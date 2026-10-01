@@ -221,13 +221,17 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     }
   });
 
+  const saveEdit = async (rel: string, lang: 'en' | 'zh', file: string, expectSha: unknown, overwrite: unknown, operator: string) => {
+    const args: JobArgs = { from: file, lang };
+    if (expectSha && !overwrite) args.expect_sha = String(expectSha);
+    return app.jobs.submit('edit', [rel], args, `edit ${lang === 'zh' ? 'topic.zh.md' : 'topic.md'} · ${rel}`, operator);
+  };
+
   f.post(`/api/topic/:id(${TOPIC})/save`, async (req: Req, reply) => {
     const rel = app.targetRel(req.params.id);
     const data = await readJson(req);
     const lang = langOf(data.lang);
-    const args: JobArgs = { from: editTextFile(String(data.text ?? '')), lang };
-    if (data.expect_sha && !data.overwrite) args.expect_sha = String(data.expect_sha);
-    const job = await app.jobs.submit('edit', [rel], args, `edit ${lang === 'zh' ? 'topic.zh.md' : 'topic.md'} · ${rel}`, await app.operator());
+    const job = await saveEdit(rel, lang, editTextFile(String(data.text ?? '')), data.expect_sha, data.overwrite, await app.operator());
     return reply.code(202).send(job);
   });
 
@@ -287,6 +291,25 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const target = app.targetRel(String(data.path || '.'));
     const args: JobArgs = { from: file, dry_run: Boolean(data.dry_run) };
     const job = await app.jobs.submit('intake', [target], args, `intake${args.dry_run ? ' (check only)' : ''} · paste`, await app.operator());
+    return reply.code(202).send(job);
+  });
+
+  // A batch of real topic.md files from a content creator — a zip (bcn intake reads every
+  // .md file inside and concatenates them, same as a multi-topic paste) rather than one
+  // pasted blob. Written beside the paste files in dataDir/intake/, not the programme root:
+  // like a paste, it's a transient input, not a programme artifact worth keeping around.
+  f.post('/api/intake/upload', async (req: Req, reply) => {
+    const name = (req.query.name ?? 'batch.zip').replace(/[^A-Za-z0-9._-]/g, '_');
+    if (!name.toLowerCase().endsWith('.zip')) throw new BadRequest('Upload a .zip file.');
+    const n = Number(req.headers['content-length'] || 0);
+    if (!(n > 0) || n > UPLOAD_MAX) throw new BadRequest('Upload is empty or too large.');
+    const d = join(app.dataDir, 'intake');
+    mkdirSync(d, { recursive: true });
+    const file = join(d, `${stamp()}-${name}`);
+    await pipeline(req.body as IncomingMessage, createWriteStream(file));
+    const target = app.targetRel(String(req.query.path || '.'));
+    const args: JobArgs = { from: file, dry_run: req.query.dry_run === '1' };
+    const job = await app.jobs.submit('intake', [target], args, `intake${args.dry_run ? ' (check only)' : ''} · ${name}`, await app.operator());
     return reply.code(202).send(job);
   });
 

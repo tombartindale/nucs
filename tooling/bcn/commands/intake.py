@@ -3,6 +3,11 @@
 Identify, check, place, validate. No editing. A paste may hold a whole unit;
 it is split on topic front matter. A topic not in the course map is refused, and
 an existing file that differs is never overwritten: the diff is returned instead.
+
+--from also accepts a folder or a .zip of real topic.md files (e.g. a batch handed
+over by a content creator), not just one pasted text file: every .md file found is
+read and concatenated, each already carrying its own topic_id front matter, then
+split and placed exactly as a single paste would be.
 """
 
 from __future__ import annotations
@@ -10,6 +15,9 @@ from __future__ import annotations
 import argparse
 import difflib
 import re
+import shutil
+import tempfile
+import zipfile
 from pathlib import Path
 
 from .. import fsutil
@@ -18,15 +26,45 @@ from ..envelope import Diagnostic, Envelope, Fail, TopicResult
 from ..markdown import parse
 from ..rules import validate_topic
 from ..state import module_context
-from ..tree import TOPIC_ID_RE, Target, Topic
+from ..tree import TOPIC_ID_RE, Target, Topic, is_noise
 
 HELP = "place pasted topic markdown into the tree and validate it"
 FENCE = re.compile(r"^\s*(```|~~~)[\w-]*\s*$")
 
 
 def add_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--from", dest="source", required=True, help="file holding the pasted text")
+    p.add_argument("--from", dest="source", required=True, help="file, folder or .zip holding the topic markdown")
     p.add_argument("--dry-run", action="store_true", help="check and report, write nothing")
+
+
+def _read_source(source: str, root: Path) -> str:
+    """One file is read as-is (today's paste path); a folder or .zip has every .md file
+    inside read and concatenated, so a batch of real topic.md files intakes the same way
+    a single multi-topic paste does."""
+    src = Path(source)
+    if not src.exists():
+        raise Fail("FS_MISSING", f"{source} does not exist.")
+    if src.is_file() and src.suffix.lower() != ".zip":
+        return src.read_text(encoding="utf-8-sig")
+    tmp = None
+    try:
+        if src.is_file():
+            tmp = Path(tempfile.mkdtemp(prefix=".intake-", dir=root))
+            with zipfile.ZipFile(src) as z:
+                for member in z.namelist():
+                    name = Path(member).name
+                    if name.lower().endswith(".md") and not member.endswith("/") and not is_noise(name) and "__MACOSX" not in member:
+                        (tmp / name).write_bytes(z.read(member))
+            base = tmp
+        else:
+            base = src
+        files = sorted(f for f in base.rglob("*.md") if f.is_file() and not is_noise(f.name))
+        if not files:
+            raise Fail("INTAKE_NO_TOPICS", f"{source} has no .md files in it.")
+        return "\n\n".join(f.read_text(encoding="utf-8-sig") for f in files)
+    finally:
+        if tmp is not None:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 def split_topics(text: str) -> list[tuple[int, str]]:
@@ -52,10 +90,7 @@ def split_topics(text: str) -> list[tuple[int, str]]:
 
 
 def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
-    src = Path(args.source)
-    if not src.is_file():
-        raise Fail("FS_MISSING", f"{args.source} does not exist.")
-    text = src.read_text(encoding="utf-8-sig")
+    text = _read_source(args.source, target.root)
     blocks = split_topics(text)
     if not blocks:
         raise Fail("INTAKE_NO_TOPICS", "No topic front matter (--- then topic_id: ...) was found in the pasted text.",

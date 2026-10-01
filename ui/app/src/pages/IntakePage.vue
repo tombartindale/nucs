@@ -18,6 +18,8 @@ const read = () => { try { return sessionStorage.getItem(DRAFT) || ''; } catch {
 const text = ref(read());
 const path = ref('.');
 const busy = ref(false);
+const over = ref(false);
+const fileInput = ref<HTMLInputElement | null>(null);
 const result = shallowRef<{ env: BcnIntakeEnvelope | undefined; dryRun: boolean } | null>(null);
 const error = ref<string | null>(null);
 watch(text, (t) => { try { sessionStorage.setItem(DRAFT, t); } catch { /* private window: fine */ } });
@@ -25,21 +27,44 @@ watch(text, (t) => { try { sessionStorage.setItem(DRAFT, t); } catch { /* privat
 const moduleOptions = computed(() => [{ label: 'any module', value: '.' }, ...Object.keys(beacon.status?.summary.modules || {}).sort().map((m) => ({ label: m, value: m }))]);
 const env = computed(() => result.value?.env);
 
+async function runJob(job: JobSummary, dryRun: boolean): Promise<void> {
+  beacon.trackJob(job);
+  const done = await beacon.awaitJob(job.id);
+  const e = done.envelopes?.[0] as unknown as BcnIntakeEnvelope | undefined;
+  result.value = { env: e, dryRun };
+  if (!e) error.value = 'bcn intake produced no result; see the job log.';
+  else if (!dryRun && e.results.every((r) => ['written', 'unchanged'].includes(r.action as string))) {
+    try { sessionStorage.removeItem(DRAFT); } catch { /* fine */ }
+  }
+}
+
 async function submit(dryRun: boolean) {
   busy.value = true; error.value = null; result.value = null;
   try {
     const job = await api<JobSummary>('/api/intake', { body: { text: text.value, dry_run: dryRun, path: path.value } });
-    beacon.trackJob(job);
-    const done = await beacon.awaitJob(job.id);
-    const e = done.envelopes?.[0] as unknown as BcnIntakeEnvelope | undefined;
-    result.value = { env: e, dryRun };
-    if (!e) error.value = 'bcn intake produced no result; see the job log.';
-    else if (!dryRun && e.results.every((r) => ['written', 'unchanged'].includes(r.action as string))) {
-      try { sessionStorage.removeItem(DRAFT); } catch { /* fine */ }
-    }
+    await runJob(job, dryRun);
   } catch (e) { error.value = (e as Error).message; }
   busy.value = false;
 }
+
+// A batch of real topic.md files, e.g. from a content creator — a .zip, not pasted text.
+async function submitFile(file: File | undefined, dryRun: boolean) {
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith('.zip')) { error.value = 'Choose a .zip file.'; return; }
+  busy.value = true; error.value = null; result.value = null;
+  try {
+    const q = `name=${encodeURIComponent(file.name)}&path=${encodeURIComponent(path.value)}&dry_run=${dryRun ? '1' : '0'}`;
+    const job = await api<JobSummary>(`/api/intake/upload?${q}`, { raw: await file.arrayBuffer() });
+    await runJob(job, dryRun);
+  } catch (e) { error.value = (e as Error).message; }
+  busy.value = false;
+}
+function onFilePicked(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  void submitFile(file, false);
+  (e.target as HTMLInputElement).value = '';
+}
+function onDrop(e: DragEvent) { over.value = false; void submitFile(e.dataTransfer?.files[0], false); }
 
 const errsFor = (topic: string) => ((env.value?.diagnostics || []) as Diagnostic[]).filter((d) => d.topic === topic && !d.code.startsWith('INTAKE_'));
 const diffClass = (l: string) => (l.startsWith('+') && !l.startsWith('+++') ? 'add' : l.startsWith('-') && !l.startsWith('---') ? 'del' : l.startsWith('@@') ? 'hunk' : '');
@@ -63,6 +88,17 @@ const good = (action: unknown) => ['written', 'unchanged', 'would_write'].includ
             <q-btn outline no-caps label="Check only" :disable="busy || !text.trim()" @click="submit(true)" />
             <q-btn unelevated color="primary" no-caps :loading="busy" label="Place and validate" :disable="busy || !text.trim()" @click="submit(false)" />
           </q-card-actions>
+        </q-card>
+        <q-card flat bordered class="q-mt-md">
+          <q-card-section>
+            <div :class="['dropzone q-pa-md text-center rounded-borders cursor-pointer', { 'bg-blue-1 text-black': over }]"
+              style="border: 2px dashed var(--line)" @click="fileInput?.click()" @dragover.prevent="over = true" @dragleave="over = false" @drop.prevent="onDrop">
+              <q-icon name="upload_file" size="sm" class="q-mb-xs" /><br>
+              Or drop a <strong>.zip</strong> of topic.md files here, e.g. a batch from a content creator — or click to choose.
+              <div class="text-caption text-grey-7 q-mt-xs">Each file keeps its own topic_id front matter; multiple topics in one zip are fine.</div>
+              <input ref="fileInput" type="file" accept=".zip" class="hidden" @change="onFilePicked">
+            </div>
+          </q-card-section>
         </q-card>
       </div>
       <div class="col-12 col-md-6">

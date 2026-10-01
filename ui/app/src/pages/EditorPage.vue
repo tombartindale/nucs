@@ -34,6 +34,8 @@ const loaded = ref(false);
 const textarea = ref<HTMLTextAreaElement | null>(null);
 const measure = ref<HTMLDivElement | null>(null);
 const gutter = ref<HTMLDivElement | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
+const dropOver = ref(false);
 const gutterLines = shallowRef<Array<{ height: number; level: string }>>([]);
 let lineTops: number[] = [];
 let checkSeq = 0;
@@ -145,6 +147,30 @@ async function save(overwrite = false): Promise<void> {
   drawGutter();
 }
 
+// A content creator's file replaces the editor's contents for review, the same as if it
+// had been pasted in — it still goes through check() and the existing dirty/save/conflict
+// flow rather than writing straight to disk, so a bad or stale upload is caught before
+// anything is overwritten.
+async function uploadFile(file: File | undefined) {
+  if (!file) return;
+  if (!file.name.endsWith('.md') && !file.name.endsWith('.txt')) {
+    beacon.toast('Choose a .md file.', true);
+    return;
+  }
+  if (dirty.value && !(await confirm({ title: 'Replace your unsaved changes?', lines: [`${file.name} will replace the text currently in the editor.`], ok: 'Replace', danger: true }))) return;
+  text.value = await file.text();
+  onInput();
+  await nextTick();
+  drawGutter();
+  void check();
+  beacon.toast(`Loaded ${file.name} — review and Save to apply it.`);
+}
+function onFilePicked(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  void uploadFile(file);
+  (e.target as HTMLInputElement).value = '';
+}
+
 async function revert() {
   if (dirty.value && !(await confirm({ title: 'Discard your changes?', lines: ['The editor goes back to the version on disk.'], ok: 'Discard', danger: true }))) return;
   text.value = base.value.text;
@@ -208,6 +234,8 @@ onBeforeUnmount(() => {
         :options="[{ label: 'English', value: 'en' }, { label: 'Mandarin', value: 'zh' }]"
         @update:model-value="(l) => router.push(`/edit/${id}?lang=${l}`)" />
       <q-btn outline no-caps label="Check now" @click="check"><q-tooltip>⌘/Ctrl-Enter</q-tooltip></q-btn>
+      <q-btn outline no-caps label="Upload file…" @click="fileInput?.click()" />
+      <input ref="fileInput" type="file" accept=".md,.txt" class="hidden" @change="onFilePicked">
       <q-btn outline no-caps label="Revert" @click="revert" />
       <q-btn unelevated color="primary" no-caps :label="saving ? 'Saving…' : 'Save'" :disable="saving || !dirty" @click="save()"><q-tooltip>⌘/Ctrl-S</q-tooltip></q-btn>
       <q-btn flat no-caps label="Back to topic" :to="`/topic/${id}`" />
@@ -215,15 +243,18 @@ onBeforeUnmount(() => {
     <div class="row q-col-gutter-md">
       <div class="col-12 col-lg-8">
         <q-card flat bordered>
-          <div class="ed-box">
+          <div class="ed-box" :class="{ 'ed-drop-over': dropOver }"
+            @dragover.prevent="dropOver = true" @dragleave.prevent="dropOver = false"
+            @drop.prevent="dropOver = false; uploadFile($event.dataTransfer?.files[0])">
             <div ref="gutter" class="ed-gutter" aria-hidden="true">
               <div v-for="(g, i) in gutterLines" :key="i" :class="['ln', g.level]" :style="{ height: `${g.height}px` }">{{ i + 1 }}</div>
               <div :style="{ height: `${textarea?.clientHeight || 0}px` }"></div>
             </div>
             <textarea ref="textarea" v-model="text" class="ed-text" spellcheck="true" autocomplete="off" aria-label="Script"
-              :placeholder="loaded && !base.exists ? `${file} does not exist yet. Paste or write the script here and save to create it.` : ''"
+              :placeholder="loaded && !base.exists ? `${file} does not exist yet. Paste or write the script here, upload a file, or drop one here.` : ''"
               @input="onInput" @scroll="gutter && (gutter.scrollTop = textarea!.scrollTop)" @keydown.tab="onTab"></textarea>
             <div ref="measure" class="ed-measure" aria-hidden="true"></div>
+            <div v-if="dropOver" class="ed-drop-hint">Drop to load {{ file }}</div>
           </div>
           <q-card-section class="text-caption text-grey-7 q-py-sm">⌘S save · ⌘↵ check · slides are separated by a line of ---; narration goes in a final &gt; **Say:** block</q-card-section>
         </q-card>

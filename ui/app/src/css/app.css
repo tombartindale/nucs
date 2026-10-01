@@ -162,6 +162,12 @@ tr.low td.conf { color: var(--q-warning); font-weight: 600; }
 .ed-text, .ed-measure { font-family: var(--mono); font-size: 13px; line-height: 21px; padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ed-text { border: 0; outline: 0; resize: none; background: transparent; color: inherit; height: 100%; overflow: auto; tab-size: 2; }
 .ed-measure { position: absolute; visibility: hidden; left: 48px; top: 0; pointer-events: none; }
+.ed-drop-over { outline: 2px dashed var(--q-primary); outline-offset: -2px; }
+.ed-drop-hint {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--q-primary) 10%, transparent); color: var(--q-primary);
+  font-weight: 700; pointer-events: none;
+}
 
 /* -- teleprompter ------------------------------------------------------------------------ */
 body.prompting { background: #000; overflow: hidden; }
