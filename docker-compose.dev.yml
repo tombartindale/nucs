@@ -1,0 +1,32 @@
+# Local development override: no SendGrid, no Caddy/TLS, no S3 backups, and the login
+# gate is bypassed entirely so there's nothing to click through while iterating.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# Everything else (Postgres, Redis, the worker, the actual app) runs exactly as it would
+# in a real deployment — only the external-service dependencies and the login step are
+# removed, so what you're testing locally stays representative of production behaviour.
+services:
+  # --test-disable-auth is a real flag on beacon-ui (see ui/server/src/cli.ts), not an env
+  # var, specifically so it can never be left on by a stray .env value in a real
+  # deployment — it is only ever passed here, in this file, explicitly.
+  #
+  # `build: .` overrides the base file's `image:` (a published registry tag) so local
+  # development always builds from source, never pulls what's already published.
+  api:
+    build: .
+    image: !reset null
+    command: ["--root", "/data/programme", "--data-dir", "/data/ui-state", "--port", "8420", "--host", "0.0.0.0", "--test-disable-auth"]
+    ports:
+      - "8420:8420"
+
+  # Caddy only exists to terminate TLS and front a real hostname; neither matters on
+  # localhost, and skipping it means one less container and no attempt to reach Let's
+  # Encrypt. api is reachable directly on :8420 instead (see the ports mapping above).
+  proxy:
+    profiles: ["disabled-in-dev"]
+
+  # No S3 bucket to back up to locally, and no AWS credentials to provide.
+  backup:
+    profiles: ["disabled-in-dev"]
