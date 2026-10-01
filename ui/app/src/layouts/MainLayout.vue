@@ -8,7 +8,7 @@ const NAV = [
   { to: '/diagnostics', label: 'Diagnostics', icon: 'rule' },
   { to: '/jobs', label: 'Jobs', icon: 'play_circle' },
   { to: '/translation', label: 'Translation', icon: 'translate' },
-  { to: '/sync', label: 'Sync', icon: 'sync' },
+  { to: '/transfer', label: 'Transfer', icon: 'drive_file_move' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
 ];
 const LIVE = {

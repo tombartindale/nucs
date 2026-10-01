@@ -27,7 +27,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'jobs/:open(\\d+)?', component: () => import('@/pages/JobsPage.vue'), meta: { nav: 'jobs' },
         props: (r: R) => ({ openId: num(r.params.open) }) },
       { path: 'translation', component: () => import('@/pages/TranslationPage.vue'), meta: { nav: 'translation' } },
-      { path: 'sync', component: () => import('@/pages/SyncPage.vue'), meta: { nav: 'sync' } },
+      { path: 'transfer', component: () => import('@/pages/TransferPage.vue'), meta: { nav: 'transfer' } },
       { path: 'settings', component: () => import('@/pages/SettingsPage.vue'), meta: { nav: 'settings' } },
     ],
   },
