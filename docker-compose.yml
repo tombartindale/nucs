@@ -43,6 +43,10 @@ services:
       BCN: /app/tooling/.venv/bin/bcn
     volumes:
       - programme-root:/data/programme
+      # api writes pasted/edited/uploaded text here (its dataDir) before enqueueing a job
+      # with an absolute path to it — the worker that actually runs the job needs the same
+      # volume at the same path, or intake/edit jobs fail with FS_MISSING.
+      - ui-state:/data/ui-state
     depends_on:
       postgres:
         condition: service_healthy
