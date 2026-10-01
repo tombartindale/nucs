@@ -13,7 +13,7 @@ services:
     restart: unless-stopped
 
   api:
-    build: .
+    image: ${BEACON_IMAGE:-ghcr.io/tombartindale/nucs}:${BEACON_IMAGE_TAG:-latest}
     command: ["--root", "/data/programme", "--data-dir", "/data/ui-state", "--port", "8420", "--host", "0.0.0.0"]
     environment:
       DATABASE_URL: postgres://beacon:${POSTGRES_PASSWORD:-beacon}@postgres:5432/beacon
@@ -34,7 +34,7 @@ services:
     restart: unless-stopped
 
   worker:
-    build: .
+    image: ${BEACON_IMAGE:-ghcr.io/tombartindale/nucs}:${BEACON_IMAGE_TAG:-latest}
     entrypoint: ["node", "/app/ui/server/dist/worker.js"]
     environment:
       BEACON_ROOT: /data/programme
