@@ -124,6 +124,13 @@ CODES: dict[str, tuple[str, str]] = {
     "XL_EXPORTED": ("info", "A topic was exported for translation."),
     "XL_IMPORTED": ("info", "A translated file was placed."),
     "XL_UNKNOWN_FILE": ("warn", "A returned file does not name a known topic."),
+    # --- transfer ----------------------------------------------------------
+    "XFER_NOTHING_TO_EXPORT": ("error", "Nothing in scope matched a file bcn transfer recognises."),
+    "XFER_UNRECOGNIZED": ("warn", "An imported file does not match a known name; it was not placed."),
+    "XFER_OUT_OF_SCOPE": ("error", "An imported file names a module outside the import's scope."),
+    "XFER_EXISTS_DIFFERS": ("error", "An imported file already exists with different content."),
+    "XFER_UNCHANGED": ("info", "An imported file already exists with identical content."),
+    "XFER_WRITTEN": ("info", "An imported file was written."),
     # --- sync --------------------------------------------------------------
     "SYNC_NOT_CONFIGURED": ("error", "No [sync] remote is set in programme.toml."),
     "SYNC_REMOTE_MISSING": ("error", "The shared folder is not where programme.toml says it is."),
