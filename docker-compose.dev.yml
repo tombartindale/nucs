@@ -21,6 +21,10 @@ services:
     ports:
       - "8420:8420"
 
+  worker:
+    build: .
+    image: !reset null
+
   # Caddy only exists to terminate TLS and front a real hostname; neither matters on
   # localhost, and skipping it means one less container and no attempt to reach Let's
   # Encrypt. api is reachable directly on :8420 instead (see the ports mapping above).
