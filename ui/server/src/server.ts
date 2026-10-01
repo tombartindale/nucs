@@ -354,6 +354,49 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     return reply.code(202).send(job);
   });
 
+  // -- transfer (whole-tree batch export/import, no live shared folder needed) --------------
+  // Export is triggered via the generic /api/jobs endpoint, like translation's export
+  // (beacon.runJob('transfer', [scope], { export: true, media, nested })) — only listing,
+  // upload and import need dedicated routes, for the same reasons translation's do.
+  f.get('/api/transfer', async () => {
+    const d = join(app.root, 'transfer', 'exports');
+    if (!existsSync(d) || !statSync(d).isDirectory()) return { exports: [] as TranslationItem[] };
+    const exports: TranslationItem[] = readdirSync(d).filter((n) => !n.startsWith('.')).sort().reverse().map((name) => {
+      const p = join(d, name);
+      const st = statSync(p);
+      return { name, path: relative(app.root, p), kind: st.isFile() ? 'zip' : 'folder', bytes: st.isFile() ? st.size : null,
+        mtime: now(st.mtime) };
+    });
+    return { exports };
+  });
+
+  f.post('/api/transfer/upload', async (req: Req, reply) => {
+    const name = (req.query.name ?? 'batch.zip').replace(/[^A-Za-z0-9._-]/g, '_');
+    if (!name.toLowerCase().endsWith('.zip')) throw new BadRequest('Upload a .zip file.');
+    const n = Number(req.headers['content-length'] || 0);
+    if (!(n > 0) || n > UPLOAD_MAX) throw new BadRequest('Upload is empty or too large.');
+    const d = join(app.root, 'transfer', 'incoming');
+    mkdirSync(d, { recursive: true });
+    let dest = join(d, name);
+    if (existsSync(dest)) dest = join(d, `${basename(name, extname(name))}-${Math.floor(Date.now() / 1000)}.zip`);
+    const tmp = join(d, `.${basename(dest)}.partial`);
+    await pipeline(req.body as IncomingMessage, createWriteStream(tmp));
+    renameSync(tmp, dest);
+    return reply.code(201).send({ path: relative(app.root, dest) });
+  });
+
+  f.post('/api/transfer/import', async (req, reply) => {
+    const data = await readJson(req);
+    const src = app.safePath(String(data.source ?? ''));
+    const incoming = app.safePath('transfer/incoming');
+    if (!src.startsWith(incoming + sep)) throw new Forbidden();
+    const target = app.targetRel(String(data.path || '.'));
+    const args: JobArgs = { import: src };
+    if (data.dry_run) args.dry_run = true;
+    const job = await app.jobs.submit('transfer', [target], args, `transfer import · ${basename(src)}`, await app.operator());
+    return reply.code(202).send(job);
+  });
+
   // -- prefs ----------------------------------------------------------------------------------
   f.get('/api/prefs', async () => app.db.prefs());
 

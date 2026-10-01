@@ -3,7 +3,7 @@
 // contract between the two halves (spec §2.3).
 import type {
   BcnCodesEnvelope, BcnDiagnosticsEnvelope, BcnDoctorEnvelope, BcnEditEnvelope, BcnIntakeEnvelope, BcnReviewEnvelope,
-  BcnShowEnvelope, BcnStatusEnvelope, BcnSyncEnvelope, BcnTranslationEnvelope,
+  BcnShowEnvelope, BcnStatusEnvelope, BcnSyncEnvelope, BcnTransferEnvelope, BcnTranslationEnvelope,
 } from './envelopes.gen.js';
 
 export * from './envelopes.gen.js';
@@ -177,11 +177,16 @@ export interface IntakeRequest { text: string; dry_run?: boolean; path?: string 
 export interface TranslationItem { name: string; path: string; kind: 'zip' | 'folder'; bytes: number | null; mtime: string }
 export interface TranslationListResponse { exports: TranslationItem[]; returned: TranslationItem[] }
 export interface TranslationImportRequest { source: string; path?: string }
+// transfer reuses TranslationItem's shape (name/path/kind/bytes/mtime) since it's the
+// same directory-listing data; only exports exist here (incoming uploads aren't listed —
+// each is imported once, right after upload, not browsed later).
+export interface TransferListResponse { exports: TranslationItem[] }
+export interface TransferImportRequest { source: string; path?: string; dry_run?: boolean }
 export interface ErrorResponse { error: string }
 
 // Envelopes a job can carry, by command, for callers that know which one they ran.
 export interface JobEnvelopes {
-  intake: BcnIntakeEnvelope; translation: BcnTranslationEnvelope; edit: BcnEditEnvelope; sync: BcnSyncEnvelope;
+  intake: BcnIntakeEnvelope; translation: BcnTranslationEnvelope; transfer: BcnTransferEnvelope; edit: BcnEditEnvelope; sync: BcnSyncEnvelope;
 }
 
 // -- server-sent events on /api/events ----------------------------------------------------------
