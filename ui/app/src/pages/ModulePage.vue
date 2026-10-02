@@ -110,13 +110,13 @@ async function exportQuizzes() {
 async function exportModuleMapPdf() {
   const job = await beacon.runJob('coursemap', [props.module], {});
   const result = await beacon.awaitJob(job.id);
-  if (result.state === 'done') beacon.toast('Module map PDF ready: see Module documents.');
+  if (result.state === 'done') beacon.toast('Module map PDF ready.');
   else beacon.toast('The module map PDF could not be made; see Jobs.', true);
 }
 
-// Unit activities show in their unit's grid row (see grid.activity above), not here; this box is module-wide documents only.
-const docs = computed(() => (m.value?.documents || [])
-  .filter((d) => !d.path.endsWith('/activity.md') && (d.exists || d.path.endsWith('course-map.md'))));
+// The only module-wide document that's actually in use today; assets.md/reading-list.md
+// are listed by status but unused now that reading-list content lives per topic instead.
+const moduleMap = computed(() => (m.value?.documents || []).find((d) => d.path.endsWith('/course-map.md')));
 </script>
 
 <template>
@@ -133,38 +133,24 @@ const docs = computed(() => (m.value?.documents || [])
           <q-tooltip max-width="320px">{{ STEP_HELP.qti }}</q-tooltip>
         </q-btn>
         <q-btn outline no-caps label="Run QA on module" @click="beacon.runJob('qa', [module], {})" />
+        <template v-if="moduleMap">
+          <q-btn v-if="moduleMap.exists" outline dense no-caps :to="`/doc/${moduleMap.path}`" label="Module map">
+            <q-badge v-if="moduleMap.errors" color="negative" floating>{{ moduleMap.errors }}</q-badge>
+            <q-badge v-else-if="moduleMap.warnings" color="warning" floating>{{ moduleMap.warnings }}</q-badge>
+          </q-btn>
+          <q-btn v-else flat dense no-caps disable label="Module map — missing">
+            <q-tooltip>Not in the working copy yet</q-tooltip>
+          </q-btn>
+          <q-btn v-if="moduleMap.pdf?.exists" flat dense no-caps icon="download" :color="moduleMap.pdf.stale ? 'warning' : 'primary'"
+            :label="moduleMap.pdf.stale ? 'PDF (out of date)' : 'PDF'" :href="fileUrl(moduleMap.pdf.path, null, 'download=1')">
+            <q-tooltip max-width="320px">{{ moduleMap.pdf.stale ? 'The module map has changed since this PDF was made; export again.' : STEP_HELP.coursemap }}</q-tooltip>
+          </q-btn>
+          <q-btn v-if="moduleMap.pdf && (!moduleMap.pdf.exists || moduleMap.pdf.stale)" outline dense no-caps icon="picture_as_pdf"
+            :label="moduleMap.pdf.exists ? 'Update PDF' : 'Export PDF'" @click="exportModuleMapPdf">
+            <q-tooltip max-width="320px">{{ STEP_HELP.coursemap }}</q-tooltip>
+          </q-btn>
+        </template>
       </PageHeader>
-
-      <q-card v-if="m.documents?.length" flat bordered class="q-mb-md">
-        <q-card-section class="row items-center gap-sm q-pb-none">
-          <div class="text-subtitle1 text-weight-medium">Module documents</div>
-          <StateChip v-if="m.errors" kind="error" :label="plural(m.errors, 'error')" />
-          <StateChip v-else kind="ok" label="no problems" />
-        </q-card-section>
-        <q-card-section class="row items-center gap-sm">
-          <template v-for="d in docs" :key="d.path">
-            <q-btn v-if="d.exists" outline dense no-caps :to="`/doc/${d.path}`" :label="d.path.slice(module.length + 1)">
-              <q-badge v-if="d.errors" color="negative" floating>{{ d.errors }}</q-badge>
-              <q-badge v-else-if="d.warnings" color="warning" floating>{{ d.warnings }}</q-badge>
-            </q-btn>
-            <q-btn v-else flat dense no-caps disable :label="`${d.path.slice(module.length + 1)} — missing`">
-              <q-tooltip>Not in the working copy yet</q-tooltip>
-            </q-btn>
-            <q-btn v-if="d.quiz?.exists" flat dense no-caps icon="download" :color="d.quiz.stale ? 'warning' : 'primary'"
-              :label="d.quiz.stale ? 'QTI (out of date)' : 'QTI'" :href="fileUrl(d.quiz.package, null, 'download=1')">
-              <q-tooltip>{{ d.quiz.stale ? 'The quiz has changed since this package was made; export again.' : `${plural(d.quiz.questions, 'question')}, ready to import into the LMS` }}</q-tooltip>
-            </q-btn>
-            <q-btn v-if="d.pdf?.exists" flat dense no-caps icon="download" :color="d.pdf.stale ? 'warning' : 'primary'"
-              :label="d.pdf.stale ? 'PDF (out of date)' : 'PDF'" :href="fileUrl(d.pdf.path, null, 'download=1')">
-              <q-tooltip max-width="320px">{{ d.pdf.stale ? 'The module map has changed since this PDF was made; export again.' : STEP_HELP.coursemap }}</q-tooltip>
-            </q-btn>
-            <q-btn v-if="d.pdf && (!d.pdf.exists || d.pdf.stale)" outline dense no-caps icon="picture_as_pdf"
-              :label="d.pdf.exists ? 'Update PDF' : 'Export PDF'" @click="exportModuleMapPdf">
-              <q-tooltip max-width="320px">{{ STEP_HELP.coursemap }}</q-tooltip>
-            </q-btn>
-          </template>
-        </q-card-section>
-      </q-card>
 
       <q-card flat bordered>
         <q-card-section class="row items-center gap-sm">
