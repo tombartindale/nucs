@@ -5,12 +5,13 @@
 // via ALLOWED_HOSTS, since this now typically runs behind a reverse proxy on a real
 // hostname rather than only ever being reached at localhost. Login (see auth.ts) is the
 // actual access control; this check is a defense-in-depth CSRF guard, not the only gate.
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
 import { basename, extname, join, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import cookie from '@fastify/cookie';
+import extractZip from 'extract-zip';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type {
   BcnDiagnosticsEnvelope, BcnEditEnvelope, BcnReviewEnvelope, BcnStatusEnvelope, BcnSyncEnvelope, BootResponse, JobArgs,
@@ -395,6 +396,83 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     if (data.dry_run) args.dry_run = true;
     const job = await app.jobs.submit('transfer', [target], args, `transfer import · ${basename(src)}`, await app.operator());
     return reply.code(202).send(job);
+  });
+
+  // -- theme (drop in a whole custom theme as one zip; no form, no per-field editing) -------
+  // Fixed location and name: uploading always replaces the one themes/custom/ directory.
+  // bcn's own load_theme() already prefers <root>/themes/<name>/ over the bundled theme
+  // baked into the image (tooling/bcn/config.py), so nothing about theme *resolution*
+  // needed to change — this only adds a way to get files there without disk access, and a
+  // way to flip programme.toml's theme line without hand-editing it.
+  const THEME_NAME = 'custom';
+  const themeDir = () => join(app.root, 'themes', THEME_NAME);
+
+  // Finds the [programme] section of programme.toml and returns its bounds, so the theme
+  // line can be read or replaced without disturbing [sync] or any other section.
+  function programmeSection(toml: string): { start: number; end: number } {
+    const start = toml.search(/^\[programme\]/m);
+    if (start === -1) throw new BadRequest('programme.toml has no [programme] section.');
+    const nextSection = toml.slice(start + 1).search(/^\[/m);
+    const end = nextSection === -1 ? toml.length : start + 1 + nextSection;
+    return { start, end };
+  }
+
+  function currentThemeName(toml: string): string {
+    const { start, end } = programmeSection(toml);
+    const m = /^\s*theme\s*=\s*"(.*?)"\s*$/m.exec(toml.slice(start, end));
+    return m ? m[1] : 'default';
+  }
+
+  f.get('/api/theme', async () => {
+    const d = themeDir();
+    const uploaded = existsSync(d) && statSync(d).isDirectory();
+    const files = uploaded ? readdirSync(d).filter((n) => !n.startsWith('.')).sort() : [];
+    const toml = readFileSync(join(app.root, 'programme.toml'), 'utf8');
+    const active = currentThemeName(toml) === THEME_NAME;
+    return { uploaded, active, files };
+  });
+
+  f.post('/api/theme/upload', async (req: Req, reply) => {
+    const n = Number(req.headers['content-length'] || 0);
+    if (!(n > 0) || n > UPLOAD_MAX) throw new BadRequest('Upload is empty or too large.');
+    // The temp zip and extract dir must be staged under app.root, not app.dataDir: the two
+    // can be separate Docker volumes (separate devices), and the final rename into
+    // themes/custom/ has to be an atomic same-device rename, not a cross-device copy.
+    const themesDir = join(app.root, 'themes');
+    mkdirSync(themesDir, { recursive: true });
+    const zipPath = join(themesDir, `.upload-${stamp()}.zip`);
+    await pipeline(req.body as IncomingMessage, createWriteStream(zipPath));
+    const extractTo = join(themesDir, `.extract-${stamp()}`);
+    try {
+      try {
+        await extractZip(zipPath, { dir: extractTo });
+      } catch {
+        throw new BadRequest('Not a valid zip file.');
+      }
+      const d = themeDir();
+      if (existsSync(d)) rmSync(d, { recursive: true, force: true });
+      renameSync(extractTo, d);
+      const files = readdirSync(d).filter((n) => !n.startsWith('.')).sort();
+      return reply.code(201).send({ files });
+    } finally {
+      try { unlinkSync(zipPath); } catch { /* fine */ }
+      try { rmSync(extractTo, { recursive: true, force: true }); } catch { /* already moved, or never created */ }
+    }
+  });
+
+  f.post('/api/theme/activate', async (req, reply) => {
+    const data = await readJson(req);
+    const active = Boolean(data.active);
+    if (active && !existsSync(themeDir())) throw new BadRequest('Upload a theme before activating it.');
+    const tomlPath = join(app.root, 'programme.toml');
+    const toml = readFileSync(tomlPath, 'utf8');
+    const name = active ? THEME_NAME : 'default';
+    const lineRe = /^(\s*theme\s*=\s*)".*?"(\s*)$/m;
+    const { start, end } = programmeSection(toml);
+    const section = toml.slice(start, end);
+    const updated = lineRe.test(section) ? section.replace(lineRe, `$1"${name}"$2`) : section.replace(/\n?$/, `\ntheme = "${name}"\n`);
+    writeFileSync(tomlPath, toml.slice(0, start) + updated + toml.slice(end), 'utf8');
+    return reply.send({ active });
   });
 
   // -- prefs ----------------------------------------------------------------------------------

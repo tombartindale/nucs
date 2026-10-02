@@ -59,6 +59,11 @@ async function save() {
           <q-card-section v-else class="text-grey-7">Checking…</q-card-section>
           <q-card-section class="text-caption text-grey-7">Single user, bound to localhost, no authentication. See the README before exposing it anywhere else.</q-card-section>
         </q-card>
+        <q-card flat bordered>
+          <q-card-section class="text-subtitle1 text-weight-medium">Theme</q-card-section>
+          <q-card-section class="text-caption text-grey-7">Upload and activate a custom theme for slides, video bumpers, and PDFs.</q-card-section>
+          <q-card-actions><q-btn flat no-caps color="primary" label="Manage theme" to="/theme" /></q-card-actions>
+        </q-card>
       </div>
     </div>
   </q-page>

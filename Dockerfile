@@ -29,7 +29,7 @@ FROM base AS ffmpeg-build
 ARG FFMPEG_VERSION=7.1
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential yasm nasm pkg-config \
-      libx264-dev libx265-dev libvpx-dev libmp3lame-dev libopus-dev \
+      libx264-dev libx265-dev libvpx-dev libmp3lame-dev libopus-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 RUN curl -fsSL -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
@@ -37,7 +37,7 @@ RUN curl -fsSL -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VER
     && ./configure --prefix=/opt/ffmpeg --disable-debug --disable-doc \
          --enable-gpl \
          --enable-libx264 --enable-libx265 --enable-libvpx \
-         --enable-libmp3lame --enable-libopus \
+         --enable-libmp3lame --enable-libopus --enable-zlib \
     && make -j"$(nproc)" \
     && make install \
     && /opt/ffmpeg/bin/ffmpeg -version | head -1 | grep -q "ffmpeg version ${FFMPEG_VERSION}"
@@ -52,6 +52,7 @@ RUN python3 -m venv tooling/.venv \
 
 COPY tooling/node/package.json tooling/node/package-lock.json tooling/node/
 RUN cd tooling/node && npm ci --no-audit --no-fund
+COPY tooling/node/*.mjs tooling/node/
 
 # CHROME_VERSION is pinned in tooling/bcn/tools.py; installed by the same
 # @puppeteer/browsers tool scripts/setup.sh uses, to the same path tools.py expects.
@@ -60,6 +61,9 @@ RUN CHROME_VERSION=$(python3 -c "import re;print(re.search(r'CHROME_VERSION = \"
     && npx --no-install @puppeteer/browsers install "chrome@${CHROME_VERSION}" --path /app/tooling/vendor/chrome
 
 COPY tooling/themes tooling/themes
+# The bundled default theme's bumper/document logos and background video live outside the
+# theme directory, at the repo-root assets/ (theme.toml references them as ../../../assets/).
+COPY assets assets
 
 # -- ui: build the Fastify server and the Quasar SPA ------------------------------------
 FROM base AS ui-build
@@ -90,10 +94,11 @@ WORKDIR /app
 # installed in one build stage never carry over into another via COPY, only the specific
 # files named, so the shared libraries have to be installed directly in this final stage.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      libx264-164 libx265-199 libvpx7 libmp3lame0 libopus0 \
+      libx264-164 libx265-199 libvpx7 libmp3lame0 libopus0 zlib1g \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=ffmpeg-build /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 COPY --from=tooling /app/tooling /app/tooling
+COPY --from=tooling /app/assets /app/assets
 COPY --from=ui-build /app/ui/server/dist ui/server/dist
 COPY --from=ui-build /app/ui/server/package.json ui/server/package.json
 COPY --from=ui-build /app/ui/server/bin ui/server/bin

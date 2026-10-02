@@ -9,7 +9,9 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const browser = await puppeteer.launch({
   executablePath: process.env.CHROME_PATH,
   headless: true,
-  args: ['--allow-file-access-from-files', '--disable-gpu'],
+  // --no-sandbox: this runs as root in the Docker image, where Chrome's sandbox needs a
+  // non-root user it doesn't have.
+  args: ['--allow-file-access-from-files', '--disable-gpu', '--no-sandbox', '--disable-setuid-sandbox'],
 })
 try {
   const page = await browser.newPage()

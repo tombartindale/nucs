@@ -14,7 +14,9 @@ const [inHtml, outPng, w, h, maxF, minF, mode] = process.argv.slice(2)
 const browser = await puppeteer.launch({
   executablePath: process.env.CHROME_PATH,
   headless: true,
-  args: ['--allow-file-access-from-files', '--disable-gpu', '--font-render-hinting=none'],
+  // --no-sandbox: this runs as root in the Docker image, where Chrome's sandbox needs a
+  // non-root user it doesn't have.
+  args: ['--allow-file-access-from-files', '--disable-gpu', '--font-render-hinting=none', '--no-sandbox', '--disable-setuid-sandbox'],
 })
 try {
   const page = await browser.newPage()

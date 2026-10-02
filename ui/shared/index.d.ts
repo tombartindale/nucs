@@ -58,6 +58,8 @@ export interface ModuleSummary {
   /** The module's reading list (bcn readinglist), null if there's no course-map.md to build it from. */
   reading_list: CoursemapPdfInfo | null;
 }
+/** GET /api/theme: whether a custom theme (themes/custom/) has been uploaded and/or activated. */
+export interface ThemeStatus { uploaded: boolean; active: boolean; files: string[] }
 export interface StatusSummary {
   topics: number; complete: Record<Lang, number>; blocked: number; stale: number; cloud: number; cloud_share: number;
   unreviewed: number; diagnostics: Record<Level, number>; modules: Record<string, ModuleSummary>;
