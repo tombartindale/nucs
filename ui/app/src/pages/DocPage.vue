@@ -57,13 +57,19 @@ onMounted(async () => {
     <PageHeader :title="path" :crumbs="[{ label: 'Programme', to: '/' }, { label: module, to: `/module/${module}` }, { label: path.slice(module.length + 1) }]"
       :sub="error ? '' : diags.length ? `${diags.length} problem${diags.length === 1 ? '' : 's'}` : 'No problems found.'">
       <template v-if="quiz">
-        <q-btn outline no-caps icon="quiz" :label="quiz.exists ? 'Export again' : 'Export to LMS'" :disable="diags.some((d) => d.level === 'error')" @click="exportQuiz">
-          <q-tooltip max-width="320px">{{ diags.some((d) => d.level === 'error') ? 'Fix the errors below first: a quiz with errors is not exported.' : STEP_HELP.qti }}</q-tooltip>
-        </q-btn>
-        <q-btn v-if="quiz.exists" unelevated no-caps icon="download" :color="quiz.stale ? 'warning' : 'primary'"
+        <q-btn-dropdown v-if="quiz.exists" split unelevated no-caps icon="download" :color="quiz.stale ? 'warning' : 'primary'"
           :label="quiz.stale ? 'Download QTI (out of date)' : `Download QTI · ${plural(quiz.questions, 'question')}`"
           :href="fileUrl(quiz.package, null, 'download=1')">
           <q-tooltip v-if="quiz.stale">The quiz has changed since this package was made. Export again first.</q-tooltip>
+          <q-list>
+            <q-item clickable v-close-popup :disable="diags.some((d) => d.level === 'error')" @click="exportQuiz">
+              <q-item-section avatar><q-icon name="quiz" /></q-item-section>
+              <q-item-section>Export again</q-item-section>
+            </q-item>
+          </q-list>
+        </q-btn-dropdown>
+        <q-btn v-else outline no-caps icon="quiz" label="Export to LMS" :disable="diags.some((d) => d.level === 'error')" @click="exportQuiz">
+          <q-tooltip max-width="320px">{{ diags.some((d) => d.level === 'error') ? 'Fix the errors below first: a quiz with errors is not exported.' : STEP_HELP.qti }}</q-tooltip>
         </q-btn>
       </template>
       <q-btn outline no-caps icon="open_in_new" label="Open raw" :href="fileUrl(path, null, 'view=1')" target="_blank" />

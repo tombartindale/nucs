@@ -134,20 +134,22 @@ const moduleMap = computed(() => (m.value?.documents || []).find((d) => d.path.e
         </q-btn>
         <q-btn outline no-caps label="Run QA on module" @click="beacon.runJob('qa', [module], {})" />
         <template v-if="moduleMap">
-          <q-btn v-if="moduleMap.exists" outline dense no-caps :to="`/doc/${moduleMap.path}`" label="Module map">
+          <q-btn-dropdown v-if="moduleMap.exists" split outline dense no-caps label="Module map" :to="`/doc/${moduleMap.path}`">
             <q-badge v-if="moduleMap.errors" color="negative" floating>{{ moduleMap.errors }}</q-badge>
             <q-badge v-else-if="moduleMap.warnings" color="warning" floating>{{ moduleMap.warnings }}</q-badge>
-          </q-btn>
+            <q-list>
+              <q-item v-if="moduleMap.pdf?.exists" clickable v-close-popup :href="fileUrl(moduleMap.pdf.path, null, 'download=1')">
+                <q-item-section avatar><q-icon name="download" :color="moduleMap.pdf.stale ? 'warning' : 'primary'" /></q-item-section>
+                <q-item-section>{{ moduleMap.pdf.stale ? 'Download PDF (out of date)' : 'Download PDF' }}</q-item-section>
+              </q-item>
+              <q-item v-if="moduleMap.pdf && (!moduleMap.pdf.exists || moduleMap.pdf.stale)" clickable v-close-popup @click="exportModuleMapPdf">
+                <q-item-section avatar><q-icon name="picture_as_pdf" /></q-item-section>
+                <q-item-section>{{ moduleMap.pdf.exists ? 'Update PDF' : 'Export PDF' }}</q-item-section>
+              </q-item>
+            </q-list>
+          </q-btn-dropdown>
           <q-btn v-else flat dense no-caps disable label="Module map — missing">
             <q-tooltip>Not in the working copy yet</q-tooltip>
-          </q-btn>
-          <q-btn v-if="moduleMap.pdf?.exists" flat dense no-caps icon="download" :color="moduleMap.pdf.stale ? 'warning' : 'primary'"
-            :label="moduleMap.pdf.stale ? 'PDF (out of date)' : 'PDF'" :href="fileUrl(moduleMap.pdf.path, null, 'download=1')">
-            <q-tooltip max-width="320px">{{ moduleMap.pdf.stale ? 'The module map has changed since this PDF was made; export again.' : STEP_HELP.coursemap }}</q-tooltip>
-          </q-btn>
-          <q-btn v-if="moduleMap.pdf && (!moduleMap.pdf.exists || moduleMap.pdf.stale)" outline dense no-caps icon="picture_as_pdf"
-            :label="moduleMap.pdf.exists ? 'Update PDF' : 'Export PDF'" @click="exportModuleMapPdf">
-            <q-tooltip max-width="320px">{{ STEP_HELP.coursemap }}</q-tooltip>
           </q-btn>
         </template>
       </PageHeader>
@@ -185,16 +187,21 @@ const moduleMap = computed(() => (m.value?.documents || []).find((d) => d.path.e
                 <th class="unit">
                   {{ row.unit }}<span class="t">{{ m.unit_titles?.[row.unit] || '' }}</span>
                   <span v-if="row.activity?.exists" class="row items-center gap-xs q-mt-xs">
-                    <q-btn outline dense no-caps size="sm" :to="`/doc/${row.activity.path}`" label="activity">
+                    <q-btn-dropdown split outline dense no-caps size="sm" label="activity" :to="`/doc/${row.activity.path}`">
                       <q-badge v-if="row.activity.errors" color="negative" floating>{{ row.activity.errors }}</q-badge>
                       <q-badge v-else-if="row.activity.warnings" color="warning" floating>{{ row.activity.warnings }}</q-badge>
-                    </q-btn>
-                    <q-btn v-if="row.activity.quiz?.exists" flat dense no-caps size="sm" icon="download"
-                      :color="row.activity.quiz.stale ? 'warning' : 'primary'"
-                      :label="row.activity.quiz.stale ? 'QTI (out of date)' : 'QTI'"
-                      :href="fileUrl(row.activity.quiz.package, null, 'download=1')">
-                      <q-tooltip>{{ row.activity.quiz.stale ? 'The quiz has changed since this package was made; export again.' : `${plural(row.activity.quiz.questions, 'question')}, ready to import into the LMS` }}</q-tooltip>
-                    </q-btn>
+                      <q-list>
+                        <q-item v-if="row.activity.quiz?.exists" clickable v-close-popup :href="fileUrl(row.activity.quiz.package, null, 'download=1')">
+                          <q-item-section avatar><q-icon name="download" :color="row.activity.quiz.stale ? 'warning' : 'primary'" /></q-item-section>
+                          <q-item-section>{{ row.activity.quiz.stale ? 'Download QTI (out of date)' : `Download QTI · ${plural(row.activity.quiz.questions, 'question')}` }}</q-item-section>
+                        </q-item>
+                        <q-item v-if="row.activity.quiz && (!row.activity.quiz.exists || row.activity.quiz.stale)" clickable v-close-popup
+                          @click="beacon.runJob('qti', [`${module}/${row.unit}`], { force: true })">
+                          <q-item-section avatar><q-icon name="quiz" /></q-item-section>
+                          <q-item-section>{{ row.activity.quiz.exists ? 'Update QTI' : 'Export QTI' }}</q-item-section>
+                        </q-item>
+                      </q-list>
+                    </q-btn-dropdown>
                   </span>
                 </th>
                 <td v-for="(r, i) in row.cells" :key="codes[i]">
