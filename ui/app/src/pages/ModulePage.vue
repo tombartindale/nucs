@@ -107,11 +107,11 @@ async function exportQuizzes() {
   if (ok) await beacon.runJob('qti', [props.module], {});
 }
 
-async function exportCourseMapPdf() {
+async function exportModuleMapPdf() {
   const job = await beacon.runJob('coursemap', [props.module], {});
   const result = await beacon.awaitJob(job.id);
-  if (result.state === 'done') beacon.toast('Course map PDF ready: see Module documents.');
-  else beacon.toast('The course map PDF could not be made; see Jobs.', true);
+  if (result.state === 'done') beacon.toast('Module map PDF ready: see Module documents.');
+  else beacon.toast('The module map PDF could not be made; see Jobs.', true);
 }
 
 // Unit activities show in their unit's grid row (see grid.activity above), not here; this box is module-wide documents only.
@@ -156,10 +156,10 @@ const docs = computed(() => (m.value?.documents || [])
             </q-btn>
             <q-btn v-if="d.pdf?.exists" flat dense no-caps icon="download" :color="d.pdf.stale ? 'warning' : 'primary'"
               :label="d.pdf.stale ? 'PDF (out of date)' : 'PDF'" :href="fileUrl(d.pdf.path, null, 'download=1')">
-              <q-tooltip max-width="320px">{{ d.pdf.stale ? 'course-map.md has changed since this PDF was made; export again.' : STEP_HELP.coursemap }}</q-tooltip>
+              <q-tooltip max-width="320px">{{ d.pdf.stale ? 'The module map has changed since this PDF was made; export again.' : STEP_HELP.coursemap }}</q-tooltip>
             </q-btn>
             <q-btn v-if="d.pdf && (!d.pdf.exists || d.pdf.stale)" outline dense no-caps icon="picture_as_pdf"
-              :label="d.pdf.exists ? 'Update PDF' : 'Export PDF'" @click="exportCourseMapPdf">
+              :label="d.pdf.exists ? 'Update PDF' : 'Export PDF'" @click="exportModuleMapPdf">
               <q-tooltip max-width="320px">{{ STEP_HELP.coursemap }}</q-tooltip>
             </q-btn>
           </template>

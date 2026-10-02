@@ -93,7 +93,7 @@ const zips = computed(() => lists.value.exports.filter((x) => x.kind === 'zip'))
             <q-toggle v-model="nested" dense label="Nested folder layout" />
           </q-card-section>
           <q-card-section class="text-caption text-grey-7 q-pt-none">
-            {{ media ? 'Everything in scope, including the edited video and subtitles.' : 'Text files only: scripts, quizzes, course map and the like — small and quick.' }}
+            {{ media ? 'Everything in scope, including the edited video and subtitles.' : 'Text files only: scripts, quizzes, the module map and the like — small and quick.' }}
             {{ nested ? ' Files keep the pipeline\'s own U01/T01/topic.md layout.' : ' Files use the flat KV7016-U01-T01.md names.' }}
           </q-card-section>
         </q-card>

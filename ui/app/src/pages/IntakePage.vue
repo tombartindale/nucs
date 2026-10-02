@@ -10,7 +10,7 @@ import StateChip from '@/components/StateChip.vue';
 import { useBeacon } from '@/stores/beacon';
 
 const LABEL: Record<string, string> = { written: 'written', unchanged: 'already identical', exists_differs: 'exists and differs: not written',
-  refused: 'refused: not in course map', would_write: 'would be written' };
+  refused: 'refused: not in module map', would_write: 'would be written' };
 const DRAFT = 'intake-draft';
 const beacon = useBeacon();
 
@@ -73,7 +73,7 @@ const good = (action: unknown) => ['written', 'unchanged', 'would_write'].includ
 
 <template>
   <q-page padding class="page-max">
-    <PageHeader title="Intake" sub="Paste, and bcn identifies each topic by its front matter, checks it against the course map, places it, and validates it. It never overwrites a file that differs; it shows the diff instead." />
+    <PageHeader title="Intake" sub="Paste, and bcn identifies each topic by its front matter, checks it against the module map, places it, and validates it. It never overwrites a file that differs; it shows the diff instead." />
     <div class="row q-col-gutter-md">
       <div class="col-12 col-md-6">
         <q-card flat bordered>
