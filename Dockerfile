@@ -63,9 +63,6 @@ RUN CHROME_VERSION=$(python3 -c "import re;print(re.search(r'CHROME_VERSION = \"
     && npx --no-install @puppeteer/browsers install "chrome@${CHROME_VERSION}" --path /app/tooling/vendor/chrome
 
 COPY tooling/themes tooling/themes
-# The bundled default theme's bumper/document logos and background video live outside the
-# theme directory, at the repo-root assets/ (theme.toml references them as ../../../assets/).
-COPY assets assets
 
 # -- ui: build the Fastify server and the Quasar SPA ------------------------------------
 FROM base AS ui-build
@@ -100,7 +97,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=ffmpeg-build /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 COPY --from=tooling /app/tooling /app/tooling
-COPY --from=tooling /app/assets /app/assets
 COPY --from=ui-build /app/ui/server/dist ui/server/dist
 COPY --from=ui-build /app/ui/server/package.json ui/server/package.json
 COPY --from=ui-build /app/ui/server/bin ui/server/bin

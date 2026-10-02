@@ -1,0 +1,83 @@
+/* @theme custom */
+
+/*
+ * Beacon default theme. Plain Marp CSS, so the same file drives marp-cli for
+ * delivery renders and marp-core in a browser for previews.
+ *
+ * Variables injected by bcn render from theme.toml (do not hard-code them here):
+ *   --bcn-safe-bottom   subtitle safe area at the bottom of the frame
+ *   --bcn-safe-right    right padding that keeps content clear of a p-in-p presenter
+ *                       (theme.toml's safe_area.right, already converted to a padding
+ *                       width in pixels: 0 when unset, so nothing changes by default)
+ *   --bcn-font-size     base size for the language being rendered
+ *   font-family         the language's font stack
+ *
+ * bcn render's overflow check reads section's own computed right padding back, so any
+ * block that reaches into the reserved space is always caught, never just clipped silently.
+ */
+
+section {
+  width: 1920px;
+  height: 1080px;
+  box-sizing: border-box;
+  padding: 56px calc(var(--bcn-safe-right, 0px) + 56px) calc(var(--bcn-safe-bottom, 216px) + 40px) 56px;
+  background: #000000;
+  color: #ffffff;
+  font-size: var(--bcn-font-size, 44px);
+  line-height: 1.35;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 0.4em;
+}
+
+h1, h2, h3 {
+  margin: 0 0 0.3em;
+  line-height: 1.15;
+  color: #ffffff;
+  font-weight: 900; /* house style: titles in Azo Sans Black (theme.toml title_weight) */
+}
+
+h1 { font-size: 1.6em; }
+h2 { font-size: 1.6em; }
+h3 { font-size: 1.25em; }
+
+p { margin: 0 0 0.5em; }
+
+ul, ol {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+li { margin: 0.2em 0; }
+li::marker { color: #ffffff; }
+
+strong { color: #cccccc; }
+em { color: #cccccc; font-style: normal; }
+
+p:has(> img:only-child) { text-align: center; }
+
+img {
+  max-width: 100%;
+  max-height: 560px;
+  object-fit: contain;
+  align-self: center;
+}
+
+table {
+  border-collapse: collapse;
+  font-size: 0.8em;
+}
+
+th, td {
+  border-bottom: 2px solid #c9d6df;
+  padding: 0.3em 0.8em;
+  text-align: left;
+}
+
+code {
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 0.85em;
+  background: #e8eef2;
+  padding: 0 0.2em;
+}

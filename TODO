@@ -1,1 +1,4 @@
-
+- Server-side upload and storage of configs, templates, css and image/video assets (and fonts).
+- Multiple projects (for MPV2)
+- Tidy main menu
+- add assignments functionality (import/ export / validation and PDF gen)

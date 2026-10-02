@@ -8,5 +8,6 @@ tooling/node/node_modules
 working_area
 partner-examples
 partner-examples.zip
+assets
 .git
 *.log

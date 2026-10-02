@@ -14,16 +14,24 @@ services:
   #
   # `build: .` overrides the base file's `image:` (a published registry tag) so local
   # development always builds from source, never pulls what's already published.
+  # tooling/themes is bind-mounted over the image's baked-in copy so editing a theme file
+  # (theme.toml, CSS, fonts, bumper assets) on the host takes effect on the next job run,
+  # no rebuild needed — matches ./start-dev.sh's "edit and see it" workflow for everything
+  # else. Uploaded custom themes still land on the programme-root volume, untouched by this.
   api:
     build: .
     image: !reset null
     command: ["--root", "/data/programme", "--data-dir", "/data/ui-state", "--port", "8420", "--host", "0.0.0.0", "--test-disable-auth"]
     ports:
       - "8420:8420"
+    volumes:
+      - ./tooling/themes:/app/tooling/themes
 
   worker:
     build: .
     image: !reset null
+    volumes:
+      - ./tooling/themes:/app/tooling/themes
 
   # Caddy only exists to terminate TLS and front a real hostname; neither matters on
   # localhost, and skipping it means one less container and no attempt to reach Let's
