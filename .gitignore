@@ -24,3 +24,5 @@ ui/app/.quasar/
 # Local docker compose secrets/config; copy from .env.example
 /.env
 *.otf
+NU_Logo_Black.svg
+NU_Logo_White.svg
