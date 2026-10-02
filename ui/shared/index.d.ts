@@ -55,6 +55,8 @@ export interface ModuleSummary {
   topics: number; units: string[]; en: Record<string, number>; zh: Record<string, number>; complete: Record<Lang, number>;
   blocked: number; stale: number; cloud: number; diagnostics: Record<Level, number>; unreviewed: number;
   course_map: boolean; documents: ModuleDocument[]; errors: number; title: string; unit_titles: Record<string, string>;
+  /** The module's reading list (bcn readinglist), null if there's no course-map.md to build it from. */
+  reading_list: CoursemapPdfInfo | null;
 }
 export interface StatusSummary {
   topics: number; complete: Record<Lang, number>; blocked: number; stale: number; cloud: number; cloud_share: number;

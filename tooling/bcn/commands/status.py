@@ -206,6 +206,7 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
             "errors": sum(1 for d in diags if d.level == "error"),
             "title": _module_title(ctx.course_map.path),
             "unit_titles": dict(ctx.course_map.units),
+            "reading_list": _reading_list(target.root, m),
         }
     env.extra["summary"] = summarise(rows)
     for m, info in module_docs.items():
@@ -234,6 +235,17 @@ def _coursemap_pdf(root: Path, module: str, rel: str) -> dict[str, Any] | None:
         return None
     src = root / module / rel
     out = root / module / "build" / "course-map.pdf"
+    exists = out.is_file()
+    return {"path": str(out.relative_to(root)), "exists": exists,
+            "stale": (not fsutil.is_fresh([out], [src])) if exists else None}
+
+
+def _reading_list(root: Path, module: str) -> dict[str, Any] | None:
+    """The module's reading list (bcn readinglist), if its source course-map.md exists."""
+    src = root / module / "course-map.md"
+    if not src.is_file():
+        return None
+    out = root / module / "build" / "reading-list.md"
     exists = out.is_file()
     return {"path": str(out.relative_to(root)), "exists": exists,
             "stale": (not fsutil.is_fresh([out], [src])) if exists else None}

@@ -17,6 +17,13 @@ LO_ITEM_RE = re.compile(r"^\s*[-*]\s+\*\*(LO\d+)\*\*[:.\s-]*(.*)$")
 LO_ITEM_LOOSE_RE = re.compile(r"^\s*[-*]\s+\*\*([^*]+)\*\*")
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 OUTSTANDING_DONE = {"delivered", "done", "received", "complete", "closed"}
+# A unit's reading paragraph: "**Reading.** <free text>", alongside Overview/Recording/
+# Interactive element paragraphs that already appear between a unit heading and its topic
+# table. Free text, not a citation format bcn can validate — see read_unit_reading().
+READING_RE = re.compile(r"^\*\*Reading\.?\*\*\s*(.*)$", re.IGNORECASE)
+# A citation boundary: end of sentence, followed by a capital letter — not by "(" or a
+# lowercase letter, so "et al. (2021)" is never mistaken for two sentences.
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
 
 
 @dataclass
@@ -36,6 +43,7 @@ class CourseMap:
     outcomes: dict[str, str] = field(default_factory=dict)
     units: dict[str, str] = field(default_factory=dict)
     topics: list[MapTopic] = field(default_factory=list)
+    readings: dict[str, str] = field(default_factory=dict)  # unit -> its Reading paragraph, verbatim
     diagnostics: list[Diagnostic] = field(default_factory=list)
 
     def topic_ids(self) -> list[str]:
@@ -127,6 +135,9 @@ def load_course_map(module_dir: Path, required_headings: list[str] | None = None
                 if unit in cm.units:
                     cm.diagnostics.append(Diagnostic("DOC_DUPLICATE_ID", f"Unit {unit} is listed twice.", file=rel, line=i + 1))
                 cm.units[unit] = title
+                reading = _unit_reading(lines, i + 1)
+                if reading:
+                    cm.readings[unit] = reading
                 for ln, cells in _table_rows(lines, i + 1):
                     _map_row(cm, unit, cells, ln, rel)
                 continue
@@ -165,6 +176,27 @@ def _unit_heading(text: str) -> tuple[str | None, str]:
     if m:
         return f"U{int(m.group(1)):02d}", m.group(2).strip()
     return None, ""
+
+
+def _unit_reading(lines: list[str], start: int) -> str:
+    """The unit's '**Reading.** ...' paragraph, if it has one — scanned from just after the
+    unit heading up to the next heading (so it never bleeds into the following unit)."""
+    for line in lines[start:]:
+        if HEADING_RE.match(line):
+            break
+        m = READING_RE.match(line.strip())
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
+def split_citations(reading: str) -> list[str]:
+    """A Reading paragraph, split into one entry per sentence. The text is free prose, not
+    a citation format bcn can parse or validate — this is a readability split, not an
+    attempt to tell a real second citation from a note like "revisited" or "still to be
+    identified": those come through as their own entries too, which a human reading the
+    aggregated list can tell apart more easily than bcn ever could from the text alone."""
+    return [s.strip() for s in SENTENCE_SPLIT_RE.split(reading.strip()) if s.strip()]
 
 
 def _add_outcome(cm: CourseMap, lo: str, text: str, ln: int, rel: str) -> None:

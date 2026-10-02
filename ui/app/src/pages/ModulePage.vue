@@ -114,8 +114,17 @@ async function exportModuleMapPdf() {
   else beacon.toast('The module map PDF could not be made; see Jobs.', true);
 }
 
-// The only module-wide document that's actually in use today; assets.md/reading-list.md
-// are listed by status but unused now that reading-list content lives per topic instead.
+async function exportReadingList() {
+  const job = await beacon.runJob('readinglist', [props.module], {});
+  const result = await beacon.awaitJob(job.id);
+  if (result.state === 'done') beacon.toast('Reading list ready.');
+  else beacon.toast('The reading list could not be made; see Jobs.', true);
+}
+
+// The only module-wide document that's actually in use today; assets.md is listed by
+// status but unused. reading-list.md is no longer hand-authored either — it's generated
+// from the module map's own per-unit Reading paragraphs (bcn readinglist) rather than
+// being a separate document someone writes.
 const moduleMap = computed(() => (m.value?.documents || []).find((d) => d.path.endsWith('/course-map.md')));
 </script>
 
@@ -150,6 +159,20 @@ const moduleMap = computed(() => (m.value?.documents || []).find((d) => d.path.e
           </q-btn-dropdown>
           <q-btn v-else flat dense no-caps disable label="Module map — missing">
             <q-tooltip>Not in the working copy yet</q-tooltip>
+          </q-btn>
+          <q-btn-dropdown v-if="m.reading_list?.exists" split outline dense no-caps icon="menu_book"
+            :color="m.reading_list.stale ? 'warning' : undefined" :label="m.reading_list.stale ? 'Reading list (out of date)' : 'Reading list'"
+            :href="fileUrl(m.reading_list.path, null, 'download=1')">
+            <q-tooltip max-width="320px">Every unit's Reading paragraph from the module map, pulled into one list.</q-tooltip>
+            <q-list>
+              <q-item clickable v-close-popup @click="exportReadingList">
+                <q-item-section avatar><q-icon name="menu_book" /></q-item-section>
+                <q-item-section>Update reading list</q-item-section>
+              </q-item>
+            </q-list>
+          </q-btn-dropdown>
+          <q-btn v-else-if="m.reading_list" outline dense no-caps icon="menu_book" label="Build reading list" @click="exportReadingList">
+            <q-tooltip max-width="320px">Every unit's Reading paragraph from the module map, pulled into one list.</q-tooltip>
           </q-btn>
         </template>
       </PageHeader>

@@ -86,6 +86,7 @@ RESULT_EXTRAS: dict[str, dict[str, Any]] = {
     "qti": {"title": {"type": "string"}, "questions": {"type": "integer"}, "multiple_response": {"type": "integer"},
             "package": _str_or_null},
     "coursemap": {"pdf": _str_or_null},
+    "readinglist": {"path": {"type": "string"}, "units": {"type": "integer"}, "entries": {"type": "integer"}},
     "bumpers": {"title": {"type": "string"}, "logo": {"type": "boolean"}, "font_size": {"type": "integer"},
                 "intro_seconds": {"type": "number"}, "outro_seconds": {"type": "number"},
                 "resolution": {"type": "array"}, "fps": {"type": "number"}},
