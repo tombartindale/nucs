@@ -30,6 +30,7 @@ ARG FFMPEG_VERSION=7.1
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential yasm nasm pkg-config \
       libx264-dev libx265-dev libvpx-dev libmp3lame-dev libopus-dev zlib1g-dev \
+      libass-dev libfreetype6-dev libfontconfig-dev libharfbuzz-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 RUN curl -fsSL -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
@@ -38,6 +39,7 @@ RUN curl -fsSL -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VER
          --enable-gpl \
          --enable-libx264 --enable-libx265 --enable-libvpx \
          --enable-libmp3lame --enable-libopus --enable-zlib \
+         --enable-libass --enable-libfreetype --enable-libfontconfig --enable-libharfbuzz \
     && make -j"$(nproc)" \
     && make install \
     && /opt/ffmpeg/bin/ffmpeg -version | head -1 | grep -q "ffmpeg version ${FFMPEG_VERSION}"
@@ -94,7 +96,7 @@ WORKDIR /app
 # installed in one build stage never carry over into another via COPY, only the specific
 # files named, so the shared libraries have to be installed directly in this final stage.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      libx264-164 libx265-199 libvpx7 libmp3lame0 libopus0 zlib1g \
+      libx264-164 libx265-199 libvpx7 libmp3lame0 libopus0 zlib1g libass9 libfontconfig1 libharfbuzz0b \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=ffmpeg-build /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 COPY --from=tooling /app/tooling /app/tooling
