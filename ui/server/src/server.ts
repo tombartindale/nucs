@@ -8,6 +8,7 @@
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { basename, extname, join, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import cookie from '@fastify/cookie';
@@ -15,18 +16,22 @@ import extractZip from 'extract-zip';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type {
   BcnDiagnosticsEnvelope, BcnEditEnvelope, BcnReviewEnvelope, BcnStatusEnvelope, BcnSyncEnvelope, BootResponse, JobArgs,
-  ShowEnvelope, TranslationItem,
+  ModulePlanRemindResponse, ModulePlanRequest, ModulePlanResponse, PlansSummaryResponse, ShowEnvelope, TranslationItem,
 } from '@beacon/shared';
 import { jobLabel, type App } from './app.js';
 import { SESSION_COOKIE } from './auth.js';
 import { BadRequest, BcnError, Forbidden } from './errors.js';
+import { buildIcs, type IcsEvent } from './ics.js';
 import { mimeType, withCharset } from './mime.js';
+import { computeModulePlan, moduleTopicsFor } from './planning.js';
 import { now, pyJson, sha256, stamp } from './util.js';
 
 const BODY_MAX = 5 * 1024 * 1024;
 const UPLOAD_MAX = 500 * 1024 * 1024;
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const TOPIC = '^[A-Z]{2}\\d{4}-U\\d{2}-T\\d{2}$';
+const MODULE = '^[A-Z]{2}\\d{4}$';
+const ICS_PATH = /^\/api\/module\/[A-Z]{2}\d{4}\/plan\.ics$/;
 const PING_MS = 15_000;
 const SSE_BACKLOG = 4 * 1024 * 1024;  // a tab that falls this far behind is dropped; it resyncs on reconnect
 
@@ -105,7 +110,12 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     reply.header('Cache-Control', 'no-store');
     reply.header('X-Content-Type-Options', 'nosniff');
     const path = (req.raw.url || '').split('?')[0];
-    const guarded = !testDisableAuth && (path.startsWith('/files/') || (path.startsWith('/api/') && !PUBLIC_PATHS.has(path)));
+    // The ICS feed is fetched by calendar clients (Outlook, Apple Calendar), which cannot
+    // send a session cookie. It carries its own per-module secret token instead, checked
+    // inside the route handler itself — this carve-out is a single literal route shape and
+    // opens nothing else under /api/*.
+    const guarded = !testDisableAuth
+      && (path.startsWith('/files/') || (path.startsWith('/api/') && !PUBLIC_PATHS.has(path) && !ICS_PATH.test(path)));
     if (guarded) {
       const session = await app.auth.session(req.cookies[SESSION_COOKIE]);
       if (!session) return reply.code(401).send({ error: 'Sign in required.' });
@@ -253,6 +263,91 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   f.get('/api/review', async (req: Req) => {
     const rel = app.targetRel(req.query.path ?? '.');
     return app.cachedQuery<BcnReviewEnvelope>(`review|${rel}`, 10_000, 'review', [app.targetPath(rel)]);
+  });
+
+  // -- delivery planning: backward-scheduled briefs/recording, milestones, ICS, reminders -----
+  async function planFor(module: string): Promise<ModulePlanResponse> {
+    const row = await app.db.getPlan(module);
+    const status = await app.status.get();
+    const topics = status ? moduleTopicsFor(status, module) : [];
+    const plan = computeModulePlan(topics, row.delivery_date);
+    const icsUrl = `${app.auth.baseUrl}/api/module/${module}/plan.ics?token=${row.ics_token}`;
+    return { module, deliveryDate: row.delivery_date, ownerName: row.owner_name, ownerEmail: row.owner_email, icsUrl, plan };
+  }
+
+  f.get(`/api/module/:name(${MODULE})/plan`, async (req: Req) => planFor(req.params.name));
+
+  f.put(`/api/module/:name(${MODULE})/plan`, async (req: Req) => {
+    const data = await readJson(req) as ModulePlanRequest;
+    const fields: { delivery_date?: string | null; owner_name?: string; owner_email?: string } = {};
+    if ('deliveryDate' in data) {
+      const d = data.deliveryDate;
+      if (d !== null && d !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new BadRequest('deliveryDate must be YYYY-MM-DD or null.');
+      fields.delivery_date = d ?? null;
+    }
+    if ('ownerName' in data) fields.owner_name = String(data.ownerName ?? '');
+    if ('ownerEmail' in data) {
+      const email = String(data.ownerEmail ?? '');
+      if (email && !email.includes('@')) throw new BadRequest('ownerEmail does not look like an email address.');
+      fields.owner_email = email;
+    }
+    await app.db.upsertPlan(req.params.name, fields);
+    return planFor(req.params.name);
+  });
+
+  // Not session-guarded (see the onRequest hook above) — token-guarded instead, since a
+  // calendar client can't send a cookie. A wrong or missing token looks like a 404, same
+  // as a module that doesn't exist, so a guessed token can't confirm a module's name.
+  f.get(`/api/module/:name(${MODULE})/plan.ics`, async (req: Req, reply) => {
+    const module = req.params.name;
+    const row = await app.db.getPlan(module);
+    const given = Buffer.from(String(req.query.token || ''));
+    const expected = Buffer.from(row.ics_token);
+    if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
+      return reply.code(404).send({ error: 'Not found.' });
+    }
+    const status = await app.status.get();
+    const topics = status ? moduleTopicsFor(status, module) : [];
+    const plan = computeModulePlan(topics, row.delivery_date);
+    const events: IcsEvent[] = plan.tasks.filter((t) => t.deadline).map((t) => ({
+      uid: `${t.topic}-${t.kind}@beacon-ui`,
+      date: t.deadline as string,
+      summary: t.kind === 'brief' ? `Brief due: ${t.topic} — ${t.title}` : `Record by: ${t.topic} — ${t.title}`,
+      description: t.kind === 'brief' ? `Est. 20 min to write the brief.` : `Est. recording ${t.estimatedDays} day(s).`,
+    }));
+    if (plan.deliveryDate) events.push({ uid: `${module}-delivery@beacon-ui`, date: plan.deliveryDate, summary: `Delivery: ${module}` });
+    const ics = buildIcs(module, events);
+    reply.header('Content-Type', 'text/calendar; charset=utf-8');
+    reply.header('Content-Disposition', `inline; filename="${module}-plan.ics"`);
+    return reply.send(ics);
+  });
+
+  f.post(`/api/module/:name(${MODULE})/plan/remind`, async (req: Req): Promise<ModulePlanRemindResponse> => {
+    const module = req.params.name;
+    const { ownerName, ownerEmail, deliveryDate, plan } = await planFor(module);
+    if (!ownerEmail) throw new BadRequest('Set an owner email before sending a reminder.');
+    const upcoming = plan.tasks.filter((t) => t.deadline).slice(0, 5);
+    const lines = [
+      `Hi ${ownerName || 'there'},`, '',
+      `Progress on ${module}: ${plan.topicsRecorded}/${plan.topicsTotal} recorded, ${plan.topicsNotDrafted} not yet drafted.`,
+      deliveryDate ? `Delivery date: ${deliveryDate}.` : 'No delivery date set yet.', '',
+      ...(upcoming.length ? ['Upcoming:', ...upcoming.map((t) => `- ${t.deadline}: ${t.kind === 'brief' ? 'write brief' : 'record'} ${t.topic} — ${t.title}`)] : []),
+      '', `${app.auth.baseUrl}/#/module/${module}`,
+    ];
+    await app.auth.mailer.send(ownerEmail, `NUCS: progress on ${module}`, lines.join('\n'));
+    return { ok: true, sentTo: ownerEmail };
+  });
+
+  f.get('/api/plans', async (): Promise<PlansSummaryResponse> => {
+    const rows = await app.db.allPlans();
+    const status = await app.status.get();
+    const out: PlansSummaryResponse = {};
+    for (const row of rows) {
+      const topics = status ? moduleTopicsFor(status, row.module) : [];
+      const plan = computeModulePlan(topics, row.delivery_date);
+      out[row.module] = { deliveryDate: row.delivery_date, onTrack: plan.onTrack, milestones: plan.milestones };
+    }
+    return out;
   });
 
   // -- jobs -----------------------------------------------------------------------------------

@@ -186,6 +186,35 @@ export interface TranslationImportRequest { source: string; path?: string }
 // each is imported once, right after upload, not browsed later).
 export interface TransferListResponse { exports: TranslationItem[] }
 export interface TransferImportRequest { source: string; path?: string; dry_run?: boolean }
+
+// -- delivery planning: backward-scheduled briefs/recording, milestones, ICS, reminders ---------
+/** One outstanding task against one topic: writing its brief, or recording it. */
+export interface PlannedTask {
+  topic: string; title: string; kind: 'brief' | 'recording'; estimatedDays: number; deadline: string | null;
+}
+export type MilestoneKind = 'briefs_done' | 'recorded' | 'translated' | 'packaged';
+/** One module-wide checkpoint: every topic reaching a given stage. dueDate is only
+ *  projected for briefs_done/recorded (backward-chained from the delivery date);
+ *  translated/packaged report current progress only, not a forecast. */
+export interface Milestone { kind: MilestoneKind; done: boolean; remaining: number; dueDate: string | null }
+export interface ModulePlanComputed {
+  deliveryDate: string | null;
+  topicsTotal: number; topicsRecorded: number; topicsRemaining: number; topicsNotDrafted: number;
+  onTrack: boolean | null;       // null if no delivery_date set
+  milestones: Milestone[];       // always 4, in pipeline order — the producer's headline view
+  tasks: PlannedTask[];          // outstanding brief/recording tasks, course-map order — the content creator's detail view
+}
+export interface ModulePlanResponse {
+  module: string; deliveryDate: string | null; ownerName: string; ownerEmail: string; icsUrl: string;
+  plan: ModulePlanComputed;
+}
+export interface ModulePlanRequest { deliveryDate?: string | null; ownerName?: string; ownerEmail?: string }
+export interface ModulePlanRemindResponse { ok: true; sentTo: string }
+/** The producer's cross-module view (GET /api/plans): milestones only, no topic-level task detail. */
+export type PlansSummaryResponse = Record<string, {
+  deliveryDate: string | null; onTrack: boolean | null; milestones: Milestone[];
+}>;
+
 export interface ErrorResponse { error: string }
 
 // Envelopes a job can carry, by command, for callers that know which one they ran.

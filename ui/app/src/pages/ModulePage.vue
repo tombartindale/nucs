@@ -2,12 +2,12 @@
 // Module: units down, topics across, one split cell per topic (English | Mandarin).
 // Stage is shown by position; colour marks only stale and blocked. Bulk actions live here,
 // where the scope is visible, and say what they will do before they run.
-import { computed, reactive } from 'vue';
-import type { LangState, TopicStatus } from '@beacon/shared';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
+import type { LangState, ModulePlanResponse, TopicStatus } from '@beacon/shared';
 import PageHeader from '@/components/PageHeader.vue';
 import StagePips from '@/components/StagePips.vue';
 import StateChip from '@/components/StateChip.vue';
-import { fileUrl } from '@/api';
+import { api, fileUrl } from '@/api';
 import { confirm } from '@/composables/confirm';
 import { LANG_NAME, plural, STAGE_LABEL, STEP_HELP, topicPath } from '@/format';
 import { useBeacon } from '@/stores/beacon';
@@ -126,6 +126,66 @@ async function exportReadingList() {
 // from the module map's own per-unit Reading paragraphs (bcn readinglist) rather than
 // being a separate document someone writes.
 const moduleMap = computed(() => (m.value?.documents || []).find((d) => d.path.endsWith('/course-map.md')));
+
+// Delivery planning: fetched directly, not via the polled status store — it only changes
+// on a manual edit (set delivery date/owner) and doesn't need SSE-driven refresh.
+const MILESTONE_LABEL: Record<string, string> = {
+  briefs_done: 'Briefs done', recorded: 'Recorded', translated: 'Translated', packaged: 'Packaged',
+};
+const plan = ref<ModulePlanResponse | null>(null);
+const planForm = reactive({ deliveryDate: '', ownerName: '', ownerEmail: '' });
+const planSaving = ref(false);
+const reminding = ref(false);
+
+function syncPlanForm() {
+  if (!plan.value) return;
+  planForm.deliveryDate = plan.value.deliveryDate ?? '';
+  planForm.ownerName = plan.value.ownerName;
+  planForm.ownerEmail = plan.value.ownerEmail;
+}
+async function loadPlan() {
+  plan.value = await api<ModulePlanResponse>(`/api/module/${props.module}/plan`);
+  syncPlanForm();
+}
+onMounted(loadPlan);
+watch(() => props.module, loadPlan);
+
+async function savePlan() {
+  planSaving.value = true;
+  try {
+    plan.value = await api<ModulePlanResponse>(`/api/module/${props.module}/plan`, {
+      method: 'PUT',
+      body: { deliveryDate: planForm.deliveryDate || null, ownerName: planForm.ownerName, ownerEmail: planForm.ownerEmail },
+    });
+    beacon.toast('Delivery plan saved.');
+  } catch (e) {
+    beacon.toast((e as Error).message, true);
+  } finally {
+    planSaving.value = false;
+  }
+}
+
+const webcalUrl = computed(() => plan.value ? plan.value.icsUrl.replace(/^https?:\/\//, 'webcal://') : '');
+async function copyIcsLink(url: string) {
+  try {
+    await navigator.clipboard.writeText(url);
+    beacon.toast('Calendar link copied.');
+  } catch {
+    beacon.toast('Could not copy to clipboard.', true);
+  }
+}
+
+async function sendReminder() {
+  reminding.value = true;
+  try {
+    const res = await api<{ ok: true; sentTo: string }>(`/api/module/${props.module}/plan/remind`, { method: 'POST' });
+    beacon.toast(`Reminder sent to ${res.sentTo}.`);
+  } catch (e) {
+    beacon.toast((e as Error).message, true);
+  } finally {
+    reminding.value = false;
+  }
+}
 </script>
 
 <template>
@@ -176,6 +236,75 @@ const moduleMap = computed(() => (m.value?.documents || []).find((d) => d.path.e
           </q-btn>
         </template>
       </PageHeader>
+
+      <q-expansion-item v-if="plan" icon="event" label="Delivery planning" class="q-mb-md planning-card" default-opened
+        :header-class="plan.plan.onTrack === false ? 'text-negative' : undefined">
+        <template #header>
+          <q-item-section avatar><q-icon name="event" /></q-item-section>
+          <q-item-section>
+            <q-item-label>Delivery planning</q-item-label>
+            <q-item-label caption>
+              {{ plan.deliveryDate ? `Delivery ${plan.deliveryDate}` : 'No delivery date set' }}
+              <span v-if="plan.ownerName || plan.ownerEmail"> · {{ plan.ownerName }}{{ plan.ownerName && plan.ownerEmail ? ' · ' : '' }}{{ plan.ownerEmail }}</span>
+            </q-item-label>
+          </q-item-section>
+          <StateChip v-if="plan.plan.onTrack !== null" :kind="plan.plan.onTrack ? 'ok' : 'blocked'" :label="plan.plan.onTrack ? 'on track' : 'behind schedule'" />
+        </template>
+        <q-card flat bordered>
+          <q-card-section class="row items-end gap-md">
+            <q-input v-model="planForm.deliveryDate" type="date" dense outlined label="Delivery date" style="max-width: 200px" />
+            <q-input v-model="planForm.ownerName" dense outlined label="Responsible — name" style="max-width: 220px" />
+            <q-input v-model="planForm.ownerEmail" dense outlined label="Responsible — email" style="max-width: 260px" />
+            <q-btn color="primary" no-caps label="Save" :loading="planSaving" @click="savePlan" />
+          </q-card-section>
+          <q-separator />
+
+          <!-- Milestone strip: the producer's headline view, four module-wide checkpoints. -->
+          <q-card-section>
+            <div class="row q-col-gutter-md">
+              <div v-for="ms in plan.plan.milestones" :key="ms.kind" class="col-6 col-md-3">
+                <q-card flat bordered :class="{ 'bg-green-1': ms.done }">
+                  <q-card-section class="q-pa-sm text-center">
+                    <div class="text-caption text-grey-7">{{ MILESTONE_LABEL[ms.kind] }}</div>
+                    <div class="text-h6">{{ ms.done ? '✓' : ms.remaining }}</div>
+                    <div class="text-caption text-grey-7">{{ ms.done ? 'done' : plural(ms.remaining, 'topic') + ' left' }}</div>
+                    <div v-if="ms.dueDate" class="text-caption">due {{ ms.dueDate }}</div>
+                  </q-card-section>
+                </q-card>
+              </div>
+            </div>
+          </q-card-section>
+          <q-separator />
+
+          <!-- Task table: the content creator's detail view, outstanding briefs/recordings in order. -->
+          <q-card-section v-if="plan.plan.tasks.length">
+            <table class="plan-tasks">
+              <thead><tr><th>Topic</th><th>Task</th><th>Est.</th><th>Deadline</th></tr></thead>
+              <tbody>
+                <tr v-for="t in plan.plan.tasks" :key="`${t.topic}-${t.kind}`">
+                  <td><a :href="`#/topic/${t.topic}`">{{ t.topic }}</a> {{ t.title }}</td>
+                  <td>{{ t.kind === 'brief' ? 'Write brief' : 'Record' }}</td>
+                  <td>{{ t.estimatedDays }}d</td>
+                  <td>{{ t.deadline || '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </q-card-section>
+          <q-card-section v-else class="text-grey-7">Nothing outstanding — every topic is drafted and recorded.</q-card-section>
+          <q-separator />
+
+          <q-card-section class="row items-center gap-sm">
+            <q-btn outline dense no-caps icon="content_copy" label="Copy calendar link" @click="copyIcsLink(plan.icsUrl)" />
+            <q-btn outline dense no-caps icon="event" label="Copy webcal:// link" @click="copyIcsLink(webcalUrl)">
+              <q-tooltip max-width="320px">Outlook and most calendar apps treat a webcal:// link as a direct "subscribe" action.</q-tooltip>
+            </q-btn>
+            <q-space />
+            <q-btn outline dense no-caps icon="mail" label="Send reminder now" :loading="reminding" :disable="!plan.ownerEmail" @click="sendReminder">
+              <q-tooltip v-if="!plan.ownerEmail">Set an owner email first.</q-tooltip>
+            </q-btn>
+          </q-card-section>
+        </q-card>
+      </q-expansion-item>
 
       <q-card flat bordered>
         <q-card-section class="row items-center gap-sm">
@@ -257,4 +386,8 @@ const moduleMap = computed(() => (m.value?.documents || []).find((d) => d.path.e
 
 <style scoped>
 body.body--dark .bulkbar { background: rgba(255, 255, 255, .04) !important; }
+body.body--dark .planning-card :deep(.bg-green-1) { background: rgba(76, 175, 80, .12) !important; }
+.plan-tasks { width: 100%; border-collapse: collapse; }
+.plan-tasks th { text-align: left; font-weight: normal; color: var(--q-grey-7, #757575); font-size: 12px; padding: 4px 8px; }
+.plan-tasks td { padding: 4px 8px; border-top: 1px solid rgba(0, 0, 0, .06); }
 </style>

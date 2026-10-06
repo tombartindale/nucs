@@ -5,8 +5,10 @@
 // DATABASE_URL (a standard Postgres connection string), so the UI can run as one of
 // several services in a multi-user Docker Compose stack instead of a single-user
 // desktop app with a local file.
+import { randomBytes } from 'node:crypto';
 import { Pool } from 'pg';
 import type { Prefs } from '@beacon/shared';
+import { now } from './util.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS jobs (
@@ -39,6 +41,19 @@ CREATE TABLE IF NOT EXISTS prefs (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 -- interrupted, the same way a restarted single-process backend used to recover its own
 -- crashed jobs.
 CREATE TABLE IF NOT EXISTS worker_heartbeats (worker_id TEXT PRIMARY KEY, last_seen TEXT NOT NULL);
+-- A module's delivery plan: the one schedule input (delivery_date) and who owns the
+-- module. Per-topic deadlines are never stored here — they're computed fresh from
+-- /api/status plus delivery_date on every request, same as every other pipeline-derived
+-- fact (see planning.ts). Single owner (name + email) for v1; extend later via a
+-- comma-separated owner_email or a child table if multiple recipients are ever needed.
+CREATE TABLE IF NOT EXISTS module_plans (
+    module TEXT PRIMARY KEY,
+    delivery_date TEXT,
+    owner_name TEXT NOT NULL DEFAULT '',
+    owner_email TEXT NOT NULL DEFAULT '',
+    ics_token TEXT NOT NULL,     -- random per-module secret; grants read access to the .ics feed only
+    updated TEXT NOT NULL
+);
 `;
 
 export const DEFAULT_PREFS: Prefs = {
@@ -57,6 +72,11 @@ export interface JobRow {
   exit_code: number | null; duration_ms: number | null; envelope: string | null; log: string | null;
   target_index: number; progress: string | null; last_event: string | null;
   cancel_requested: boolean; worker_id: string | null;
+}
+
+export interface ModulePlanRow {
+  module: string; delivery_date: string | null; owner_name: string; owner_email: string;
+  ics_token: string; updated: string;
 }
 
 export class DB {
@@ -88,6 +108,41 @@ export class DB {
       }
     }
     return this.prefs();
+  }
+
+  /** Loads a module's plan, creating it (with a fresh ICS token) on first access, so the
+   *  feed URL is stable from the first time it's viewed rather than only after a save. */
+  async getPlan(module: string): Promise<ModulePlanRow> {
+    const res = await this.pool.query<ModulePlanRow>('SELECT * FROM module_plans WHERE module=$1', [module]);
+    if (res.rows[0]) return res.rows[0];
+    const row: ModulePlanRow = {
+      module, delivery_date: null, owner_name: '', owner_email: '',
+      ics_token: randomBytes(24).toString('base64url'), updated: now(),
+    };
+    await this.pool.query(
+      'INSERT INTO module_plans(module, delivery_date, owner_name, owner_email, ics_token, updated) VALUES($1, $2, $3, $4, $5, $6) ON CONFLICT(module) DO NOTHING',
+      [row.module, row.delivery_date, row.owner_name, row.owner_email, row.ics_token, row.updated]);
+    const after = await this.pool.query<ModulePlanRow>('SELECT * FROM module_plans WHERE module=$1', [module]);
+    return after.rows[0] ?? row;
+  }
+
+  /** Updates delivery_date/owner fields; never touches ics_token, so an existing
+   *  subscription never breaks on a plain edit. */
+  async upsertPlan(module: string, fields: { delivery_date?: string | null; owner_name?: string; owner_email?: string }): Promise<ModulePlanRow> {
+    const current = await this.getPlan(module);
+    const next = { ...current, ...fields, updated: now() };
+    await this.pool.query(
+      `INSERT INTO module_plans(module, delivery_date, owner_name, owner_email, ics_token, updated)
+       VALUES($1, $2, $3, $4, $5, $6)
+       ON CONFLICT(module) DO UPDATE SET delivery_date=excluded.delivery_date, owner_name=excluded.owner_name,
+         owner_email=excluded.owner_email, updated=excluded.updated`,
+      [next.module, next.delivery_date, next.owner_name, next.owner_email, next.ics_token, next.updated]);
+    return next;
+  }
+
+  async allPlans(): Promise<ModulePlanRow[]> {
+    const res = await this.pool.query<ModulePlanRow>('SELECT * FROM module_plans');
+    return res.rows;
   }
 
   async close(): Promise<void> { await this.pool.end(); }

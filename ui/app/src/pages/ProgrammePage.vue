@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Programme: the landing screen. Four numbers, then one row per module. Rows are links and nothing else.
 import { computed, onMounted, ref, watch } from 'vue';
-import type { SyncResponse } from '@beacon/shared';
+import type { Milestone, PlansSummaryResponse, SyncResponse } from '@beacon/shared';
 import { api } from '@/api';
 import PageHeader from '@/components/PageHeader.vue';
 import StateChip from '@/components/StateChip.vue';
@@ -15,6 +15,32 @@ const sync = ref<SyncResponse | null>(null);  // bcn sync dry runs, for the OneD
 const loadSync = () => api<SyncResponse>('/api/sync').then((d) => { sync.value = d; }).catch(() => {});
 onMounted(loadSync);
 watch(() => beacon.status, loadSync);
+
+// Delivery planning: the next at-risk milestone per module, for a producer scanning
+// across every module at once. Full per-topic detail lives on each module's own page.
+const MILESTONE_LABEL: Record<string, string> = {
+  briefs_done: 'briefs', recorded: 'recorded', translated: 'translated', packaged: 'packaged',
+};
+const plans = ref<PlansSummaryResponse>({});
+const loadPlans = () => api<PlansSummaryResponse>('/api/plans').then((d) => { plans.value = d; }).catch(() => {});
+onMounted(loadPlans);
+watch(() => beacon.status, loadPlans);
+
+const today = () => new Date().toISOString().slice(0, 10);
+function milestoneChip(name: string): { label: string; kind: string } | null {
+  const p = plans.value[name];
+  if (!p) return null;
+  const next: Milestone | undefined = p.milestones.find((ms) => !ms.done);
+  if (!next) return { label: 'delivery-ready', kind: 'ok' };
+  const label = next.dueDate ? `${MILESTONE_LABEL[next.kind]} by ${next.dueDate}` : `${next.remaining} to be ${MILESTONE_LABEL[next.kind]}`;
+  const overdue = next.dueDate !== null && next.dueDate < today();
+  return { label, kind: overdue ? 'blocked' : 'ok' };
+}
+const milestoneChips = computed(() => {
+  const out: Record<string, { label: string; kind: string } | null> = {};
+  for (const name of Object.keys(plans.value)) out[name] = milestoneChip(name);
+  return out;
+});
 
 const env = computed(() => beacon.status);
 const s = computed(() => env.value!.summary);
@@ -141,6 +167,9 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `28px repeat(${ladder.v
               </div>
             </q-item-section>
             <q-item-section side class="prog-flags row items-center gap-xs" style="flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-content: center">
+              <StateChip v-if="milestoneChips[name]" :kind="milestoneChips[name]!.kind" :label="milestoneChips[name]!.label">
+                <q-tooltip>Next delivery-planning milestone · see the module page for details</q-tooltip>
+              </StateChip>
               <StateChip v-if="m.blocked" kind="blocked" :label="`${m.blocked} blocked`" />
               <StateChip v-if="m.stale" kind="stale" :label="`${m.stale} stale`" />
               <StateChip v-if="m.cloud" kind="cloud" :label="`☁ ${m.cloud} cloud-only`" />

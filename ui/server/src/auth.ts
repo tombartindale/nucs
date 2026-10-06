@@ -7,8 +7,8 @@
 // separate authorization concern once there is more than one programme to guard (see the
 // deployment spec's multi-programme extension).
 import { randomBytes, randomUUID } from 'node:crypto';
-import sgMail from '@sendgrid/mail';
 import type { DB } from './db.js';
+import { Mailer } from './mailer.js';
 import { now } from './util.js';
 
 const LINK_TTL_MS = 15 * 60 * 1000;      // a login link is valid for 15 minutes
@@ -32,14 +32,18 @@ function isAllowed(email: string, allowedDomains: string[]): boolean {
 }
 
 export class Auth {
-  private sendgridEnabled: boolean;
+  /** Shared with other senders (e.g. planning reminders) so there's one SendGrid-or-stderr
+   *  implementation in the process, not one per feature. */
+  readonly mailer: Mailer;
+  /** e.g. https://beacon.example.org — reused to build other absolute links (e.g. the ICS feed URL). */
+  readonly baseUrl: string;
   /** The session cookie is marked Secure unless the deployment's own base URL is plain
    *  http (local dev without TLS) — never send it over an unencrypted connection otherwise. */
   readonly cookieSecure: boolean;
 
   constructor(private db: DB, private opts: AuthOptions) {
-    this.sendgridEnabled = Boolean(opts.sendgridApiKey);
-    if (opts.sendgridApiKey) sgMail.setApiKey(opts.sendgridApiKey);
+    this.mailer = new Mailer({ sendgridApiKey: opts.sendgridApiKey, emailFrom: opts.emailFrom });
+    this.baseUrl = opts.baseUrl.replace(/\/$/, '');
     this.cookieSecure = opts.baseUrl.startsWith('https://');
   }
 
@@ -72,7 +76,7 @@ export class Auth {
     const expires = now(new Date(Date.now() + LINK_TTL_MS));
     await this.db.pool.query('INSERT INTO login_tokens(token, email, created, expires) VALUES($1, $2, $3, $4)',
       [token, normalised, created, expires]);
-    const link = `${this.opts.baseUrl.replace(/\/$/, '')}/api/auth/verify?token=${token}`;
+    const link = `${this.baseUrl}/api/auth/verify?token=${token}`;
     await this.send(normalised, link);
   }
 
@@ -104,16 +108,8 @@ export class Auth {
   }
 
   private async send(email: string, link: string): Promise<void> {
-    if (!this.sendgridEnabled) {
-      // Local dev / no SendGrid API key configured yet: the link is logged so sign-in
-      // still works without a real email provider set up.
-      process.stderr.write(`beacon-ui: magic link for ${email}: ${link}\n`);
-      return;
-    }
-    await sgMail.send({
-      from: this.opts.emailFrom, to: email, subject: 'Sign in to NUCS',
-      text: `Sign in to NUCS: ${link}\n\nThis link expires in 15 minutes and can only be used once.`,
-    });
+    await this.mailer.send(email, 'Sign in to NUCS',
+      `Sign in to NUCS: ${link}\n\nThis link expires in 15 minutes and can only be used once.`);
   }
 }
 
