@@ -29,6 +29,7 @@ import datetime as _dt
 import difflib
 import filecmp
 import json
+import re
 import shutil
 import tempfile
 import zipfile
@@ -50,6 +51,12 @@ HELP = "export or import a whole module/unit as a single zip, no live shared fol
 # "XX0000-..."), or with a real nested module subfolder (always exactly 6 characters).
 FULL_PROGRAMME_TOML = "programme.toml"
 FULL_THEME_PREFIX = "themes/custom/"
+# --full's pipeline state: human decisions (review, translation), sync's baseline, and the
+# step results / manifests that say what has already been built. Stored under state/ so the
+# zip path is always "state/<module>/..." and import can accept exactly these paths, nothing else.
+FULL_STATE_PREFIX = "state/"
+FULL_STATE_ROOT = "sync-state.json"
+STATE_PATH_RE = re.compile(r"[A-Z]{2}\d{4}/U\d{2}/T\d{2}/(?:review\.json|translation\.json|(?:build|out)/[^/]+\.(?:json|csv))")
 
 
 def add_args(p: argparse.ArgumentParser) -> None:
@@ -161,6 +168,13 @@ def _export(env: Envelope, target: Target, media: bool, nested: bool, full: bool
         toml = target.root / FULL_PROGRAMME_TOML
         if toml.is_file():
             entries.append((toml, FULL_PROGRAMME_TOML, None))
+        sync_state = target.root / FULL_STATE_ROOT
+        if sync_state.is_file():
+            entries.append((sync_state, FULL_STATE_PREFIX + FULL_STATE_ROOT, None))
+        for t in target.topics:
+            for f in [t.review_file, t.translation_file, *sorted(t.build.glob("*.json")), *sorted(t.build.glob("*.csv")), *sorted(t.out.glob("*.json"))]:
+                if f.is_file():
+                    entries.append((f, FULL_STATE_PREFIX + f.relative_to(target.root).as_posix(), t.module))
         theme_dir = target.root / "themes" / "custom"
         if theme_dir.is_dir():
             for f in sorted(theme_dir.rglob("*")):
@@ -318,6 +332,34 @@ def _import(env: Envelope, target: Target, source: str, dry_run: bool, full: boo
                 rel = str(f.relative_to(base))
                 with prog.topic(rel) as tp:
                     tp.update(0, f"placing {rel}")
+                    if rel.startswith(FULL_STATE_PREFIX):
+                        inner = rel[len(FULL_STATE_PREFIX):]
+                        r = TopicResult(rel, rel)
+                        if not full:
+                            r.ok = False
+                            r.extra["action"] = "refused"
+                            r.diagnostics.append(Diagnostic("XFER_OUT_OF_SCOPE", f"{rel} is --full pipeline state; pass --full to import it.", file=rel))
+                            env.results.append(r)
+                        elif inner == FULL_STATE_ROOT:
+                            _place(env, rel, f, str(target.root / inner), dry_run)
+                        elif STATE_PATH_RE.fullmatch(inner):
+                            module, local = inner.split("/", 1)
+                            if not _in_scope(target, module, local):
+                                r.ok = False
+                                r.extra["action"] = "refused"
+                                r.diagnostics.append(Diagnostic("XFER_OUT_OF_SCOPE", f"{inner} is outside {target.rel}, where this import was aimed.", file=rel))
+                                env.results.append(r)
+                            else:
+                                action, touched = _place(env, rel, f, str(target.root / inner), dry_run)
+                                if touched:
+                                    touched_modules.add(module)
+                        else:
+                            r.ok = False
+                            r.extra["action"] = "unrecognized"
+                            r.diagnostics.append(Diagnostic("XFER_UNRECOGNIZED", f"'{rel}' is not a known pipeline state file; it was not placed.", file=rel))
+                            env.results.append(r)
+                        tp.update(100, "placed")
+                        continue
                     if rel == FULL_PROGRAMME_TOML or rel.startswith(FULL_THEME_PREFIX):
                         if not full:
                             r = TopicResult(rel, rel)
@@ -378,4 +420,7 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
     else:
         if args.full and target.level != "root":
             raise Fail("USAGE", "--full only makes sense for the whole programme.", hint="Run it against the programme root, not a module/unit/topic path.")
-        _import(env, target, args.source, args.dry_run, args.full, bootstrapped=getattr(args, BOOTSTRAPPED_ATTR, False))
+        # A root with no module folders has no real configuration to protect (it is the shipped
+        # placeholder, or one --init just made), so a --full restore may replace its programme.toml.
+        empty_root = args.full and not target.modules
+        _import(env, target, args.source, args.dry_run, args.full, bootstrapped=empty_root or getattr(args, BOOTSTRAPPED_ATTR, False))

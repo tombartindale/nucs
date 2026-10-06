@@ -264,3 +264,56 @@ def test_full_round_trip_is_unchanged(tree, capsys):
     assert code == 0, env["diagnostics"]
     actions = {r["action"] for r in env["results"]}
     assert actions == {"unchanged"}
+
+
+def test_full_round_trip_carries_pipeline_state(tree, tmp_path, capsys):
+    topic = tree / "KV7015" / "U01" / "T01"
+    (topic / "build").mkdir(parents=True)
+    (topic / "out").mkdir(parents=True)
+    (topic / "review.json").write_text('{"decisions": []}')
+    (topic / "translation.json").write_text('{"status": "sent"}')
+    (topic / "build" / "validate.json").write_text('{"ok": true}')
+    (topic / "build" / "cues.csv").write_text("slide,time\n1,0\n")
+    (topic / "out" / "manifest.json").write_text('{"files": []}')
+    (tree / "sync-state.json").write_text('{"files": {}}')
+    code, env = bcn(capsys, "transfer", str(tree), "--export", "--full")
+    assert code == 0, env["diagnostics"]
+    zpath = tree / env["zip"]
+    names = _names(zpath)
+    assert "state/KV7015/U01/T01/review.json" in names
+    assert "state/KV7015/U01/T01/build/validate.json" in names
+    assert "state/sync-state.json" in names
+
+    root = tmp_path / "fresh"
+    code, env = bcn(capsys, "transfer", str(root), "--import", str(zpath), "--full", "--init")
+    assert code == 0, env["diagnostics"]
+    assert (root / "KV7015" / "U01" / "T01" / "review.json").read_text() == '{"decisions": []}'
+    assert (root / "KV7015" / "U01" / "T01" / "translation.json").read_text() == '{"status": "sent"}'
+    assert (root / "KV7015" / "U01" / "T01" / "build" / "validate.json").is_file()
+    assert (root / "KV7015" / "U01" / "T01" / "build" / "cues.csv").is_file()
+    assert (root / "sync-state.json").read_text() == '{"files": {}}'
+
+
+def test_state_import_refuses_unknown_paths_and_needs_full(tree, tmp_path, capsys):
+    zpath = tmp_path / "bad.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("state/KV7015/U01/T01/build/validate.json", "{}")
+        z.writestr("state/KV7015/../../escape.json", "{}")
+    code, env = bcn(capsys, "transfer", str(tree), "--import", str(zpath))
+    assert code == 1
+    actions = {r["topic"]: r["action"] for r in env["results"]}
+    assert actions["state/KV7015/U01/T01/build/validate.json"] == "refused"
+    assert not (tree / "KV7015" / "U01" / "T01" / "build" / "validate.json").exists()
+    assert not (tree.parent / "escape.json").exists()
+
+
+def test_full_restore_replaces_placeholder_programme_toml_on_empty_root(tmp_path, capsys):
+    root = tmp_path / "shipped-default"
+    root.mkdir()
+    (root / "programme.toml").write_text('[programme]\nname = "New Beacon programme"\ntheme = "default"\n')
+    zpath = tmp_path / "full.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("programme.toml", '[programme]\nname = "restored"\n')
+    code, env = bcn(capsys, "transfer", str(root), "--import", str(zpath), "--full")
+    assert code == 0, env["diagnostics"]
+    assert (root / "programme.toml").read_text() == '[programme]\nname = "restored"\n'
