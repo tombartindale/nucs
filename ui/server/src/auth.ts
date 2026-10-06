@@ -80,14 +80,15 @@ export class Auth {
     await this.send(normalised, link);
   }
 
-  /** Redeems a one-time login token for a session token, or null if it is missing, used,
-   *  expired, or the address has since fallen off the allowlist. */
+  /** Redeems a login token for a session token, or null if it is missing, expired, or the
+   *  address has since fallen off the allowlist. A token can be used more than once within
+   *  its lifetime: email link scanners fetch the link before the user clicks it, and a
+   *  one-use token would already be spent by then. */
   async verify(token: string): Promise<string | null> {
-    const res = await this.db.pool.query<{ email: string; expires: string; used: boolean }>(
-      'SELECT email, expires, used FROM login_tokens WHERE token=$1', [token]);
+    const res = await this.db.pool.query<{ email: string; expires: string }>(
+      'SELECT email, expires FROM login_tokens WHERE token=$1', [token]);
     const row = res.rows[0];
-    if (!row || row.used || new Date(row.expires).getTime() < Date.now() || !isAllowed(row.email, this.opts.allowedDomains)) return null;
-    await this.db.pool.query('UPDATE login_tokens SET used=true WHERE token=$1', [token]);
+    if (!row || new Date(row.expires).getTime() < Date.now() || !isAllowed(row.email, this.opts.allowedDomains)) return null;
     const sessionToken = randomUUID();
     await this.db.pool.query('INSERT INTO sessions(token, email, created, expires) VALUES($1, $2, $3, $4)',
       [sessionToken, row.email, now(), now(new Date(Date.now() + SESSION_TTL_MS))]);
@@ -109,7 +110,7 @@ export class Auth {
 
   private async send(email: string, link: string): Promise<void> {
     await this.mailer.send(email, 'Sign in to NUCS',
-      `Sign in to NUCS: ${link}\n\nThis link expires in 15 minutes and can only be used once.`);
+      `Sign in to NUCS: ${link}\n\nThis link expires in 15 minutes.`);
   }
 }
 
