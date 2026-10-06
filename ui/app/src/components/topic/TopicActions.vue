@@ -2,8 +2,7 @@
 // The topic's pipeline in both languages: English steps on one row, Mandarin on the row below,
 // branching off between English cues and subtitles. Each step shows whether bcn says it is done,
 // out of date, failed or not run, with the next step marked. Clicking a step runs it in its
-// row's language. Tools that are not steps sit below; Intro/outro carries its own language
-// switch next to it, since that is the one tool here that needs to be told which to make.
+// row's language.
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { StepState } from '@beacon/shared';
 import { fmtAgo, LANG_NAME, STEP_HELP } from '@/format';
@@ -12,20 +11,26 @@ import { TOPIC } from './context';
 
 type Item =
   | { kind: 'step'; name: string; optional?: boolean }
-  | { kind: 'wait'; name: string; label: string; icon: string };
+  | { kind: 'wait'; name: string; label: string; icon: string }
+  | { kind: 'bumpers' };
 
 // The order bcn works through (tooling/bcn/state.py). The waits are what a person does
 // between steps: the editor delivers the recording, the translator returns the Mandarin.
+// bumpers is its own kind, not a 'step': bcn tracks it as a tool with its own artifacts
+// (intro/outro card + video), not a pipeline step with a StepState, so it needs compose's
+// --no-bumpers to have something to draw from before compose runs.
 const FLOW: Record<'en' | 'zh', Item[]> = {
   en: [
     { kind: 'step', name: 'validate' }, { kind: 'step', name: 'render' },
     { kind: 'wait', name: 'recording', label: 'Recording', icon: 'videocam' },
     { kind: 'step', name: 'cues' }, { kind: 'step', name: 'subtitles' },
+    { kind: 'bumpers' },
     { kind: 'step', name: 'compose', optional: true }, { kind: 'step', name: 'package' },
   ],
   zh: [
     { kind: 'wait', name: 'translation', label: 'Translation', icon: 'translate' },
     { kind: 'step', name: 'validate' }, { kind: 'step', name: 'subtitles' }, { kind: 'step', name: 'render' },
+    { kind: 'bumpers' },
     { kind: 'step', name: 'compose', optional: true }, { kind: 'step', name: 'package' },
   ],
 };
@@ -42,7 +47,6 @@ const t = inject(TOPIC)!;
 const beacon = useBeacon();
 const force = ref(false);
 const noBumpers = ref(true);
-const bumpersLang = ref<'en' | 'zh'>('en');  // which language Intro/outro makes
 
 const stateOf = (lang: 'en' | 'zh') => t.status.value?.[lang] ?? null;
 
@@ -59,6 +63,26 @@ function view(item: Item, lang: 'en' | 'zh') {
       : reached ? 'arrived' : item.name === 'translation' ? 'after English subtitles' : 'not yet';
     return { cls: ['wait', { current }], icon: reached && !current ? 'check_circle' : item.icon, color: current ? 'white' : reached ? 'positive' : undefined,
       cap, tip: WAIT_HELP[item.name] };
+  }
+  if (item.kind === 'bumpers') {
+    // Not a pipeline step on the backend (no StepState): derived from the bumper_card/bumper
+    // artifacts themselves, the same data SlidesPane reads to show the intro/outro thumbnails.
+    // Reads topic.zh.md for the Mandarin title (bumpers.py: require_input(t, src, lang)), so
+    // it is gated the same as the real Mandarin steps until translation has been returned.
+    const waitingForTranslation = lang === 'zh' && !!s && s.stage_index < s.stages.indexOf('returned');
+    const arts = (t.status.value?.artifacts || []).filter((a) => a.kind.startsWith('bumper') && a.lang === lang);
+    const made = arts.filter((a) => a.exists);
+    const status = !made.length ? 'todo' : made.some((a) => a.stale) ? 'stale' : 'done';
+    const ICON = { done: 'check_circle', stale: 'update', todo: 'radio_button_unchecked' } as const;
+    const COLOR = { done: 'positive', stale: 'warning', todo: 'grey-6' } as const;
+    const CAP = { done: 'done', stale: 'out of date', todo: 'optional' };
+    return {
+      cls: ['step-btn', status, { optional: true, disabled: waitingForTranslation }],
+      icon: ICON[status], color: COLOR[status], cap: waitingForTranslation ? 'needs translation' : CAP[status],
+      disable: waitingForTranslation,
+      tip: `${lang === 'zh' ? 'Mandarin. ' : ''}${STEP_HELP.bumpers} Needed before compose draws on them; compose can also run with --no-bumpers.`
+        + (waitingForTranslation ? ' Needs topic.zh.md back from the translator first.' : ''),
+    };
   }
   const st: StepState | undefined = s?.steps?.[item.name];
   const current = next === item.name;
@@ -137,8 +161,8 @@ async function run(step: string, lang: 'en' | 'zh') {
 }
 
 // Intro/outro makes files the Slides pane links to, so it waits for them and says where they are.
-async function bumpers() {
-  const job = await beacon.runJob('bumpers', [t.rel], { lang: bumpersLang.value, ...(force.value ? { force: true } : {}) });
+async function bumpers(lang: 'en' | 'zh') {
+  const job = await beacon.runJob('bumpers', [t.rel], { lang, ...(force.value ? { force: true } : {}) });
   const result = await beacon.awaitJob(job.id);
   await t.reload();
   if (result.state === 'done') beacon.toast('Intro and outro ready: see the top of the Slides pane.');
@@ -161,13 +185,19 @@ async function bumpers() {
               {{ r.lang.toUpperCase() }}
               <q-icon v-if="r.complete" name="task_alt" color="positive" size="14px"><q-tooltip>{{ LANG_NAME[r.lang] }} complete</q-tooltip></q-icon>
             </div>
-            <template v-for="({ item, v }, i) in r.items" :key="r.lang + item.name">
+            <template v-for="({ item, v }, i) in r.items" :key="r.lang + (item.kind === 'bumpers' ? 'bumpers' : item.name)">
               <q-icon v-if="i > 0" name="arrow_forward" size="18px" class="arrow" />
               <div v-if="item.kind === 'wait'" :class="['step', ...v.cls]" :data-step="`${r.lang}-${item.name}`">
                 <div class="name"><q-icon :name="v.icon" :color="v.color" size="16px" />{{ item.label }}</div>
                 <div class="cap">{{ v.cap }}</div>
                 <q-tooltip max-width="320px">{{ v.tip }}</q-tooltip>
               </div>
+              <q-btn v-else-if="item.kind === 'bumpers'" no-caps flat :class="['step', ...v.cls]" :data-step="`${r.lang}-bumpers`" :disable="v.disable"
+                :aria-label="`Make intro/outro (${LANG_NAME[r.lang]})`" @click="bumpers(r.lang)">
+                <div class="name"><q-icon :name="v.icon" :color="v.color" size="16px" />bumpers</div>
+                <div class="cap">{{ v.cap }}</div>
+                <q-tooltip max-width="340px">{{ v.tip }}</q-tooltip>
+              </q-btn>
               <q-btn v-else no-caps flat :class="['step', ...v.cls]" :data-step="`${r.lang}-${item.name}`" :disable="v.disable"
                 :aria-label="`Run ${item.name} (${LANG_NAME[r.lang]})`" @click="run(item.name, r.lang)">
                 <div class="name"><q-icon :name="v.icon" :color="v.color" size="16px" />{{ item.name }}</div>
@@ -204,15 +234,6 @@ async function bumpers() {
         <q-tooltip max-width="320px">Leave the intro and outro off the draft video made by compose. Quicker, and the player's times then match the cue sheet exactly. Delivered files are unaffected.</q-tooltip>
       </q-checkbox>
       <q-space />
-      <span class="row items-center gap-xs">
-        <q-btn-toggle v-model="bumpersLang" dense no-caps unelevated size="sm" toggle-color="primary"
-          :options="[{ label: 'EN', value: 'en' }, { label: 'ZH', value: 'zh' }]">
-          <q-tooltip>Which language Intro/outro makes next</q-tooltip>
-        </q-btn-toggle>
-        <q-btn flat dense no-caps icon="movie" label="Intro/outro" @click="bumpers">
-          <q-tooltip max-width="320px">{{ STEP_HELP.bumpers }} In {{ LANG_NAME[bumpersLang] }}, chosen just to its left. They appear at the top and bottom of the Slides pane.</q-tooltip>
-        </q-btn>
-      </span>
       <q-btn flat dense no-caps icon="slideshow" label="Teleprompter" :href="`#/prompt/${t.id}`" target="_blank">
         <q-tooltip max-width="320px">Open the narration as a full-screen teleprompter in a new tab. Space plays and pauses; the arrow keys change speed and jump between slides.</q-tooltip>
       </q-btn>

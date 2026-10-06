@@ -5,11 +5,10 @@ import { useBeacon } from '@/stores/beacon';
 const beacon = useBeacon();
 const NAV = [
   { to: '/', label: 'Programme', icon: 'dashboard' },
-  { to: '/diagnostics', label: 'Diagnostics', icon: 'rule' },
+  { to: '/diagnostics', label: 'Verification', icon: 'rule' },
   { to: '/jobs', label: 'Jobs', icon: 'play_circle' },
   { to: '/translation', label: 'Translation', icon: 'translate' },
   { to: '/transfer', label: 'Transfer', icon: 'drive_file_move' },
-  { to: '/settings', label: 'Settings', icon: 'settings' },
 ];
 const LIVE = {
   connecting: { color: 'grey', label: 'connecting' },
@@ -31,16 +30,23 @@ const banners = computed(() => {
   <q-layout view="hHh lpR fFf">
     <q-header bordered class="bg-primary text-white">
       <q-toolbar>
-        <q-btn flat no-caps to="/" class="text-weight-bold text-subtitle1 q-mr-md" label="NUCS" />
-        <q-tabs dense no-caps inline-label shrink stretch class="col" active-color="white" indicator-color="white">
+        <q-btn flat no-caps to="/" class="text-weight-bold text-subtitle1 q-mr-md brand-btn">
+          <span class="brand-full">NU Content Studio</span>
+          <span class="brand-short">NUCS</span>
+        </q-btn>
+        <q-tabs dense no-caps inline-label shrink stretch active-color="white" indicator-color="white">
           <q-route-tab v-for="n in NAV" :key="n.to" :to="n.to" :label="n.label" :icon="n.icon">
             <q-badge v-if="n.to === '/jobs' && beacon.activeJobs" color="orange" floating>{{ beacon.activeJobs }}</q-badge>
           </q-route-tab>
         </q-tabs>
+        <q-space />
         <q-chip dense square :color="LIVE[beacon.live].color" text-color="white" icon="circle" class="live-chip">
           {{ LIVE[beacon.live].label }}
           <q-tooltip>Connection to the backend</q-tooltip>
         </q-chip>
+        <q-btn flat round dense icon="settings" to="/settings" aria-label="Settings">
+          <q-tooltip>Settings</q-tooltip>
+        </q-btn>
       </q-toolbar>
     </q-header>
 
@@ -60,5 +66,11 @@ const banners = computed(() => {
 </template>
 
 <style scoped>
+.brand-short { display: inline; }
+.brand-full { display: none; }
+@media (min-width: 1024px) {
+  .brand-short { display: none; }
+  .brand-full { display: inline; }
+}
 .live-chip :deep(.q-icon) { font-size: 10px; }
 </style>

@@ -83,7 +83,7 @@ function correct(d: Diagnostic) {
 
 <template>
   <q-page padding class="page-max">
-    <PageHeader title="Diagnostics"
+    <PageHeader title="Verification"
       :sub="env ? `${env.counts.error} errors · ${env.counts.warn} warnings · ${env.counts.info} info, from current step results` : 'Loading…'" />
     <q-banner v-if="error" class="bg-negative text-white q-mb-md" rounded>{{ error }}</q-banner>
     <q-tabs v-model="tab" dense no-caps align="left" class="q-mb-md" active-color="primary" indicator-color="primary">
