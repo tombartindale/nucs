@@ -62,13 +62,15 @@ STATE_PATH_RE = re.compile(r"[A-Z]{2}\d{4}/U\d{2}/T\d{2}/(?:review\.json|transla
 def add_args(p: argparse.ArgumentParser) -> None:
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--export", action="store_true", help="export the files beneath the path")
-    g.add_argument("--import", dest="source", metavar="DIR_OR_ZIP", help="import files from a folder or .zip")
+    g.add_argument("--import", dest="source", metavar="DIR_OR_ZIP_OR_MEDIA", help="import files from a folder, a .zip, or a single .mp4/.srt")
     p.add_argument("--media", action="store_true", help="export: also include assets/ and the edited video/subtitles")
     p.add_argument("--nested", action="store_true", help="export: use the pipeline's own U01/T01/topic.md layout, not the flat OneDrive names")
     p.add_argument("--full", action="store_true",
                    help="root scope only: a disaster-recovery backup, not just content -- implies --media, and also "
                         "carries programme.toml and themes/custom/")
     p.add_argument("--dry-run", action="store_true", help="import: report what would happen, write nothing")
+    p.add_argument("--replace", action="store_true",
+                   help="import: overwrite a differing edit/ video or subtitle (a re-cut). Every other file is still never overwritten.")
     p.add_argument("--init", action="store_true",
                    help="import --full: create the root (with a placeholder programme.toml) if it does not exist yet, "
                         "so a disaster-recovery restore has a root to resolve before --full's own programme.toml overwrites it")
@@ -291,14 +293,20 @@ def _place(env: Envelope, rel: str, f: Path, dest: str, dry_run: bool, overwrite
     return r.extra["action"], True
 
 
-def _import(env: Envelope, target: Target, source: str, dry_run: bool, full: bool, bootstrapped: bool = False) -> None:
+MEDIA_SUFFIXES = (".mp4", ".srt")
+
+
+def _import(env: Envelope, target: Target, source: str, dry_run: bool, full: bool, bootstrapped: bool = False, replace: bool = False) -> None:
     src = Path(source).expanduser()
     if not src.exists():
         raise Fail("FS_MISSING", f"{source} does not exist.")
     tmp = None
     touched_modules: set[str] = set()
+    single = src if src.is_file() and src.suffix.lower() in MEDIA_SUFFIXES else None
     try:
-        if src.is_file() and src.suffix.lower() == ".zip":
+        if single is not None:
+            base = src.parent
+        elif src.is_file() and src.suffix.lower() == ".zip":
             tmp = Path(tempfile.mkdtemp(prefix=".transfer-import-", dir=target.root))
             with zipfile.ZipFile(src) as z:
                 members = [m for m in z.namelist() if not m.endswith("/") and not is_noise(Path(m).name) and "__MACOSX" not in m]
@@ -320,9 +328,12 @@ def _import(env: Envelope, target: Target, source: str, dry_run: bool, full: boo
         elif src.is_dir():
             base = src
         else:
-            raise Fail("USAGE", f"{source} must be a folder or a .zip.")
+            raise Fail("USAGE", f"{source} must be a folder, a .zip, or a single .mp4/.srt file.")
 
-        files = [f for f in sorted(base.rglob("*")) if f.is_file() and not is_noise(f.name) and "__MACOSX" not in f.parts and f.name != "manifest.json"]
+        if single is not None:
+            files = [single]
+        else:
+            files = [f for f in sorted(base.rglob("*")) if f.is_file() and not is_noise(f.name) and "__MACOSX" not in f.parts and f.name != "manifest.json"]
         with Progress("transfer", len(files)) as prog:
             for f in files:
                 if CANCEL.is_set():
@@ -391,7 +402,8 @@ def _import(env: Envelope, target: Target, source: str, dry_run: bool, full: boo
                         env.results.append(r)
                         tp.update(100, "refused")
                         continue
-                    action, touched = _place(env, rel, f, str(target.root / module / local_rel), dry_run)
+                    replaceable = replace and "/edit/" in f"/{local_rel}"
+                    action, touched = _place(env, rel, f, str(target.root / module / local_rel), dry_run, overwrite=replaceable)
                     if touched:
                         touched_modules.add(module)
                     tp.update(100, action)
@@ -423,4 +435,5 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
         # A root with no module folders has no real configuration to protect (it is the shipped
         # placeholder, or one --init just made), so a --full restore may replace its programme.toml.
         empty_root = args.full and not target.modules
-        _import(env, target, args.source, args.dry_run, args.full, bootstrapped=empty_root or getattr(args, BOOTSTRAPPED_ATTR, False))
+        _import(env, target, args.source, args.dry_run, args.full,
+                bootstrapped=empty_root or getattr(args, BOOTSTRAPPED_ATTR, False), replace=args.replace)

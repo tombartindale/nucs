@@ -9,6 +9,7 @@ import { confirm } from '@/composables/confirm';
 import { fmtTC, fmtTime } from '@/format';
 import { useBeacon } from '@/stores/beacon';
 import { TOPIC } from './context';
+import MediaUpload from './MediaUpload.vue';
 
 const props = defineProps<{ startAt: number | null }>();
 const t = inject(TOPIC)!;
@@ -123,6 +124,7 @@ onBeforeUnmount(() => {
       <q-space />
       <span class="text-caption text-grey-7">Cue markers from the cue sheet</span>
     </q-card-section>
+    <MediaUpload />
     <q-card-section v-if="!media?.master" class="text-grey-7">No edited video yet (edit/master.mp4).</q-card-section>
     <q-card-section v-else>
       <div class="player-main">

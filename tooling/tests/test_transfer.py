@@ -317,3 +317,68 @@ def test_full_restore_replaces_placeholder_programme_toml_on_empty_root(tmp_path
     code, env = bcn(capsys, "transfer", str(root), "--import", str(zpath), "--full")
     assert code == 0, env["diagnostics"]
     assert (root / "programme.toml").read_text() == '[programme]\nname = "restored"\n'
+
+
+def _topic_dir(tree: Path) -> Path:
+    return tree / "KV7015" / "U01" / "T01"
+
+
+def test_single_video_file_imports_into_its_topic(tree, tmp_path, capsys):
+    staged = tmp_path / "KV7015-U01-T01.mp4"
+    staged.write_bytes(b"first cut")
+    code, env = bcn(capsys, "transfer", str(_topic_dir(tree)), "--import", str(staged))
+    assert code == 0, env["diagnostics"]
+    assert (_topic_dir(tree) / "edit" / "master.mp4").read_bytes() == b"first cut"
+
+
+def test_single_subtitle_files_map_to_english_and_mandarin(tree, tmp_path, capsys):
+    en = tmp_path / "KV7015-U01-T01.srt"
+    en.write_text("1\n00:00:00,000 --> 00:00:02,000\nHello.\n")
+    zh = tmp_path / "KV7015-U01-T01.zh.srt"
+    zh.write_text("1\n00:00:00,000 --> 00:00:02,000\n你好。\n")
+    for path in (en, zh):
+        code, env = bcn(capsys, "transfer", str(_topic_dir(tree)), "--import", str(path))
+        assert code == 0, env["diagnostics"]
+    assert (_topic_dir(tree) / "edit" / "master.srt").read_text().startswith("1\n")
+    assert "你好" in (_topic_dir(tree) / "edit" / "master.zh.srt").read_text()
+
+
+def test_differing_video_is_refused_without_replace(tree, tmp_path, capsys):
+    (_topic_dir(tree) / "edit").mkdir()
+    (_topic_dir(tree) / "edit" / "master.mp4").write_bytes(b"first cut")
+    staged = tmp_path / "KV7015-U01-T01.mp4"
+    staged.write_bytes(b"re-cut")
+    code, env = bcn(capsys, "transfer", str(_topic_dir(tree)), "--import", str(staged))
+    assert code == 1
+    assert next(r for r in env["results"] if r["topic"] == "KV7015-U01-T01.mp4")["action"] == "exists_differs"
+    assert (_topic_dir(tree) / "edit" / "master.mp4").read_bytes() == b"first cut"
+
+
+def test_replace_overwrites_a_differing_video(tree, tmp_path, capsys):
+    (_topic_dir(tree) / "edit").mkdir()
+    (_topic_dir(tree) / "edit" / "master.mp4").write_bytes(b"first cut")
+    staged = tmp_path / "KV7015-U01-T01.mp4"
+    staged.write_bytes(b"re-cut")
+    code, env = bcn(capsys, "transfer", str(_topic_dir(tree)), "--import", str(staged), "--replace")
+    assert code == 0, env["diagnostics"]
+    assert (_topic_dir(tree) / "edit" / "master.mp4").read_bytes() == b"re-cut"
+
+
+def test_replace_never_overwrites_topic_content(tree, tmp_path, capsys):
+    zpath = tmp_path / "batch.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("KV7015-U01-T01.md", topic_md(say=False))
+    before = (_topic_dir(tree) / "topic.md").read_text()
+    code, env = bcn(capsys, "transfer", str(tree / "KV7015"), "--import", str(zpath), "--replace")
+    assert code == 1
+    assert next(r for r in env["results"] if r["topic"] == "KV7015-U01-T01.md")["action"] == "exists_differs"
+    assert (_topic_dir(tree) / "topic.md").read_text() == before
+
+
+def test_single_file_with_unknown_name_is_not_placed(tree, tmp_path, capsys):
+    staged = tmp_path / "final-cut.mp4"
+    staged.write_bytes(b"x")
+    code, env = bcn(capsys, "transfer", str(_topic_dir(tree)), "--import", str(staged))
+    assert code == 1
+    assert next(r for r in env["results"] if r["topic"] == "final-cut.mp4")["action"] == "unrecognized"
+    assert not (_topic_dir(tree) / "edit").exists()

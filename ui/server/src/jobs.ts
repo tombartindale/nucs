@@ -19,7 +19,7 @@ export const STALL_MS = 10_000;
 // What the browser may ask for. Anything else is refused.
 export const COMMANDS = new Set(['validate', 'render', 'script', 'bumpers', 'cues', 'subtitles', 'compose', 'package', 'qa',
   'review', 'intake', 'translation', 'transfer', 'sync', 'ack', 'edit', 'qti', 'coursemap', 'readinglist']);
-export const FLAG_ARGS = ['force', 'no_bumpers', 'dump_narration', 'accept', 'clear', 'dry_run', 'export', 'pull', 'push', 'media', 'nested', 'full', 'init'];
+export const FLAG_ARGS = ['force', 'no_bumpers', 'dump_narration', 'accept', 'clear', 'dry_run', 'export', 'pull', 'push', 'media', 'nested', 'full', 'init', 'replace'];
 export const VALUE_ARGS: Record<string, RegExp> = {
   lang: /^(en|zh)$/,
   theme: /^[A-Za-z0-9_-]{1,40}$/,
