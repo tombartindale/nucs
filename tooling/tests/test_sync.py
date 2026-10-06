@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from bcn.cli import main
-from bcn.sync import local_to_remote, remote_to_local
+from bcn.sync import PULL_ONLY, local_to_remote, remote_to_local
 
 from .conftest import age, topic_md
 
@@ -26,7 +26,16 @@ def test_name_mapping():
     assert remote_to_local("KV7016", "Module_Specification_-_KV7016.docx") is None
     assert remote_to_local("KV7016", "KV7099-U01-T01.md") is None  # another module's file
     assert local_to_remote("KV7016", "U01/T01/topic.md") == "KV7016-U01-T01.md"
-    assert local_to_remote("KV7016", "U01/T01/edit/master.mp4") is None  # media is never pushed
+    # Media has a flat name too (bcn transfer --media uses it to export files that were
+    # never pulled from anywhere), but bcn sync --push never actually writes it back —
+    # that is PULL_ONLY below, a separate guard from the naming table.
+    assert local_to_remote("KV7016", "U01/T01/edit/master.mp4") == "KV7016-U01-T01.mp4"
+    assert remote_to_local("KV7016", "KV7016-U01-T01.mp4") == "U01/T01/edit/master.mp4"
+
+
+def test_media_is_pull_only():
+    assert PULL_ONLY.search("/U01/T01/edit/master.mp4")
+    assert not PULL_ONLY.search("/U01/T01/topic.md")
 
 
 def _remote(tmp_path: Path) -> Path:

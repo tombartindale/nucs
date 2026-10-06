@@ -60,6 +60,9 @@ NESTED_RULES: list[tuple[str, str]] = [
 ]
 
 # Local path under the module -> flat remote name, for files that have never been pulled.
+# Includes names for edit/master.* (mirroring FLAT_RULES' matching entries) even though
+# bcn sync --push never writes them back (PULL_ONLY below) -- bcn transfer --media is the
+# one real consumer of these, exporting media that was never pulled from anywhere.
 PUSH_NAMES: list[tuple[str, str]] = [
     (r"course-map\.md", "{m}-course-map.md"),
     (r"assets\.md", "{m}-asset-requests.md"),
@@ -69,9 +72,13 @@ PUSH_NAMES: list[tuple[str, str]] = [
     (r"(?P<u>U\d\d)/(?P<t>T\d\d)/topic\.md", "{m}-{u}-{t}.md"),
     (r"(?P<u>U\d\d)/(?P<t>T\d\d)/topic\.zh\.md", "{m}-{u}-{t}.zh.md"),
     (r"(?P<u>U\d\d)/(?P<t>T\d\d)/review\.json", "{m}-{u}-{t}.review.json"),
+    (r"(?P<u>U\d\d)/(?P<t>T\d\d)/edit/master\.mp4", "{m}-{u}-{t}.mp4"),
+    (r"(?P<u>U\d\d)/(?P<t>T\d\d)/edit/master\.srt", "{m}-{u}-{t}.srt"),
+    (r"(?P<u>U\d\d)/(?P<t>T\d\d)/edit/master\.zh\.srt", "{m}-{u}-{t}.zh.srt"),
     (r"(?P<u>U\d\d)/(?P<t>T\d\d)/assets/(?P<f>[^/]+)", "{m}-{u}-{t}-assets/{f}"),
 ]
-# Media comes from the editor and the translator, not from us: pulled, never pushed back.
+# Media comes from the editor and the translator, not from us: pulled, never pushed back
+# (bcn sync --push only; PUSH_NAMES above may still name these files for other consumers).
 PULL_ONLY = re.compile(r"/edit/")
 
 

@@ -32,6 +32,9 @@ const lastImport = shallowRef<{ item: TranslationItem; env: BcnTransferEnvelope 
 const busy = ref(false);
 const over = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
+const fullBusy = ref(false);
+const fullOver = ref(false);
+const fullFileInput = ref<HTMLInputElement | null>(null);
 
 async function refresh() {
   try { lists.value = await api<TransferListResponse>('/api/transfer'); } catch (e) { beacon.toast((e as Error).message, true); }
@@ -72,9 +75,43 @@ async function doImport(item: TranslationItem) {
   busy.value = false;
 }
 
+// Full backup: everything bcn transfer --full covers (every module, media, programme.toml,
+// the custom theme) in one zip. A separate flow from the scoped export/import above —
+// infrequent, can be large and slow, and is for disaster recovery, not routine handover.
+async function exportFull() {
+  fullBusy.value = true;
+  try {
+    const job = await beacon.runJob('transfer', ['.'], { export: true, full: true });
+    const done = await beacon.awaitJob(job.id);
+    const env = done.envelopes?.[0];
+    if (env && !env.ok) beacon.toast(env.diagnostics.filter((d) => d.level === 'error').map((d) => d.message).join(' ') || 'Full backup failed.', true);
+    else beacon.toast('Full backup ready: see the list below.');
+  } finally {
+    fullBusy.value = false;
+    void refresh();
+  }
+}
+
+async function uploadFull(file: File | undefined) {
+  if (!file) return;
+  fullBusy.value = true;
+  try {
+    const { path } = await api<{ path: string }>(`/api/transfer/upload?name=${encodeURIComponent(file.name)}`, { raw: await file.arrayBuffer() });
+    const job = await api<JobSummary>('/api/transfer/import', { body: { source: path, full: true } });
+    beacon.trackJob(job);
+    const done = await beacon.awaitJob(job.id);
+    lastImport.value = { item: { name: file.name, path, kind: 'zip', bytes: file.size, mtime: new Date().toISOString() },
+      env: done.envelopes?.[0] as unknown as BcnTransferEnvelope | undefined };
+  } catch (e) { beacon.toast((e as Error).message, true); }
+  fullBusy.value = false;
+}
+function onDropFull(e: DragEvent) { fullOver.value = false; void uploadFull(e.dataTransfer?.files[0]); }
+
 const scopes = computed(() => Object.entries(beacon.status?.summary.modules || {}).sort()
   .flatMap(([m, info]) => [m, ...info.units.map((u) => `${m}/${u}`)]));
-const zips = computed(() => lists.value.exports.filter((x) => x.kind === 'zip'));
+const isFull = (name: string) => name.includes('-programme-full');
+const zips = computed(() => lists.value.exports.filter((x) => x.kind === 'zip' && !isFull(x.name)));
+const fullZips = computed(() => lists.value.exports.filter((x) => x.kind === 'zip' && isFull(x.name)));
 </script>
 
 <template>
@@ -140,6 +177,51 @@ const zips = computed(() => lists.value.exports.filter((x) => x.kind === 'zip'))
           </q-list>
           <q-card-section v-if="lastImport.env.validated?.length" class="text-caption text-grey-7">
             Validated: {{ (lastImport.env.validated as Array<{ topic: string; ok: boolean }>).filter((v) => !v.ok).length }} of {{ lastImport.env.validated.length }} topics have problems — see the Diagnostics page.
+          </q-card-section>
+        </q-card>
+      </div>
+    </div>
+
+    <q-separator class="q-my-lg" />
+
+    <div class="text-subtitle1 text-weight-medium q-mb-sm">Full backup</div>
+    <p class="text-caption text-grey-7" style="max-width: 760px">
+      Every module, its media, programme.toml and the custom theme, in one zip — enough to rebuild the whole programme from nothing. This is for
+      disaster recovery, not routine handover: it can take a long time and produce a very large file. Use Export above for day-to-day batches.
+    </p>
+    <div class="row q-col-gutter-md">
+      <div class="col-12 col-md-6 q-gutter-y-md">
+        <q-card flat bordered>
+          <q-card-section class="text-subtitle1 text-weight-medium q-pb-none">Export everything</q-card-section>
+          <q-card-section>
+            <q-btn unelevated color="primary" no-caps label="Export everything" :disable="fullBusy" :loading="fullBusy" @click="exportFull" />
+          </q-card-section>
+        </q-card>
+        <q-card flat bordered>
+          <q-card-section class="text-subtitle1 text-weight-medium q-pb-none">Backups</q-card-section>
+          <q-list v-if="fullZips.length" separator>
+            <q-item v-for="x in fullZips" :key="x.path">
+              <q-item-section><q-item-label class="text-mono">{{ x.name }}</q-item-label>
+                <q-item-label caption>{{ fmtAgo(x.mtime, beacon.now) }} · {{ fmtBytes(x.bytes) }}</q-item-label></q-item-section>
+              <q-item-section side><q-btn outline dense size="sm" no-caps icon="download" label="Download" :href="fileUrl(x.path, null, 'download=1')" /></q-item-section>
+            </q-item>
+          </q-list>
+          <q-card-section v-else class="text-grey-7">No full backups yet.</q-card-section>
+        </q-card>
+      </div>
+      <div class="col-12 col-md-6 q-gutter-y-md">
+        <q-card flat bordered>
+          <q-card-section class="text-subtitle1 text-weight-medium q-pb-none">Restore from a full backup</q-card-section>
+          <q-card-section>
+            <div :class="['dropzone q-pa-lg text-center rounded-borders cursor-pointer', { 'bg-blue-1 text-black': fullOver }]"
+              style="border: 2px dashed var(--line)" @click="fullFileInput?.click()" @dragover.prevent="fullOver = true" @dragleave="fullOver = false" @drop.prevent="onDropFull">
+              <q-icon name="upload_file" size="md" class="q-mb-sm" /><br>
+              Drop a full backup .zip here, or click to choose.
+              <input ref="fullFileInput" type="file" accept=".zip" class="hidden" @change="uploadFull(($event.target as HTMLInputElement).files?.[0])">
+            </div>
+          </q-card-section>
+          <q-card-section class="text-caption text-grey-7">
+            Restores onto the existing programme — programme.toml and anything else that already differs is reported, not overwritten, same as any other import.
           </q-card-section>
         </q-card>
       </div>

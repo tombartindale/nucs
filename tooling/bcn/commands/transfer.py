@@ -12,6 +12,10 @@
           not guessed at. A file that already exists with different content is
           never overwritten: the diff comes back instead, exactly as bcn intake
           already does for topic.md.
+--full    Root-scope only. Everything --media already covers, plus programme.toml
+          and themes/custom/ (if present) at the zip's top level, so the result is
+          enough to rebuild the whole programme on a fresh server: a disaster-
+          recovery backup, not just a content handover.
 
 This exists for the same handover bcn sync used to do against a live OneDrive
 folder, but as a one-time transfer with no persistent synced state: a content
@@ -23,13 +27,16 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import difflib
+import filecmp
+import json
 import shutil
 import tempfile
 import zipfile
 from pathlib import Path
 
 from .. import fsutil
-from ..envelope import Diagnostic, Envelope, Fail, TopicResult, sha256_file, utcnow
+from ..envelope import Cancelled, Diagnostic, Envelope, Fail, TopicResult, sha256_file, utcnow
+from ..progress import CANCEL, Progress
 from ..runner import run_topics
 from ..sync import local_to_remote, remote_to_local
 from ..tree import Target, is_noise
@@ -38,6 +45,12 @@ from . import validate as validate_cmd
 
 HELP = "export or import a whole module/unit as a single zip, no live shared folder needed"
 
+# --full's two extras, read/written at the zip's top level rather than under a module —
+# never collide with local_to_remote()'s module-prefixed flat names (those are always
+# "XX0000-..."), or with a real nested module subfolder (always exactly 6 characters).
+FULL_PROGRAMME_TOML = "programme.toml"
+FULL_THEME_PREFIX = "themes/custom/"
+
 
 def add_args(p: argparse.ArgumentParser) -> None:
     g = p.add_mutually_exclusive_group(required=True)
@@ -45,7 +58,40 @@ def add_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--import", dest="source", metavar="DIR_OR_ZIP", help="import files from a folder or .zip")
     p.add_argument("--media", action="store_true", help="export: also include assets/ and the edited video/subtitles")
     p.add_argument("--nested", action="store_true", help="export: use the pipeline's own U01/T01/topic.md layout, not the flat OneDrive names")
+    p.add_argument("--full", action="store_true",
+                   help="root scope only: a disaster-recovery backup, not just content -- implies --media, and also "
+                        "carries programme.toml and themes/custom/")
     p.add_argument("--dry-run", action="store_true", help="import: report what would happen, write nothing")
+    p.add_argument("--init", action="store_true",
+                   help="import --full: create the root (with a placeholder programme.toml) if it does not exist yet, "
+                        "so a disaster-recovery restore has a root to resolve before --full's own programme.toml overwrites it")
+
+
+# prepare() sets this on args when it actually bootstraps a placeholder root, so _import
+# (same process, same args object) knows to let --full's own programme.toml overwrite that
+# placeholder unconditionally rather than treating it as a real, protect-worthy conflict.
+BOOTSTRAPPED_ATTR = "_transfer_bootstrapped"
+
+
+def prepare(args: argparse.Namespace) -> None:
+    """Runs before the path is resolved, so --init can create the root for a from-scratch
+    --full restore — resolve()/find_root() need a programme.toml to find the root at all,
+    the same bootstrap problem bcn sync --init solves for its own first-time case."""
+    setattr(args, BOOTSTRAPPED_ATTR, False)
+    if not args.init:
+        return
+    if not args.full or args.export:
+        raise Fail("USAGE", "--init only makes sense with --import --full.")
+    root = Path(args.path).expanduser()
+    if (root / "programme.toml").is_file():
+        return
+    if root.exists() and any(root.iterdir()):
+        raise Fail("USAGE", f"{root} exists and is not empty; --init only creates a new, empty programme root.")
+    root.mkdir(parents=True, exist_ok=True)
+    # Placeholder only: --full's own programme.toml in the zip overwrites this immediately
+    # (it is read before any file is compared, so nothing else looks at it in between).
+    (root / "programme.toml").write_text("[programme]\nname = \"\"\n", encoding="utf-8")
+    setattr(args, BOOTSTRAPPED_ATTR, True)
 
 
 def _module_files(root: Path, module: str, unit: str | None) -> list[str]:
@@ -69,9 +115,12 @@ def _module_files(root: Path, module: str, unit: str | None) -> list[str]:
     return out
 
 
-def _export(env: Envelope, target: Target, media: bool, nested: bool) -> None:
+def _export(env: Envelope, target: Target, media: bool, nested: bool, full: bool) -> None:
+    if full and target.level != "root":
+        raise Fail("USAGE", "--full only makes sense for the whole programme.", hint="Run it against the programme root, not a module/unit/topic path.")
+    media = media or full
     stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
-    scope = target.rel.replace("/", "-") if target.rel != "." else "programme"
+    scope = "programme-full" if full else (target.rel.replace("/", "-") if target.rel != "." else "programme")
     batch = f"{stamp}-{scope}"
     exports = target.root / "transfer" / "exports"
     n = 2
@@ -99,41 +148,59 @@ def _export(env: Envelope, target: Target, media: bool, nested: bool) -> None:
                 if f.is_file():
                     included.append((t.module, f"{t.unit}/{t.code}/edit/{f.name}"))
 
-    if not included:
+    # (source path, name inside the zip, manifest module-or-None) for every file, content
+    # and extras together, so one progress-reported loop below writes and hashes them all.
+    entries: list[tuple[Path, str, str | None]] = []
+    for module, local_rel in included:
+        src = target.root / module / local_rel
+        name = local_rel if nested else (local_to_remote(module, local_rel) or local_rel.replace("/", "-"))
+        # Nested keeps a real module subfolder; flat names already carry the module as a
+        # filename prefix via local_to_remote(), so no extra nesting is needed there.
+        entries.append((src, f"{module}/{name}" if nested else name, module))
+    if full:
+        toml = target.root / FULL_PROGRAMME_TOML
+        if toml.is_file():
+            entries.append((toml, FULL_PROGRAMME_TOML, None))
+        theme_dir = target.root / "themes" / "custom"
+        if theme_dir.is_dir():
+            for f in sorted(theme_dir.rglob("*")):
+                if f.is_file() and not is_noise(f.name):
+                    entries.append((f, f"{FULL_THEME_PREFIX}{f.relative_to(theme_dir)}", None))
+
+    if not entries:
         env.diagnostics.append(Diagnostic("XFER_NOTHING_TO_EXPORT", "Nothing in scope matched a file bcn transfer recognises.",
                                           hint="Check the path: a topic needs a topic.md, a module needs a course-map.md, etc."))
         return
 
-    work = Path(tempfile.mkdtemp(prefix=".transfer-export-", dir=target.root))
+    exports.mkdir(parents=True, exist_ok=True)
+    zpath = exports / f"{batch}.zip"
+    manifest_files: list[dict] = []
     try:
-        manifest_files = []
-        for module, local_rel in included:
-            src = target.root / module / local_rel
-            name = local_rel if nested else (local_to_remote(module, local_rel) or local_rel.replace("/", "-"))
-            # Nested keeps a real module subfolder; flat names already carry the module as
-            # a filename prefix via local_to_remote(), so no extra nesting is needed there.
-            dest = work / module / name if nested else work / name
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, dest)
-            manifest_files.append({"module": module, "local": local_rel, "name": str(dest.relative_to(work)), "sha256": sha256_file(dest)})
-        fsutil.write_json(work / "manifest.json", {"batch": batch, "created": utcnow(), "nested": nested, "media": media, "files": manifest_files})
-        exports.mkdir(parents=True, exist_ok=True)
-        zpath = exports / f"{batch}.zip"
         with fsutil.atomic_path(zpath) as tmp:
-            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
-                for f in sorted(work.rglob("*")):
-                    if f.is_file():
-                        z.write(f, str(f.relative_to(work)))
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
+            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z, Progress("transfer", len(entries)) as prog:
+                for src, name, module in entries:
+                    if CANCEL.is_set():
+                        prog.done(cancelled=True)
+                        raise Cancelled()
+                    with prog.topic(name) as tp:
+                        tp.update(0, f"zipping {name}")
+                        z.write(src, name)
+                        manifest_files.append({"module": module, "name": name, "sha256": sha256_file(src)})
+                        tp.update(100, "zipped")
+                prog.done()
+                manifest = {"batch": batch, "created": utcnow(), "nested": nested, "media": media, "full": full, "files": manifest_files}
+                z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+    except Cancelled:
+        env.cancelled = True
+        return
 
     env.artifacts.append(env.artifact(zpath, "transfer-export"))
     env.extra["batch"] = batch
     env.extra["zip"] = env.rel(zpath)
-    env.extra["file_count"] = len(included)
+    env.extra["file_count"] = len(entries)
     r = TopicResult(target.rel, target.rel)
     r.ok = True
-    r.extra["exported"] = len(included)
+    r.extra["exported"] = len(entries)
     env.results.append(r)
 
 
@@ -164,7 +231,53 @@ def _in_scope(target: Target, module: str, local_rel: str) -> bool:
     return local_rel == scope_within_module or local_rel.startswith(scope_within_module + "/")
 
 
-def _import(env: Envelope, target: Target, source: str, dry_run: bool) -> None:
+# A diff is only worth reading both files fully for, and only means anything for text:
+# above this a conflict is just reported without one, matching how a binary (media) file
+# already skipped the diff via UnicodeDecodeError.
+DIFF_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _place(env: Envelope, rel: str, f: Path, dest: str, dry_run: bool, overwrite: bool = False) -> tuple[str, bool]:
+    """Compares f (a staged import file) against the real path dest, streaming rather
+    than reading either fully into memory — the file may be a multi-GB video. Returns
+    (action, touched) for the caller's TopicResult/diagnostic and touched-module bookkeeping.
+    overwrite skips the diff-protection entirely: only for the placeholder programme.toml
+    a --full --init bootstrap just wrote, which is not real content worth protecting."""
+    dest_path = Path(dest)
+    r = TopicResult(rel, rel)
+    env.results.append(r)
+    r.extra["path"] = dest
+    if dest_path.is_file() and not overwrite:
+        if filecmp.cmp(f, dest_path, shallow=False):
+            r.extra["action"] = "unchanged"
+            r.diagnostics.append(Diagnostic("XFER_UNCHANGED", f"{dest} already holds this content.", file=rel))
+            return "unchanged", True
+        diff = ""
+        if f.stat().st_size <= DIFF_MAX_BYTES and dest_path.stat().st_size <= DIFF_MAX_BYTES:
+            try:
+                diff = "".join(difflib.unified_diff(dest_path.read_text("utf-8").splitlines(True), f.read_text("utf-8").splitlines(True),
+                                                    fromfile=f"{dest} (on disk)", tofile=rel))
+            except UnicodeDecodeError:
+                pass  # binary (media): report the conflict without a text diff
+        r.ok = False
+        r.extra["action"] = "exists_differs"
+        r.extra["diff"] = diff
+        r.diagnostics.append(Diagnostic("XFER_EXISTS_DIFFERS", f"{dest} exists and differs; nothing was written.",
+                                        file=rel, data={"diff": diff} if diff else None,
+                                        hint="Review the diff. If the import is right, edit or remove the file on disk yourself."))
+        return "exists_differs", False
+    if dry_run:
+        r.extra["action"] = "would_write"
+    else:
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        with fsutil.atomic_path(dest_path) as tmp, open(f, "rb") as src_f, open(tmp, "wb") as out_f:
+            shutil.copyfileobj(src_f, out_f)
+        r.extra["action"] = "written"
+        r.diagnostics.append(Diagnostic("XFER_WRITTEN", f"Wrote {dest}.", file=rel))
+    return r.extra["action"], True
+
+
+def _import(env: Envelope, target: Target, source: str, dry_run: bool, full: bool, bootstrapped: bool = False) -> None:
     src = Path(source).expanduser()
     if not src.exists():
         raise Fail("FS_MISSING", f"{source} does not exist.")
@@ -174,67 +287,73 @@ def _import(env: Envelope, target: Target, source: str, dry_run: bool) -> None:
         if src.is_file() and src.suffix.lower() == ".zip":
             tmp = Path(tempfile.mkdtemp(prefix=".transfer-import-", dir=target.root))
             with zipfile.ZipFile(src) as z:
-                for member in z.namelist():
-                    if member.endswith("/") or is_noise(Path(member).name) or "__MACOSX" in member:
-                        continue
-                    dest = tmp / member
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_bytes(z.read(member))
+                members = [m for m in z.namelist() if not m.endswith("/") and not is_noise(Path(m).name) and "__MACOSX" not in m]
+                with Progress("transfer-extract", len(members)) as prog:
+                    for member in members:
+                        if CANCEL.is_set():
+                            prog.done(cancelled=True)
+                            env.cancelled = True
+                            return
+                        with prog.topic(member) as tp:
+                            tp.update(0, f"extracting {member}")
+                            dest = tmp / member
+                            dest.parent.mkdir(parents=True, exist_ok=True)
+                            with z.open(member) as zf, open(dest, "wb") as out:
+                                shutil.copyfileobj(zf, out)
+                            tp.update(100, "extracted")
+                    prog.done()
             base = tmp
         elif src.is_dir():
             base = src
         else:
             raise Fail("USAGE", f"{source} must be a folder or a .zip.")
 
-        for f in sorted(base.rglob("*")):
-            if not f.is_file() or is_noise(f.name) or "__MACOSX" in f.parts or f.name == "manifest.json":
-                continue
-            rel = str(f.relative_to(base))
-            module, inner = _module_of(rel)
-            local_rel = remote_to_local(module, inner) if module else None
-            r = TopicResult(rel, rel)
-            env.results.append(r)
-            if not module or not local_rel:
-                r.ok = False
-                r.extra["action"] = "unrecognized"
-                r.diagnostics.append(Diagnostic("XFER_UNRECOGNIZED", f"'{rel}' does not match a known file name; it was not placed.",
-                                                file=rel, hint="Check the file name against bcn sync's naming (e.g. KV7016-U01-T01.md, KV7016-course-map.md)."))
-                continue
-            if not _in_scope(target, module, local_rel):
-                r.ok = False
-                r.extra["action"] = "refused"
-                r.diagnostics.append(Diagnostic("XFER_OUT_OF_SCOPE", f"{module}/{local_rel} is outside {target.rel}, where this import was aimed.", file=rel))
-                continue
-            dest = target.root / module / local_rel
-            r.extra["path"] = f"{module}/{local_rel}"
-            data = f.read_bytes()
-            if dest.is_file():
-                current = dest.read_bytes()
-                if current == data:
-                    r.extra["action"] = "unchanged"
-                    r.diagnostics.append(Diagnostic("XFER_UNCHANGED", f"{module}/{local_rel} already holds this content.", file=rel))
-                    touched_modules.add(module)
-                    continue
-                diff = ""
-                try:
-                    diff = "".join(difflib.unified_diff(current.decode("utf-8").splitlines(True), data.decode("utf-8").splitlines(True),
-                                                        fromfile=f"{module}/{local_rel} (on disk)", tofile=rel))
-                except UnicodeDecodeError:
-                    pass  # binary (media): report the conflict without a text diff
-                r.ok = False
-                r.extra["action"] = "exists_differs"
-                r.extra["diff"] = diff
-                r.diagnostics.append(Diagnostic("XFER_EXISTS_DIFFERS", f"{module}/{local_rel} exists and differs; nothing was written.",
-                                                file=rel, data={"diff": diff} if diff else None,
-                                                hint="Review the diff. If the import is right, edit or remove the file on disk yourself."))
-                continue
-            if dry_run:
-                r.extra["action"] = "would_write"
-            else:
-                fsutil.write_bytes(dest, data)
-                r.extra["action"] = "written"
-                r.diagnostics.append(Diagnostic("XFER_WRITTEN", f"Wrote {module}/{local_rel}.", file=rel))
-            touched_modules.add(module)
+        files = [f for f in sorted(base.rglob("*")) if f.is_file() and not is_noise(f.name) and "__MACOSX" not in f.parts and f.name != "manifest.json"]
+        with Progress("transfer", len(files)) as prog:
+            for f in files:
+                if CANCEL.is_set():
+                    prog.done(cancelled=True)
+                    env.cancelled = True
+                    return
+                rel = str(f.relative_to(base))
+                with prog.topic(rel) as tp:
+                    tp.update(0, f"placing {rel}")
+                    if rel == FULL_PROGRAMME_TOML or rel.startswith(FULL_THEME_PREFIX):
+                        if not full:
+                            r = TopicResult(rel, rel)
+                            r.ok = False
+                            r.extra["action"] = "refused"
+                            r.diagnostics.append(Diagnostic("XFER_OUT_OF_SCOPE", f"{rel} is a --full extra; pass --full to import it.", file=rel))
+                            env.results.append(r)
+                        else:
+                            overwrite = bootstrapped and rel == FULL_PROGRAMME_TOML
+                            _place(env, rel, f, str(target.root / rel), dry_run, overwrite=overwrite)
+                        tp.update(100, "placed")
+                        continue
+                    module, inner = _module_of(rel)
+                    local_rel = remote_to_local(module, inner) if module else None
+                    if not module or not local_rel:
+                        r = TopicResult(rel, rel)
+                        r.ok = False
+                        r.extra["action"] = "unrecognized"
+                        r.diagnostics.append(Diagnostic("XFER_UNRECOGNIZED", f"'{rel}' does not match a known file name; it was not placed.",
+                                                        file=rel, hint="Check the file name against bcn sync's naming (e.g. KV7016-U01-T01.md, KV7016-course-map.md)."))
+                        env.results.append(r)
+                        tp.update(100, "unrecognized")
+                        continue
+                    if not _in_scope(target, module, local_rel):
+                        r = TopicResult(rel, rel)
+                        r.ok = False
+                        r.extra["action"] = "refused"
+                        r.diagnostics.append(Diagnostic("XFER_OUT_OF_SCOPE", f"{module}/{local_rel} is outside {target.rel}, where this import was aimed.", file=rel))
+                        env.results.append(r)
+                        tp.update(100, "refused")
+                        continue
+                    action, touched = _place(env, rel, f, str(target.root / module / local_rel), dry_run)
+                    if touched:
+                        touched_modules.add(module)
+                    tp.update(100, action)
+            prog.done()
     finally:
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -255,6 +374,8 @@ def _import(env: Envelope, target: Target, source: str, dry_run: bool) -> None:
 
 def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
     if args.export:
-        _export(env, target, args.media, args.nested)
+        _export(env, target, args.media, args.nested, args.full)
     else:
-        _import(env, target, args.source, args.dry_run)
+        if args.full and target.level != "root":
+            raise Fail("USAGE", "--full only makes sense for the whole programme.", hint="Run it against the programme root, not a module/unit/topic path.")
+        _import(env, target, args.source, args.dry_run, args.full, bootstrapped=getattr(args, BOOTSTRAPPED_ATTR, False))

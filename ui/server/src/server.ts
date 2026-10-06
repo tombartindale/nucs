@@ -28,6 +28,10 @@ import { now, pyJson, sha256, stamp } from './util.js';
 
 const BODY_MAX = 5 * 1024 * 1024;
 const UPLOAD_MAX = 500 * 1024 * 1024;
+// A whole-programme --full backup can run to many GB of video across every module; the
+// other uploads (a handover batch, a translation return) stay at UPLOAD_MAX, so only the
+// one route that needs it pays for a bigger Fastify bodyLimit override.
+const TRANSFER_UPLOAD_MAX = 20 * 1024 * 1024 * 1024;
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const TOPIC = '^[A-Z]{2}\\d{4}-U\\d{2}-T\\d{2}$';
 const MODULE = '^[A-Z]{2}\\d{4}$';
@@ -466,11 +470,11 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     return { exports };
   });
 
-  f.post('/api/transfer/upload', async (req: Req, reply) => {
+  f.post('/api/transfer/upload', { bodyLimit: TRANSFER_UPLOAD_MAX }, async (req: Req, reply) => {
     const name = (req.query.name ?? 'batch.zip').replace(/[^A-Za-z0-9._-]/g, '_');
     if (!name.toLowerCase().endsWith('.zip')) throw new BadRequest('Upload a .zip file.');
     const n = Number(req.headers['content-length'] || 0);
-    if (!(n > 0) || n > UPLOAD_MAX) throw new BadRequest('Upload is empty or too large.');
+    if (!(n > 0) || n > TRANSFER_UPLOAD_MAX) throw new BadRequest('Upload is empty or too large.');
     const d = join(app.root, 'transfer', 'incoming');
     mkdirSync(d, { recursive: true });
     let dest = join(d, name);
@@ -489,6 +493,8 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const target = app.targetRel(String(data.path || '.'));
     const args: JobArgs = { import: src };
     if (data.dry_run) args.dry_run = true;
+    if (data.full) args.full = true;
+    if (data.init) args.init = true;
     const job = await app.jobs.submit('transfer', [target], args, `transfer import · ${basename(src)}`, await app.operator());
     return reply.code(202).send(job);
   });
