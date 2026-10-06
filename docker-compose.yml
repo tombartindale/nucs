@@ -8,6 +8,8 @@ services:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+    environment:
+      CADDY_HOST: ${CADDY_HOST:-localhost}
     depends_on:
       - api
     restart: unless-stopped
