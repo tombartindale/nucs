@@ -29,7 +29,6 @@ export function checkRoot(root: string): string[] {
   if (!existsSync(root) || !statSync(root).isDirectory()) throw new StartupError(`The programme root ${root} does not exist.`);
   if (!existsSync(join(root, 'programme.toml'))) throw new StartupError(`${root} has no programme.toml; it is not a programme root.`);
   const modules = readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && /^[A-Z]{2}\d{4}$/.test(e.name));
-  if (!modules.length) throw new StartupError(`${root} contains no module folders (named like KV7015).`);
   const probe = join(root, `.beacon-ui-write-test-${process.pid}`);
   try {
     writeFileSync(probe, 'x');
@@ -42,6 +41,9 @@ export function checkRoot(root: string): string[] {
   if (real.includes('CloudStorage') || real.includes('OneDrive')) {
     warnings.push('The programme root is inside a synced folder. Files may be cloud-only placeholders; '
       + 'keeping the root on local disk and copying to SharePoint deliberately avoids that.');
+  }
+  if (!modules.length) {
+    warnings.push(`${root} contains no module folders yet (named like KV7015). Import a programme to get started.`);
   }
   return warnings;
 }

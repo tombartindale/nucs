@@ -1,0 +1,7 @@
+# Bare programme root baked into the image so a fresh deployment boots to a working,
+# empty UI with no modules. Replace this file and add module folders by running
+# deploy/import-programme.sh, or by copying your own content into /data/programme.
+
+[programme]
+name = "New Beacon programme"
+theme = "default"

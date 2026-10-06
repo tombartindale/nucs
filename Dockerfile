@@ -106,6 +106,12 @@ COPY --from=ui-build /app/ui/server/bin ui/server/bin
 COPY --from=ui-build /app/ui/node_modules ui/node_modules
 COPY --from=ui-build /app/ui/app/dist/spa ui/app/dist/spa
 
+# A bare programme root with no modules, baked in so a fresh deployment's empty
+# /data/programme volume (Docker seeds a new named volume from the image's content at
+# its mount point) boots straight to a working, empty UI instead of a startup error.
+# Overwritten in place by deploy/import-programme.sh once there's real content to import.
+COPY deploy/default-programme/ /data/programme/
+
 ENV BCN=/app/tooling/.venv/bin/bcn
 ENV NODE_ENV=production
 
