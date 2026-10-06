@@ -1,20 +1,15 @@
 <script setup lang="ts">
 // Programme: the landing screen. Four numbers, then one row per module. Rows are links and nothing else.
 import { computed, onMounted, ref, watch } from 'vue';
-import type { Milestone, PlansSummaryResponse, SyncResponse } from '@beacon/shared';
+import type { Milestone, PlansSummaryResponse } from '@beacon/shared';
 import { api } from '@/api';
 import PageHeader from '@/components/PageHeader.vue';
 import StateChip from '@/components/StateChip.vue';
-import { fmtAgo, plural, STAGE_LABEL } from '@/format';
+import { plural, STAGE_LABEL } from '@/format';
 import { useBeacon } from '@/stores/beacon';
 
 const LANGS = ['en', 'zh'] as const;
 const beacon = useBeacon();
-
-const sync = ref<SyncResponse | null>(null);  // bcn sync dry runs, for the OneDrive line
-const loadSync = () => api<SyncResponse>('/api/sync').then((d) => { sync.value = d; }).catch(() => {});
-onMounted(loadSync);
-watch(() => beacon.status, loadSync);
 
 // Delivery planning: the next at-risk milestone per module, for a producer scanning
 // across every module at once. Full per-topic detail lives on each module's own page.
@@ -61,15 +56,6 @@ const kpis = computed(() => {
   ];
 });
 
-const syncLine = computed(() => {
-  if (!sync.value) return null;
-  const { pull, push } = sync.value;
-  if ((pull.diagnostics || []).some((d) => d.code === 'SYNC_NOT_CONFIGURED')) return null;
-  const n = (e: typeof pull) => (e.plan || []).filter((p) => p.action === 'copy' || p.action === 'check').length;
-  return { last: pull.last_pull ?? null, pull: n(pull), push: n(push),
-    conflicts: (pull.plan || []).filter((p) => p.action === 'conflict').length };
-});
-
 // The stage ladder: one column per pipeline step, English on top, Mandarin below. Mandarin
 // can only be sent for translation once the English subtitles are done, so its row starts
 // after English "Cued", under English "Packaged", which runs alongside the translation.
@@ -101,20 +87,6 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `28px repeat(${ladder.v
     <div v-if="!env" class="text-grey-7 q-pa-lg">Reading the programme…</div>
     <template v-else>
       <PageHeader title="Programme" :sub="`${s.topics} topics across ${modules.length} modules`" />
-
-      <q-card v-if="syncLine" flat bordered class="q-mb-md cursor-pointer" @click="$router.push('/sync')">
-        <q-card-section class="row items-center gap-sm q-py-sm">
-          <q-icon name="cloud" size="sm" color="primary" />
-          <strong>OneDrive</strong>
-          <span class="text-grey-7">{{ syncLine.last ? `last pulled ${fmtAgo(syncLine.last, beacon.now)}` : 'never pulled' }}</span>
-          <StateChip v-if="syncLine.pull" kind="warn" :label="`${syncLine.pull} to pull`" />
-          <StateChip v-else kind="ok" label="up to date" />
-          <StateChip v-if="syncLine.push" :label="`${syncLine.push} to push`" />
-          <StateChip v-if="syncLine.conflicts" kind="blocked" :label="plural(syncLine.conflicts, 'conflict')" />
-          <q-space />
-          <span class="text-caption">Sync →</span>
-        </q-card-section>
-      </q-card>
 
       <div class="row q-col-gutter-md q-mb-md">
         <div v-for="k in kpis" :key="k.l" class="col-12 col-sm-6 col-md-3">
