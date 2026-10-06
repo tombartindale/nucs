@@ -30,6 +30,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'transfer', component: () => import('@/pages/TransferPage.vue'), meta: { nav: 'transfer' } },
       { path: 'settings', component: () => import('@/pages/SettingsPage.vue'), meta: { nav: 'settings' } },
       { path: 'theme', component: () => import('@/pages/ThemePage.vue'), meta: { nav: 'settings' } },
+      { path: 'admin', component: () => import('@/pages/AdminPage.vue'), meta: { nav: 'admin' } },
     ],
   },
   // The teleprompter is full screen: no header or navigation.

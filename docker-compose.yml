@@ -25,6 +25,7 @@ services:
       MAGIC_LINK_BASE_URL: ${MAGIC_LINK_BASE_URL:-http://localhost}
       EMAIL_FROM: ${EMAIL_FROM:-beacon@localhost}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
     volumes:
       - programme-root:/data/programme
       - ui-state:/data/ui-state
@@ -85,9 +86,13 @@ services:
     restart: unless-stopped
 
   backup:
-    build: ./deploy/backup
+    # Built from the repo root: it runs bcn against the programme volume for the full export.
+    build:
+      context: .
+      dockerfile: deploy/backup/Dockerfile
     init: true
     environment:
+      BEACON_ROOT: /data/programme
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-beacon}
       S3_BACKUP_BUCKET: ${S3_BACKUP_BUCKET:-}
       S3_BACKUP_PREFIX: ${S3_BACKUP_PREFIX:-postgres}
@@ -95,6 +100,8 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+    volumes:
+      - programme-root:/data/programme
     depends_on:
       postgres:
         condition: service_healthy

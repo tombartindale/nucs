@@ -162,7 +162,7 @@ export interface JobDetail extends JobSummary {
 
 // -- routes --------------------------------------------------------------------------------------
 export interface BootResponse {
-  root: string; prefs: Prefs; operator: string; warnings: string[];
+  root: string; prefs: Prefs; operator: string; warnings: string[]; admin: boolean;
   doctor: Queried<DoctorEnvelope> | null; codes: CodeInfo[]; status_version: number;
 }
 export type StatusResponse = Queried<StatusEnvelope> & { version: number; jobs_running: number };

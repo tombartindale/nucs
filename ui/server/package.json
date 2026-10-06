@@ -5,7 +5,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": { "beacon-ui": "./bin/beacon-ui" },
+  "bin": {
+    "beacon-ui": "./bin/beacon-ui"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -14,6 +16,7 @@
     "record": "RECORD=1 vitest run test/contract.test.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1146.0",
     "@fastify/cookie": "11.1.2",
     "@fastify/static": "10.1.5",
     "@sendgrid/mail": "8.1.6",

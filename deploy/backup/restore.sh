@@ -1,8 +1,9 @@
 #!/bin/sh
-# Restores a Postgres backup from S3 into the running "postgres" container.
+# Restores a Postgres dump (db/) from S3 into the running "postgres" container. Programme
+# files are restored from the admin page (or bcn transfer --import --full), not here.
 # Usage: ./restore.sh <s3-key-or-date-prefix>
 #   e.g. ./restore.sh 2026-09-30T03-17-00Z
-#        ./restore.sh postgres/2026-09-30T03-17-00Z.sql.gz
+#        ./restore.sh postgres/db/2026-09-30T03-17-00Z.sql.gz
 #
 # Run from the backup container: docker compose exec backup /usr/local/bin/restore.sh <key>
 # WARNING: this drops and recreates the "beacon" database. Make sure that's what you want.
@@ -14,8 +15,8 @@ prefix="${S3_BACKUP_PREFIX:-postgres}"
 arg="${1:?Usage: restore.sh <s3-key-or-date-prefix>}"
 case "$arg" in
   */*) key="$arg" ;;
-  *.sql.gz) key="${prefix}/${arg}" ;;
-  *) key="${prefix}/${arg}.sql.gz" ;;
+  *.sql.gz) key="${prefix}/db/${arg}" ;;
+  *) key="${prefix}/db/${arg}.sql.gz" ;;
 esac
 
 file="/tmp/restore.sql.gz"

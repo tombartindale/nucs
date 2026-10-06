@@ -20,6 +20,7 @@ import type {
 } from '@beacon/shared';
 import { jobLabel, type App } from './app.js';
 import { SESSION_COOKIE } from './auth.js';
+import { Backups } from './backups.js';
 import { BadRequest, BcnError, Forbidden } from './errors.js';
 import { buildIcs, type IcsEvent } from './ics.js';
 import { mimeType, withCharset } from './mime.js';
@@ -37,6 +38,7 @@ const TOPIC = '^[A-Z]{2}\\d{4}-U\\d{2}-T\\d{2}$';
 const MODULE = '^[A-Z]{2}\\d{4}$';
 const ICS_PATH = /^\/api\/module\/[A-Z]{2}\d{4}\/plan\.ics$/;
 const PING_MS = 15_000;
+const ADMIN_EMAILS = new Set((process.env.ADMIN_EMAILS || '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean));
 const SSE_BACKLOG = 4 * 1024 * 1024;  // a tab that falls this far behind is dropped; it resyncs on reconnect
 
 /** localhost, plus any hostnames in ALLOWED_HOSTS (comma-separated, e.g. beacon.example.org). */
@@ -171,8 +173,8 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   });
 
   // -- API ------------------------------------------------------------------------------------
-  f.get('/api/boot', async (): Promise<BootResponse> => ({
-    root: app.root, prefs: await app.db.prefs(), operator: await app.operator(), warnings: app.warnings,
+  f.get('/api/boot', async (req: Req): Promise<BootResponse> => ({
+    root: app.root, prefs: await app.db.prefs(), operator: await app.operator(), warnings: app.warnings, admin: isAdmin(req),
     doctor: app.doctor, codes: app.codes, status_version: app.status.version,
   }));
 
@@ -496,6 +498,65 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     if (data.full) args.full = true;
     if (data.init) args.init = true;
     const job = await app.jobs.submit('transfer', [target], args, `transfer import · ${basename(src)}`, await app.operator());
+    return reply.code(202).send(job);
+  });
+
+  // The editor's video and subtitles, for one topic, straight from the browser. The file is
+  // named for the topic here, so the import's own naming rules always match it. It then goes
+  // through bcn transfer --import like any other handover file: same scope check, same
+  // refusal to overwrite, and the diff protection that a re-cut needs to opt out of with replace.
+  const MEDIA_KINDS: Record<string, { suffix: string; ext: string }> = {
+    master: { suffix: '', ext: 'mp4' }, en: { suffix: '', ext: 'srt' }, zh: { suffix: '.zh', ext: 'srt' },
+  };
+  f.post(`/api/topic/:id(${TOPIC})/media`, { bodyLimit: TRANSFER_UPLOAD_MAX }, async (req: Req, reply) => {
+    const kind = MEDIA_KINDS[String(req.query.kind ?? '')];
+    if (!kind) throw new BadRequest('kind must be master, en or zh.');
+    const n = Number(req.headers['content-length'] || 0);
+    if (!(n > 0) || n > TRANSFER_UPLOAD_MAX) throw new BadRequest('Upload is empty or too large.');
+    const id = req.params.id;
+    const dir = join(app.root, 'transfer', 'incoming', `media-${stamp()}`);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `${id}${kind.suffix}.${kind.ext}`);
+    await pipeline(req.body as IncomingMessage, createWriteStream(file));
+    const args: JobArgs = { import: file };
+    if (req.query.replace === '1') args.replace = true;
+    const job = await app.jobs.submit('transfer', [app.targetRel(id)], args, `media ${basename(file)} · ${id}`, await app.operator());
+    return reply.code(202).send(job);
+  });
+
+  // -- backups (admin only) ------------------------------------------------------------------
+  const backups = new Backups();
+  const isAdmin = (req: Req) => testDisableAuth
+    || ADMIN_EMAILS.has(String((req as FastifyRequest & { email?: string }).email ?? '').toLowerCase());
+  const requireAdmin = (req: Req) => { if (!isAdmin(req)) throw new Forbidden('Backups are for administrators only.'); };
+
+  f.get('/api/admin/backups', async (req: Req) => {
+    requireAdmin(req);
+    return { enabled: backups.enabled, items: await backups.list() };
+  });
+
+  f.get('/api/admin/backups/download', async (req: Req, reply) => {
+    requireAdmin(req);
+    const key = String(req.query.key || '');
+    const { body, bytes } = await backups.open(key);
+    reply.header('Content-Length', bytes);
+    reply.header('Content-Disposition', `attachment; filename="${basename(key)}"`);
+    return reply.type('application/octet-stream').send(body);
+  });
+
+  // Restoring a full backup merges it into the live programme, exactly like importing a zip:
+  // anything that already exists with different content is reported, not overwritten.
+  f.post('/api/admin/backups/restore', async (req: Req, reply) => {
+    requireAdmin(req);
+    const data = await readJson(req);
+    const key = String(data.key ?? '');
+    if (!key.includes('/full/') || !key.endsWith('.zip')) throw new BadRequest('Only a full programme backup can be restored here.');
+    const d = join(app.root, 'transfer', 'incoming');
+    mkdirSync(d, { recursive: true });
+    const name = basename(key);
+    const dest = join(d, `restore-${stamp()}-${name}`);
+    await backups.download(key, dest);
+    const job = await app.jobs.submit('transfer', ['.'], { import: dest, full: true }, `restore backup · ${name}`, await app.operator());
     return reply.code(202).send(job);
   });
 

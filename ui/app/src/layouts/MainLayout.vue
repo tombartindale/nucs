@@ -10,6 +10,8 @@ const NAV = [
   { to: '/translation', label: 'Translation', icon: 'translate' },
   { to: '/transfer', label: 'Transfer', icon: 'drive_file_move' },
 ];
+const ADMIN_NAV = { to: '/admin', label: 'Backups', icon: 'backup' };
+const navItems = computed(() => (beacon.boot?.admin ? [...NAV, ADMIN_NAV] : NAV));
 const LIVE = {
   connecting: { color: 'grey', label: 'connecting' },
   up: { color: 'positive', label: 'live' },
@@ -35,7 +37,7 @@ const banners = computed(() => {
           <span class="brand-short">NUCS</span>
         </q-btn>
         <q-tabs dense no-caps inline-label shrink stretch active-color="white" indicator-color="white">
-          <q-route-tab v-for="n in NAV" :key="n.to" :to="n.to" :label="n.label" :icon="n.icon">
+          <q-route-tab v-for="n in navItems" :key="n.to" :to="n.to" :label="n.label" :icon="n.icon">
             <q-badge v-if="n.to === '/jobs' && beacon.activeJobs" color="orange" floating>{{ beacon.activeJobs }}</q-badge>
           </q-route-tab>
         </q-tabs>
