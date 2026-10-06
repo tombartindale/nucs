@@ -12,6 +12,8 @@ import { useBeacon } from '@/stores/beacon';
 const beacon = useBeacon();
 const status = shallowRef<ThemeStatus | null>(null);
 const busy = ref(false);
+// Bytes sent so far, as a fraction; null once the upload has finished and the server is unpacking it.
+const sent = ref<number | null>(null);
 const over = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 
@@ -20,15 +22,36 @@ async function refresh() {
 }
 void refresh();
 
+// fetch() cannot report upload progress, so the zip is sent with XMLHttpRequest, which can.
+function sendZip(file: File): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/theme/upload');
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) sent.value = e.loaded / e.total; };
+    xhr.upload.onload = () => { sent.value = null; };
+    xhr.onload = () => {
+      if (xhr.status === 401) { window.location.href = '/login.html'; return; }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      let message = `${xhr.status} ${xhr.statusText}`;
+      try { message = JSON.parse(xhr.responseText).error || message; } catch { /* not JSON: keep the status text */ }
+      reject(new Error(message));
+    };
+    xhr.onerror = () => reject(new Error('The upload failed: the connection was lost.'));
+    xhr.send(file);
+  });
+}
+
 async function upload(file: File | undefined) {
   if (!file) return;
   if (!file.name.toLowerCase().endsWith('.zip')) { beacon.toast('Upload a .zip file.', true); return; }
   busy.value = true;
+  sent.value = 0;
   try {
-    await api('/api/theme/upload', { method: 'POST', raw: await file.arrayBuffer() });
+    await sendZip(file);
     beacon.toast('Theme uploaded.');
     await refresh();
-  } catch (e) { beacon.toast((e as Error).message, true); } finally { busy.value = false; }
+  } catch (e) { beacon.toast((e as Error).message, true); } finally { busy.value = false; sent.value = null; }
 }
 function onDrop(e: DragEvent) { over.value = false; void upload(e.dataTransfer?.files[0]); }
 
@@ -55,6 +78,16 @@ async function setActive(active: boolean) {
               <q-icon name="upload_file" size="md" class="q-mb-sm" /><br>
               Drop a theme .zip here, or click to choose.
               <input ref="fileInput" type="file" accept=".zip" class="hidden" @change="upload(($event.target as HTMLInputElement).files?.[0])">
+            </div>
+            <div v-if="busy" class="q-mt-md">
+              <template v-if="sent !== null">
+                <q-linear-progress :value="sent" size="8px" rounded color="primary" />
+                <div class="text-caption text-grey-7 q-mt-xs">Uploading… {{ Math.round(sent * 100) }}%</div>
+              </template>
+              <div v-else class="row items-center gap-sm text-grey-7">
+                <q-spinner color="primary" size="20px" />
+                <span>Unpacking the theme on the server…</span>
+              </div>
             </div>
           </q-card-section>
           <q-card-section class="text-caption text-grey-7">Replaces the current custom theme wholesale. The zip's top level should be the theme's own files (theme.toml, its CSS, fonts, images, video).</q-card-section>
