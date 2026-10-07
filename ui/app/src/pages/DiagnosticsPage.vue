@@ -73,8 +73,14 @@ const mt = computed(() => {
     { title: 'Reviewed', rows: items.filter((d) => d.data?.review), empty: '' },
   ];
 });
-const review = (d: Diagnostic, args: Record<string, string | boolean>) =>
-  beacon.runJob('review', [topicPath(d.topic!)], { item: d.data!.id!, ...args });
+async function review(d: Diagnostic, args: Record<string, string | boolean>) {
+  try {
+    const job = await beacon.runJob('review', [topicPath(d.topic!)], { item: d.data!.id!, ...args });
+    const result = await beacon.awaitJob(job.id);
+    if (result.state === 'done') await load();
+    else beacon.toast('That decision did not save; see Jobs.', true);
+  } catch { /* beacon.runJob already toasted the submit failure */ }
+}
 function correct(d: Diagnostic) {
   const text = (corrections[d.data!.id!] ?? d.data!.script ?? '').trim();
   if (text) void review(d, { correct: text });
@@ -138,16 +144,49 @@ function correct(d: Diagnostic) {
 
     <template v-else>
       <p class="text-grey-7">The partner translates from this SRT, so a mishearing here reaches Mandarin.
-        Accept leaves the SRT as it is; Correct changes the delivered subtitle text (timings never change). Run subtitles and package afterwards.</p>
-      <template v-for="section in mt" :key="section.title">
-        <q-card v-if="(mt[0].rows.length || mt[1].rows.length) && (section.empty || section.rows.length)" flat bordered class="q-mb-md">
-          <q-card-section class="text-subtitle1 text-weight-medium q-pb-sm">{{ section.title }} ({{ section.rows.length }})</q-card-section>
+        Accept leaves the SRT as it is; Correct changes the delivered subtitle text (timings never change). Run subtitles and package afterwards.
+        A decision takes a moment to save — the item moves to Reviewed below once it has.</p>
+      <q-card v-if="mt[0].rows.length" flat bordered class="q-mb-md">
+        <q-card-section class="text-subtitle1 text-weight-medium q-pb-sm">{{ mt[0].title }} ({{ mt[0].rows.length }})</q-card-section>
+        <q-list separator>
+          <q-item v-for="d in mt[0].rows" :key="d.data!.id">
+            <q-item-section style="max-width: 190px">
+              <router-link :to="`/topic/${d.topic}`">{{ d.topic }}</router-link>
+              <q-item-label caption>slide {{ d.data!.slide }} · cue {{ d.data!.cue ?? '—' }}</q-item-label>
+              <router-link v-if="d.data!.time !== null && d.data!.time !== undefined" class="text-caption" :to="`/topic/${d.topic}?t=${d.data!.time}`">▶ play {{ fmtTime(d.data!.time) }}</router-link>
+            </q-item-section>
+            <q-item-section>
+              <q-item-label caption>Script (approved)</q-item-label>
+              <q-item-label>{{ d.data!.script }}</q-item-label>
+            </q-item-section>
+            <q-item-section>
+              <q-item-label caption>SRT (captioned)</q-item-label>
+              <q-item-label class="text-warning">{{ d.data!.srt }}</q-item-label>
+            </q-item-section>
+            <q-item-section side style="min-width: 340px">
+              <div class="row items-center gap-sm no-wrap">
+                <q-btn outline dense size="sm" no-caps label="Accept" @click="review(d, { accept: true })">
+                  <q-tooltip>The SRT reading is fine as it is</q-tooltip>
+                </q-btn>
+                <q-input :model-value="corrections[d.data!.id!] ?? d.data!.script" dense outlined class="col" aria-label="Corrected subtitle text"
+                  @update:model-value="(v) => (corrections[d.data!.id!] = String(v ?? ''))" />
+                <q-btn unelevated dense size="sm" color="primary" no-caps label="Correct" @click="correct(d)">
+                  <q-tooltip>The delivered subtitle should read this</q-tooltip>
+                </q-btn>
+              </div>
+            </q-item-section>
+          </q-item>
+        </q-list>
+      </q-card>
+      <q-card v-if="!mt[0].rows.length && !mt[1].rows.length" flat bordered><q-card-section class="text-grey-7">No suspected mis-transcriptions.</q-card-section></q-card>
+      <q-card v-if="!mt[0].rows.length && mt[1].rows.length" flat bordered class="q-mb-md"><q-card-section class="text-grey-7">All reviewed.</q-card-section></q-card>
+      <q-card v-if="mt[1].rows.length" flat bordered>
+        <q-expansion-item :label="`Reviewed (${mt[1].rows.length})`" header-class="text-subtitle1 text-weight-medium">
           <q-list separator>
-            <q-item v-for="d in section.rows" :key="d.data!.id" :class="{ 'text-grey-6': d.data?.review }">
+            <q-item v-for="d in mt[1].rows" :key="d.data!.id" class="text-grey-6">
               <q-item-section style="max-width: 190px">
                 <router-link :to="`/topic/${d.topic}`">{{ d.topic }}</router-link>
                 <q-item-label caption>slide {{ d.data!.slide }} · cue {{ d.data!.cue ?? '—' }}</q-item-label>
-                <router-link v-if="d.data!.time !== null && d.data!.time !== undefined" class="text-caption" :to="`/topic/${d.topic}?t=${d.data!.time}`">▶ play {{ fmtTime(d.data!.time) }}</router-link>
               </q-item-section>
               <q-item-section>
                 <q-item-label caption>Script (approved)</q-item-label>
@@ -155,31 +194,19 @@ function correct(d: Diagnostic) {
               </q-item-section>
               <q-item-section>
                 <q-item-label caption>SRT (captioned)</q-item-label>
-                <q-item-label class="text-warning">{{ d.data!.srt }}</q-item-label>
+                <q-item-label>{{ d.data!.srt }}</q-item-label>
               </q-item-section>
               <q-item-section side style="min-width: 340px">
-                <div v-if="d.data?.review" class="row items-center gap-sm">
-                  <StateChip kind="ok" :label="d.data.review.decision === 'accept' ? 'accepted' : `corrected to “${d.data.review.text}”`" />
-                  <span class="text-caption">{{ d.data.review.by || '' }}</span>
+                <div class="row items-center gap-sm">
+                  <StateChip kind="ok" :label="d.data!.review!.decision === 'accept' ? 'accepted' : `corrected to “${d.data!.review!.text}”`" />
+                  <span class="text-caption">{{ d.data!.review!.by || '' }}</span>
                   <q-btn flat dense size="sm" no-caps label="Undo" @click="review(d, { clear: true })" />
-                </div>
-                <div v-else class="row items-center gap-sm no-wrap">
-                  <q-btn outline dense size="sm" no-caps label="Accept" @click="review(d, { accept: true })">
-                    <q-tooltip>The SRT reading is fine as it is</q-tooltip>
-                  </q-btn>
-                  <q-input :model-value="corrections[d.data!.id!] ?? d.data!.script" dense outlined class="col" aria-label="Corrected subtitle text"
-                    @update:model-value="(v) => (corrections[d.data!.id!] = String(v ?? ''))" />
-                  <q-btn unelevated dense size="sm" color="primary" no-caps label="Correct" @click="correct(d)">
-                    <q-tooltip>The delivered subtitle should read this</q-tooltip>
-                  </q-btn>
                 </div>
               </q-item-section>
             </q-item>
-            <q-item v-if="!section.rows.length"><q-item-section class="text-grey-7">{{ section.empty }}</q-item-section></q-item>
           </q-list>
-        </q-card>
-      </template>
-      <q-card v-if="!mt[0].rows.length && !mt[1].rows.length" flat bordered><q-card-section class="text-grey-7">No suspected mis-transcriptions.</q-card-section></q-card>
+        </q-expansion-item>
+      </q-card>
     </template>
   </q-page>
 </template>
