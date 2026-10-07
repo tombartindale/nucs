@@ -26,6 +26,11 @@ services:
       EMAIL_FROM: ${EMAIL_FROM:-beacon@localhost}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      S3_BACKUP_BUCKET: ${S3_BACKUP_BUCKET:-}
+      S3_BACKUP_PREFIX: ${S3_BACKUP_PREFIX:-postgres}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
     volumes:
       - programme-root:/data/programme
       - ui-state:/data/ui-state
