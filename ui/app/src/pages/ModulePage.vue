@@ -203,10 +203,14 @@ async function sendReminder() {
         </q-btn>
         <q-btn outline no-caps label="Run QA on module" @click="beacon.runJob('qa', [module], {})" />
         <template v-if="moduleMap">
-          <q-btn-dropdown v-if="moduleMap.exists" split outline dense no-caps label="Module map" :to="`/doc/${moduleMap.path}`">
+          <q-btn-dropdown v-if="moduleMap.exists" split outline dense no-caps label="Module map" :to="`/edit-doc/${moduleMap.path}`">
             <q-badge v-if="moduleMap.errors" color="negative" floating>{{ moduleMap.errors }}</q-badge>
             <q-badge v-else-if="moduleMap.warnings" color="warning" floating>{{ moduleMap.warnings }}</q-badge>
             <q-list>
+              <q-item clickable v-close-popup :to="`/doc/${moduleMap.path}`">
+                <q-item-section avatar><q-icon name="visibility" /></q-item-section>
+                <q-item-section>View</q-item-section>
+              </q-item>
               <q-item v-if="moduleMap.pdf?.exists" clickable v-close-popup :href="fileUrl(moduleMap.pdf.path, null, 'download=1')">
                 <q-item-section avatar><q-icon name="download" :color="moduleMap.pdf.stale ? 'warning' : 'primary'" /></q-item-section>
                 <q-item-section>{{ moduleMap.pdf.stale ? 'Download PDF (out of date)' : 'Download PDF' }}</q-item-section>
@@ -334,28 +338,11 @@ async function sendReminder() {
         </q-card-section>
         <q-card-section class="scroll">
           <table class="topic-grid">
-            <thead><tr><th></th><th v-for="c in codes" :key="c">{{ c }}</th></tr></thead>
+            <thead><tr><th></th><th v-for="c in codes" :key="c">{{ c }}</th><th>Activity</th></tr></thead>
             <tbody>
               <tr v-for="row in grid" :key="row.unit">
                 <th class="unit">
                   {{ row.unit }}<span class="t">{{ m.unit_titles?.[row.unit] || '' }}</span>
-                  <span v-if="row.activity?.exists" class="row items-center gap-xs q-mt-xs">
-                    <q-btn-dropdown split outline dense no-caps size="sm" label="activity" :to="`/doc/${row.activity.path}`">
-                      <q-badge v-if="row.activity.errors" color="negative" floating>{{ row.activity.errors }}</q-badge>
-                      <q-badge v-else-if="row.activity.warnings" color="warning" floating>{{ row.activity.warnings }}</q-badge>
-                      <q-list>
-                        <q-item v-if="row.activity.quiz?.exists" clickable v-close-popup :href="fileUrl(row.activity.quiz.package, null, 'download=1')">
-                          <q-item-section avatar><q-icon name="download" :color="row.activity.quiz.stale ? 'warning' : 'primary'" /></q-item-section>
-                          <q-item-section>{{ row.activity.quiz.stale ? 'Download QTI (out of date)' : `Download QTI · ${plural(row.activity.quiz.questions, 'question')}` }}</q-item-section>
-                        </q-item>
-                        <q-item v-if="row.activity.quiz && (!row.activity.quiz.exists || row.activity.quiz.stale)" clickable v-close-popup
-                          @click="beacon.runJob('qti', [`${module}/${row.unit}`], { force: true })">
-                          <q-item-section avatar><q-icon name="quiz" /></q-item-section>
-                          <q-item-section>{{ row.activity.quiz.exists ? 'Update QTI' : 'Export QTI' }}</q-item-section>
-                        </q-item>
-                      </q-list>
-                    </q-btn-dropdown>
-                  </span>
                 </th>
                 <td v-for="(r, i) in row.cells" :key="codes[i]">
                   <a v-if="r" :href="`#/topic/${r.topic}`" @click="cellClick($event, r)"
@@ -370,6 +357,29 @@ async function sendReminder() {
                     </div>
                     <span v-if="r.unreviewed_mistranscriptions" class="unrev">✎{{ r.unreviewed_mistranscriptions }}<q-tooltip>suspected mis-transcriptions to review</q-tooltip></span>
                   </a>
+                </td>
+                <td>
+                  <div v-if="row.activity?.exists" class="cell one activity">
+                    <q-btn-dropdown split outline dense no-caps size="sm" label="activity" :to="`/edit-doc/${row.activity.path}`">
+                      <q-badge v-if="row.activity.errors" color="negative" floating>{{ row.activity.errors }}</q-badge>
+                      <q-badge v-else-if="row.activity.warnings" color="warning" floating>{{ row.activity.warnings }}</q-badge>
+                      <q-list>
+                        <q-item clickable v-close-popup :to="`/doc/${row.activity.path}`">
+                          <q-item-section avatar><q-icon name="visibility" /></q-item-section>
+                          <q-item-section>View</q-item-section>
+                        </q-item>
+                        <q-item v-if="row.activity.quiz?.exists" clickable v-close-popup :href="fileUrl(row.activity.quiz.package, null, 'download=1')">
+                          <q-item-section avatar><q-icon name="download" :color="row.activity.quiz.stale ? 'warning' : 'primary'" /></q-item-section>
+                          <q-item-section>{{ row.activity.quiz.stale ? 'Download QTI (out of date)' : `Download QTI · ${plural(row.activity.quiz.questions, 'question')}` }}</q-item-section>
+                        </q-item>
+                        <q-item v-if="row.activity.quiz && (!row.activity.quiz.exists || row.activity.quiz.stale)" clickable v-close-popup
+                          @click="beacon.runJob('qti', [`${module}/${row.unit}`], { force: true })">
+                          <q-item-section avatar><q-icon name="quiz" /></q-item-section>
+                          <q-item-section>{{ row.activity.quiz.exists ? 'Update QTI' : 'Export QTI' }}</q-item-section>
+                        </q-item>
+                      </q-list>
+                    </q-btn-dropdown>
+                  </div>
                 </td>
               </tr>
             </tbody>

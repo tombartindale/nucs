@@ -18,7 +18,7 @@ export const STALL_MS = 10_000;
 
 // What the browser may ask for. Anything else is refused.
 export const COMMANDS = new Set(['validate', 'render', 'script', 'bumpers', 'cues', 'subtitles', 'compose', 'package', 'qa',
-  'review', 'intake', 'translation', 'transfer', 'sync', 'ack', 'edit', 'qti', 'coursemap', 'readinglist']);
+  'review', 'intake', 'translation', 'transfer', 'sync', 'ack', 'edit', 'docedit', 'qti', 'coursemap', 'readinglist']);
 export const FLAG_ARGS = ['force', 'no_bumpers', 'dump_narration', 'accept', 'clear', 'dry_run', 'export', 'pull', 'push', 'media', 'nested', 'full', 'init', 'replace'];
 export const VALUE_ARGS: Record<string, RegExp> = {
   lang: /^(en|zh)$/,
@@ -35,9 +35,13 @@ export const VALUE_ARGS: Record<string, RegExp> = {
   fingerprint: /^[A-Z_]{3,40}\|(en|zh)\|s\d{1,3}\|[^\x00-\x1f]{0,300}$/,
   note: /^[^\x00-\x1f]{0,500}$/,
   only: /^[A-Z]{2}\d{4}\/[^\x00-\x1f]{1,300}$/,  // a local path under the root; may be a list
+  // A module document's path relative to the module (e.g. course-map.md, U01/activity.md,
+  // assignment-3.md) — bcn docedit is the actual authority on which of these are editable;
+  // this just keeps the characters sane before it gets there.
+  doc: /^[A-Za-z0-9/_.-]{1,100}$/,
 };
 // The order value arguments are passed to bcn in. Shared with the worker's argv builder.
-export const VALUE_ORDER = ['lang', 'theme', 'set', 'unset', 'item', 'correct', 'from', 'by', 'prefer', 'fingerprint', 'note', 'expect_sha'];
+export const VALUE_ORDER = ['lang', 'theme', 'set', 'unset', 'item', 'correct', 'from', 'by', 'prefer', 'fingerprint', 'note', 'expect_sha', 'doc'];
 export const PIPELINE = new Set(['validate', 'render', 'script', 'bumpers', 'cues', 'subtitles', 'compose', 'package', 'qa']);
 
 /** Two targets overlap when one contains the other ('.' is the whole programme). */

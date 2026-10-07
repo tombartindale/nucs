@@ -2,7 +2,7 @@
 // (envelopes.gen.d.ts); everything else here is the UI's own HTTP API, which is the
 // contract between the two halves (spec §2.3).
 import type {
-  BcnCodesEnvelope, BcnDiagnosticsEnvelope, BcnDoctorEnvelope, BcnEditEnvelope, BcnIntakeEnvelope, BcnReviewEnvelope,
+  BcnCodesEnvelope, BcnDiagnosticsEnvelope, BcnDoceditEnvelope, BcnDoctorEnvelope, BcnEditEnvelope, BcnIntakeEnvelope, BcnReviewEnvelope,
   BcnShowEnvelope, BcnStatusEnvelope, BcnSyncEnvelope, BcnTransferEnvelope, BcnTranslationEnvelope,
 } from './envelopes.gen.js';
 
@@ -172,6 +172,12 @@ export interface TopicSourceResponse { exists: boolean; text: string; sha256: st
 export interface TopicCheckRequest { text: string; lang: Lang }
 export type TopicCheckResponse = Queried<BcnEditEnvelope>;
 export interface TopicSaveRequest { text: string; lang: Lang; expect_sha?: string | null; overwrite?: boolean }
+// A module document (course-map.md, a unit's activity.md, assignment-N.md), addressed by its
+// path (e.g. "KV7016/course-map.md") rather than a topic id + language.
+export interface ModDocSourceResponse { exists: boolean; text: string; sha256: string | null; path: string }
+export interface ModDocCheckRequest { text: string }
+export type ModDocCheckResponse = Queried<BcnDoceditEnvelope>;
+export interface ModDocSaveRequest { text: string; expect_sha?: string | null; overwrite?: boolean }
 export type DiagnosticsResponse = Queried<DiagnosticsEnvelope>;
 export type ReviewResponse = Queried<BcnReviewEnvelope>;
 export interface SyncResponse { pull: Queried<SyncEnvelope>; push: Queried<SyncEnvelope> }

@@ -1,12 +1,13 @@
 <script setup lang="ts">
-// Script editor: edit topic.md (or topic.zh.md) in the browser, with the problems bcn finds
-// shown beside it as you type. bcn edit does all checking and writing: --dry-run to check,
-// a job to save. Saving is refused if the file changed on disk since it was loaded.
+// Module document editor: course-map.md, a unit's activity.md, or assignment-N.md, in the
+// browser, with the problems bcn finds shown beside it as you type. bcn docedit does all
+// checking and writing: --dry-run to check, a job to save, validating the *whole* module so
+// a cross-file effect (e.g. removing a learning outcome) shows up before you save. Saving is
+// refused if the file changed on disk since it was loaded.
 //
 // Keys: ⌘/Ctrl-S save · ⌘/Ctrl-Enter check now · Tab indents.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
-import { useRouter } from 'vue-router';
-import type { BcnEditEnvelope, Diagnostic, JobSummary, TopicSourceResponse } from '@beacon/shared';
+import type { BcnDoceditEnvelope, Diagnostic, JobSummary, ModDocSourceResponse } from '@beacon/shared';
 import { api } from '@/api';
 import DiagnosticItem from '@/components/DiagnosticItem.vue';
 import PageHeader from '@/components/PageHeader.vue';
@@ -17,14 +18,14 @@ import { useBeacon } from '@/stores/beacon';
 
 const CHECK_DELAY_MS = 700;
 
-const props = defineProps<{ id: string; lang: 'en' | 'zh'; startLine: number | null }>();
+const props = defineProps<{ path: string; line: number | null }>();
 const beacon = useBeacon();
-const router = useRouter();
-const draftKey = `beacon-edit-${props.id}-${props.lang}`;
-const file = props.lang === 'zh' ? 'topic.zh.md' : 'topic.md';
-type Summary = BcnEditEnvelope['results'][number];
+const draftKey = `beacon-editdoc-${props.path}`;
+const module = props.path.split('/')[0];
+const docName = props.path.split('/').slice(1).join('/');
+type Summary = BcnDoceditEnvelope['results'][number];
 
-const base = shallowRef<TopicSourceResponse>({ text: '', sha256: null, exists: false, path: '' });  // what is on disk
+const base = shallowRef<ModDocSourceResponse>({ text: '', sha256: null, exists: false, path: props.path });  // what is on disk
 const text = ref('');
 const problems = shallowRef<Diagnostic[]>([]);
 const summary = shallowRef<Summary | null>(null);
@@ -47,19 +48,15 @@ const status = computed(() => {
   return [dirty.value ? 'Unsaved changes' : 'Saved', checking.value ? 'checking…' : null,
     summary.value ? `${plural(errs, 'error')} · ${plural(warns, 'warning')}` : null].filter(Boolean).join(' · ');
 });
-const counts = computed(() => {
-  const s = summary.value as (Summary & { slides?: number; words?: number; target_words?: number }) | null;
-  if (!s) return '';
-  return [s.slides != null ? `${s.slides} slides` : null,
-    s.words != null && props.lang === 'en' ? `${s.words} words${s.target_words ? ` / ${s.target_words} target` : ''}` : null].filter(Boolean).join(' · ');
-});
+
+const qp = `path=${encodeURIComponent(props.path)}`;
 
 async function check() {
   clearTimeout(checkTimer);
   const seq = ++checkSeq;
   checking.value = true;
   try {
-    const env = await api<BcnEditEnvelope>(`/api/topic/${props.id}/check`, { body: { text: text.value, lang: props.lang } });
+    const env = await api<BcnDoceditEnvelope>(`/api/moddoc/check?${qp}`, { body: { text: text.value } });
     if (seq !== checkSeq || disposed) return;   // a newer check is on its way
     problems.value = env.diagnostics as Diagnostic[];
     summary.value = env.results?.[0] ?? null;
@@ -81,7 +78,7 @@ async function save(overwrite = false): Promise<void> {
   if (saving.value) return;
   saving.value = true;
   try {
-    const job = await api<JobSummary>(`/api/topic/${props.id}/save`, { body: { text: text.value, lang: props.lang, expect_sha: base.value.sha256, overwrite } });
+    const job = await api<JobSummary>(`/api/moddoc/save?${qp}`, { body: { text: text.value, expect_sha: base.value.sha256, overwrite } });
     beacon.trackJob(job);
     const done = await beacon.awaitJob(job.id);
     const env = done.envelopes?.[0];
@@ -90,7 +87,7 @@ async function save(overwrite = false): Promise<void> {
       const ok = await confirm({
         title: 'Overwrite the newer version?', ok: 'Overwrite', danger: true,
         lines: [`${base.value.path} was changed on disk after you opened it (a sync pull or another editor).`,
-          'Overwrite replaces that version with yours; the replaced version is kept in the topic\'s .history folder. Or cancel, copy what you need, and reload the page to see the new version.'],
+          'Overwrite replaces that version with yours; the replaced version is kept in a .history folder next to it. Or cancel, copy what you need, and reload the page to see the new version.'],
       });
       if (ok) return save(true);
       return;
@@ -110,10 +107,9 @@ async function save(overwrite = false): Promise<void> {
   drawGutter();
 }
 
-// A content creator's file replaces the editor's contents for review, the same as if it
-// had been pasted in — it still goes through check() and the existing dirty/save/conflict
-// flow rather than writing straight to disk, so a bad or stale upload is caught before
-// anything is overwritten.
+// A colleague's file replaces the editor's contents for review, the same as if it had been
+// pasted in — it still goes through check() and the existing dirty/save/conflict flow rather
+// than writing straight to disk, so a bad or stale upload is caught before anything is overwritten.
 async function uploadFile(file: File | undefined) {
   if (!file) return;
   if (!file.name.endsWith('.md') && !file.name.endsWith('.txt')) {
@@ -160,7 +156,7 @@ function onUnload(e: BeforeUnloadEvent) { if (dirty.value) { e.preventDefault();
 onMounted(async () => {
   document.addEventListener('keydown', onKey);
   window.addEventListener('beforeunload', onUnload);
-  try { base.value = await api<TopicSourceResponse>(`/api/topic/${props.id}/source?lang=${props.lang}`); } catch (e) { beacon.toast((e as Error).message, true); return; }
+  try { base.value = await api<ModDocSourceResponse>(`/api/moddoc?${qp}`); } catch (e) { beacon.toast((e as Error).message, true); return; }
   if (disposed) return;
   let recovered: { text: string; sha256: string | null } | null = null;
   try { recovered = JSON.parse(sessionStorage.getItem(draftKey) || 'null'); } catch { /* fine */ }
@@ -175,7 +171,7 @@ onMounted(async () => {
   observe();
   drawGutter();
   await check();
-  if (props.startLine) jumpTo(props.startLine); else textarea.value?.focus();
+  if (props.line) jumpTo(props.line); else textarea.value?.focus();
 });
 
 onBeforeUnmount(() => {
@@ -189,17 +185,14 @@ onBeforeUnmount(() => {
 
 <template>
   <q-page padding>
-    <PageHeader :title="`Edit ${file}`" :sub="status"
-      :crumbs="[{ label: 'Programme', to: '/' }, { label: id.slice(0, 6), to: `/module/${id.slice(0, 6)}` }, { label: id, to: `/topic/${id}` }]">
-      <q-btn-toggle :model-value="lang" dense no-caps unelevated toggle-color="primary"
-        :options="[{ label: 'English', value: 'en' }, { label: 'Mandarin', value: 'zh' }]"
-        @update:model-value="(l) => router.push(`/edit/${id}?lang=${l}`)" />
+    <PageHeader :title="`Edit ${docName}`" :sub="status"
+      :crumbs="[{ label: 'Programme', to: '/' }, { label: module, to: `/module/${module}` }, { label: docName, to: `/doc/${path}` }]">
       <q-btn outline no-caps label="Check now" @click="check"><q-tooltip>⌘/Ctrl-Enter</q-tooltip></q-btn>
       <q-btn outline no-caps label="Upload file…" @click="fileInput?.click()" />
       <input ref="fileInput" type="file" accept=".md,.txt" class="hidden" @change="onFilePicked">
       <q-btn outline no-caps label="Revert" @click="revert" />
       <q-btn unelevated color="primary" no-caps :label="saving ? 'Saving…' : 'Save'" :disable="saving || !dirty" @click="save()"><q-tooltip>⌘/Ctrl-S</q-tooltip></q-btn>
-      <q-btn flat no-caps label="Back to topic" :to="`/topic/${id}`" />
+      <q-btn flat no-caps label="Back to document" :to="`/doc/${path}`" />
     </PageHeader>
     <div class="row q-col-gutter-md">
       <div class="col-12 col-lg-8">
@@ -211,25 +204,24 @@ onBeforeUnmount(() => {
               <div v-for="(g, i) in gutterLines" :key="i" :class="['ln', g.level]" :style="{ height: `${g.height}px` }">{{ i + 1 }}</div>
               <div :style="{ height: `${textarea?.clientHeight || 0}px` }"></div>
             </div>
-            <textarea ref="textarea" v-model="text" class="ed-text" spellcheck="true" autocomplete="off" aria-label="Script"
-              :placeholder="loaded && !base.exists ? `${file} does not exist yet. Paste or write the script here, upload a file, or drop one here.` : ''"
+            <textarea ref="textarea" v-model="text" class="ed-text" spellcheck="true" autocomplete="off" aria-label="Document text"
+              :placeholder="loaded && !base.exists ? `${docName} does not exist yet. Paste or write it here, upload a file, or drop one here.` : ''"
               @input="onInput" @scroll="gutter && (gutter.scrollTop = textarea!.scrollTop)" @keydown.tab="onTab"></textarea>
             <div ref="measure" class="ed-measure" aria-hidden="true"></div>
-            <div v-if="dropOver" class="ed-drop-hint">Drop to load {{ file }}</div>
+            <div v-if="dropOver" class="ed-drop-hint">Drop to load {{ docName }}</div>
           </div>
-          <q-card-section class="text-caption text-grey-7 q-py-sm">⌘S save · ⌘↵ check · slides are separated by a line of ---; narration goes in a final &gt; **Say:** block</q-card-section>
+          <q-card-section class="text-caption text-grey-7 q-py-sm">⌘S save · ⌘↵ check</q-card-section>
         </q-card>
       </div>
       <div class="col-12 col-lg-4">
         <q-card flat bordered>
-          <q-card-section class="row items-center q-pb-sm">
-            <div class="text-subtitle1 text-weight-medium">Problems</div>
-            <q-space /><span class="text-caption text-grey-7">{{ counts }}</span>
-          </q-card-section>
+          <q-card-section class="text-subtitle1 text-weight-medium q-pb-sm">Problems</q-card-section>
           <q-list v-if="shown.length" separator>
             <DiagnosticItem v-for="(p, i) in shown" :key="i" :d="p">
               <template #message>
-                <a v-if="p.line" href="#" @click.prevent="jumpTo(p.line)">line {{ p.line }}: </a>{{ p.message }}{{ p.data?.acknowledged ? ' (acknowledged)' : '' }}
+                <a v-if="p.line && p.file === path" href="#" @click.prevent="jumpTo(p.line)">line {{ p.line }}: </a>
+                <span v-else-if="p.file && p.file !== path" class="text-grey-7">{{ p.file }}: </span>
+                {{ p.message }}{{ p.data?.acknowledged ? ' (acknowledged)' : '' }}
               </template>
             </DiagnosticItem>
           </q-list>

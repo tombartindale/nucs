@@ -72,6 +72,7 @@ onMounted(async () => {
           <q-tooltip max-width="320px">{{ diags.some((d) => d.level === 'error') ? 'Fix the errors below first: a quiz with errors is not exported.' : STEP_HELP.qti }}</q-tooltip>
         </q-btn>
       </template>
+      <q-btn outline no-caps icon="edit" label="Edit" :to="`/edit-doc/${path}`" />
       <q-btn outline no-caps icon="open_in_new" label="Open raw" :href="fileUrl(path, null, 'view=1')" target="_blank" />
     </PageHeader>
     <q-banner v-if="error" class="bg-negative text-white" rounded>{{ error }}</q-banner>

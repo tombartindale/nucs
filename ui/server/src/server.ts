@@ -15,7 +15,7 @@ import cookie from '@fastify/cookie';
 import extractZip from 'extract-zip';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type {
-  BcnDiagnosticsEnvelope, BcnEditEnvelope, BcnReviewEnvelope, BcnStatusEnvelope, BcnSyncEnvelope, BootResponse, JobArgs,
+  BcnDiagnosticsEnvelope, BcnDoceditEnvelope, BcnEditEnvelope, BcnReviewEnvelope, BcnStatusEnvelope, BcnSyncEnvelope, BootResponse, JobArgs,
   ModulePlanRemindResponse, ModulePlanRequest, ModulePlanResponse, PlansSummaryResponse, ShowEnvelope, TranslationItem,
 } from '@beacon/shared';
 import { jobLabel, type App } from './app.js';
@@ -259,6 +259,47 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const data = await readJson(req);
     const lang = langOf(data.lang);
     const job = await saveEdit(rel, lang, editTextFile(String(data.text ?? '')), data.expect_sha, data.overwrite, await app.operator());
+    return reply.code(202).send(job);
+  });
+
+  // -- module document editing (course-map.md, a unit's activity.md, assignment-N.md) ---------
+  // bcn docedit is the sole authority on which relative names count as an editable module
+  // document; this just splits "KV7016/course-map.md" into the module and the doc's path
+  // relative to it, and keeps the whole thing inside the root (reusing app.safePath).
+  function modDocPath(raw: string): { module: string; relDoc: string; abs: string; relPath: string } {
+    const abs = app.safePath(raw);
+    const relPath = relative(app.root, abs);
+    const parts = relPath.split(sep);
+    if (parts.length < 2 || !new RegExp(MODULE).test(parts[0])) throw new BadRequest(`'${raw}' is not a module document.`);
+    return { module: parts[0], relDoc: parts.slice(1).join('/'), abs, relPath };
+  }
+
+  f.get('/api/moddoc', async (req: Req) => {
+    const { abs, relPath } = modDocPath(String(req.query.path ?? ''));
+    if (!existsSync(abs) || !statSync(abs).isFile()) return { exists: false, text: '', sha256: null, path: relPath };
+    const data = readFileSync(abs);
+    return { exists: true, text: data.toString('utf8').replace(/^﻿/, ''), sha256: sha256(data), path: relPath };
+  });
+
+  // Validate unsaved text (bcn docedit --dry-run). Read-only, so it runs directly rather than as a job.
+  f.post('/api/moddoc/check', async (req: Req) => {
+    const { module, relDoc } = modDocPath(String(req.query.path ?? ''));
+    const data = await readJson(req);
+    const file = editTextFile(String(data.text ?? ''));
+    try {
+      return await app.bcn.query<BcnDoceditEnvelope>('docedit', [app.targetPath(module), '--doc', relDoc, '--from', file, '--dry-run'], 60_000);
+    } finally {
+      try { unlinkSync(file); } catch { /* fine */ }
+    }
+  });
+
+  f.post('/api/moddoc/save', async (req: Req, reply) => {
+    const { module, relDoc } = modDocPath(String(req.query.path ?? ''));
+    const data = await readJson(req);
+    const file = editTextFile(String(data.text ?? ''));
+    const args: JobArgs = { doc: relDoc, from: file };
+    if (data.expect_sha && !data.overwrite) args.expect_sha = String(data.expect_sha);
+    const job = await app.jobs.submit('docedit', [module], args, `edit ${relDoc} · ${module}`, await app.operator());
     return reply.code(202).send(job);
   });
 

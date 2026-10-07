@@ -22,6 +22,8 @@ const routes: RouteRecordRaw[] = [
         props: (r: R) => ({ id: r.params.id, lang: r.query.lang === 'zh' ? 'zh' : 'en', startLine: num(r.query.line) }) },
       { path: `doc/:path(${MODULE}/.+)`, component: () => import('@/pages/DocPage.vue'), meta: { nav: 'programme' },
         props: (r: R) => ({ path: r.params.path, line: num(r.query.line) }) },
+      { path: `edit-doc/:path(${MODULE}/.+)`, component: () => import('@/pages/DocEditorPage.vue'), meta: { nav: 'programme' },
+        props: (r: R) => ({ path: r.params.path, line: num(r.query.line) }) },
       { path: 'diagnostics/:tab(mistranscriptions)?', component: () => import('@/pages/DiagnosticsPage.vue'), meta: { nav: 'diagnostics' },
         props: (r: R) => ({ tab: r.params.tab || 'codes' }) },
       { path: 'jobs/:open(\\d+)?', component: () => import('@/pages/JobsPage.vue'), meta: { nav: 'jobs' },

@@ -12,7 +12,7 @@ const repo = join(here, '..', '..', '..');
 const bcn = process.env.BCN || join(repo, 'tooling', '.venv', 'bin', 'bcn');
 if (!existsSync(bcn)) throw new Error(`bcn not found at ${bcn}; run scripts/setup.sh or set BCN`);
 
-const TOOLS = ['status', 'show', 'diagnostics', 'sync', 'review', 'doctor', 'codes', 'intake', 'translation', 'transfer', 'edit',
+const TOOLS = ['status', 'show', 'diagnostics', 'sync', 'review', 'doctor', 'codes', 'intake', 'translation', 'transfer', 'edit', 'docedit',
   'validate', 'render', 'cues', 'subtitles', 'package', 'qa', 'ack', 'script', 'bumpers', 'compose', 'qti', 'coursemap', 'readinglist'];
 const pascal = (s) => s.replace(/(^|_)(\w)/g, (_, __, c) => c.toUpperCase());
 
