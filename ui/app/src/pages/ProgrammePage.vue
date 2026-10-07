@@ -146,7 +146,6 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `28px repeat(${ladder.v
             <q-item-section class="prog-name">
               <q-item-label class="text-weight-bold">{{ name }}</q-item-label>
               <q-item-label caption>{{ m.title }}</q-item-label>
-              <q-item-label caption>{{ m.topics }} topics · {{ m.units.length }} units</q-item-label>
             </q-item-section>
             <q-item-section>
               <div class="ladder" :style="gridStyle">
