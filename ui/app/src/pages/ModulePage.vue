@@ -9,7 +9,7 @@ import StagePips from '@/components/StagePips.vue';
 import StateChip from '@/components/StateChip.vue';
 import { api, fileUrl } from '@/api';
 import { confirm } from '@/composables/confirm';
-import { LANG_NAME, plural, STAGE_LABEL, STEP_HELP, topicPath } from '@/format';
+import { fmtMinutes, LANG_NAME, plural, STAGE_LABEL, STEP_HELP, topicPath } from '@/format';
 import { useBeacon } from '@/stores/beacon';
 
 const BULK = ['validate', 'render', 'script', 'bumpers', 'cues', 'compose', 'package'];
@@ -237,7 +237,7 @@ async function sendReminder() {
         </template>
       </PageHeader>
 
-      <q-expansion-item v-if="plan" icon="event" label="Delivery planning" class="q-mb-md planning-card" default-opened
+      <q-expansion-item v-if="plan" icon="event" label="Delivery planning" class="q-mb-md planning-card"
         :header-class="plan.plan.onTrack === false ? 'text-negative' : undefined">
         <template #header>
           <q-item-section avatar><q-icon name="event" /></q-item-section>
@@ -248,7 +248,8 @@ async function sendReminder() {
               <span v-if="plan.ownerName || plan.ownerEmail"> · {{ plan.ownerName }}{{ plan.ownerName && plan.ownerEmail ? ' · ' : '' }}{{ plan.ownerEmail }}</span>
             </q-item-label>
           </q-item-section>
-          <StateChip v-if="plan.plan.onTrack !== null" :kind="plan.plan.onTrack ? 'ok' : 'blocked'" :label="plan.plan.onTrack ? 'on track' : 'behind schedule'" />
+          <StateChip v-if="plan.plan.onTrack !== null" :kind="plan.plan.onTrack ? 'ok' : 'blocked'"
+            :label="plan.plan.onTrack ? 'on track' : `${plural(plan.plan.daysBehind, 'day')} behind`" />
         </template>
         <q-card flat bordered>
           <q-card-section class="row items-end gap-md">
@@ -284,7 +285,7 @@ async function sendReminder() {
                 <tr v-for="t in plan.plan.tasks" :key="`${t.topic}-${t.kind}`">
                   <td><a :href="`#/topic/${t.topic}`">{{ t.topic }}</a> {{ t.title }}</td>
                   <td>{{ t.kind === 'brief' ? 'Write brief' : 'Record' }}</td>
-                  <td>{{ t.estimatedDays }}d</td>
+                  <td>{{ fmtMinutes(t.estimatedMinutes) }}</td>
                   <td>{{ t.deadline || '—' }}</td>
                 </tr>
               </tbody>

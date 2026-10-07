@@ -61,6 +61,14 @@ export function fmtDuration(ms: number | null | undefined): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+/** A task estimate in minutes, e.g. 15 -> "15 min", 90 -> "1h 30m", 120 -> "2h". */
+export function fmtMinutes(min: number): string {
+  if (min < 60) return `${Math.round(min)} min`;
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
 export function fmtAgo(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return '—';
   const d = (now - new Date(iso).getTime()) / 1000;

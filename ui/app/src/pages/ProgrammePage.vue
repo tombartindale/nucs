@@ -37,6 +37,13 @@ const milestoneChips = computed(() => {
   return out;
 });
 
+// The programme-wide view: every module with a delivery date, worst-behind first, so a
+// producer scanning across all modules sees what needs attention without opening each one.
+const scheduleRows = computed(() => Object.entries(plans.value)
+  .filter(([, p]) => p.deliveryDate !== null)
+  .map(([name, p]) => ({ name, deliveryDate: p.deliveryDate as string, onTrack: p.onTrack, daysBehind: p.daysBehind, next: milestoneChip(name) }))
+  .sort((a, b) => b.daysBehind - a.daysBehind || a.deliveryDate.localeCompare(b.deliveryDate)));
+
 const env = computed(() => beacon.status);
 const s = computed(() => env.value!.summary);
 const stages = computed(() => ({ en: env.value?.results[0]?.en.stages || [], zh: env.value?.results[0]?.zh.stages || [] }));
@@ -99,6 +106,28 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `28px repeat(${ladder.v
           </q-card>
         </div>
       </div>
+
+      <q-card v-if="Object.keys(plans).length" flat bordered class="q-mb-md">
+        <q-card-section class="row items-center q-pb-sm">
+          <div class="text-subtitle1 text-weight-medium">Delivery schedule</div>
+          <q-space />
+          <span class="text-caption text-grey-7">How each module's plan compares to today</span>
+        </q-card-section>
+        <q-list v-if="scheduleRows.length" separator>
+          <q-item v-for="r in scheduleRows" :key="r.name" clickable :to="`/module/${r.name}`">
+            <q-item-section>
+              <q-item-label class="text-weight-bold">{{ r.name }}</q-item-label>
+              <q-item-label caption>Delivery {{ r.deliveryDate }}{{ r.next ? ` · ${r.next.label}` : '' }}</q-item-label>
+            </q-item-section>
+            <q-item-section side>
+              <StateChip :kind="r.onTrack ? 'ok' : 'blocked'" :label="r.onTrack ? 'on track' : `${plural(r.daysBehind, 'day')} behind`" />
+            </q-item-section>
+          </q-item>
+        </q-list>
+        <q-card-section v-else class="text-grey-7">
+          No modules have a delivery date set yet. Open a module's Delivery planning section to set one.
+        </q-card-section>
+      </q-card>
 
       <q-card flat bordered>
         <q-list separator>

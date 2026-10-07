@@ -25,9 +25,12 @@ const RECORDING_MULTIPLIER = 1.5;
 const HOURS_PER_DAY = 3;
 const DEFAULT_RECORDING_MINUTES = 40; // used when a topic has no declared `minutes`
 
-/** Minutes of work, to quarter-day granularity, at HOURS_PER_DAY focused hours/day. */
-function daysFor(minutes: number): number {
-  return Math.ceil((minutes / 60 / HOURS_PER_DAY) * 4) / 4;
+/** Minutes of work, as a raw (unrounded) fraction of a day at HOURS_PER_DAY focused
+ *  hours/day. Rounding happens only once, when the backward walk steps whole days off
+ *  the calendar — never here, or every task under one quarter-day would display
+ *  identically regardless of its actual length. */
+function rawDaysFor(minutes: number): number {
+  return minutes / 60 / HOURS_PER_DAY;
 }
 
 /** Steps back by a whole number of days, rounding fractional accumulated offsets up
@@ -46,7 +49,7 @@ export interface PlannedTopicInput {
 }
 
 export interface PlannedTask {
-  topic: string; title: string; kind: 'brief' | 'recording'; estimatedDays: number; deadline: string | null;
+  topic: string; title: string; kind: 'brief' | 'recording'; estimatedMinutes: number; deadline: string | null;
 }
 
 export interface Milestone {
@@ -58,6 +61,9 @@ export interface ModulePlanComputed {
   deliveryDate: string | null;
   topicsTotal: number; topicsRecorded: number; topicsRemaining: number; topicsNotDrafted: number;
   onTrack: boolean | null;
+  /** How many days the schedule has already run past "doable": the earliest outstanding
+   *  task's deadline is this many days before today. 0 when on track or no delivery date. */
+  daysBehind: number;
   milestones: Milestone[];
   tasks: PlannedTask[];
 }
@@ -87,17 +93,23 @@ export function moduleTopicsFor(status: StatusEnvelope, module: string): Planned
 export function computeModulePlan(topics: PlannedTopicInput[], deliveryDate: string | null): ModulePlanComputed {
   // Outstanding tasks, course-map order, each topic's brief task immediately before its
   // recording task so a not-yet-drafted topic schedules both in the right sequence.
+  // estimatedMinutes is the real, displayed estimate (brief: a fixed 20 min; recording:
+  // 1.5x the topic's declared length) — never rounded here. Scheduling needs whole
+  // calendar days, but rounding each task's own minutes to a day (or even a quarter-day)
+  // before accumulating would make most topics, whose work is under a quarter-day, show
+  // identically regardless of actual length. The walk below rounds only once, when
+  // stepping days off the calendar, carrying the remainder forward across tasks instead.
   const tasks: Omit<PlannedTask, 'deadline'>[] = [];
   for (const t of topics) {
-    if (!t.drafted) tasks.push({ topic: t.topic, title: t.title, kind: 'brief', estimatedDays: daysFor(BRIEF_MINUTES) });
+    if (!t.drafted) tasks.push({ topic: t.topic, title: t.title, kind: 'brief', estimatedMinutes: BRIEF_MINUTES });
     if (!t.recorded) {
-      const minutes = t.minutes ?? DEFAULT_RECORDING_MINUTES;
-      tasks.push({ topic: t.topic, title: t.title, kind: 'recording', estimatedDays: daysFor(minutes * RECORDING_MULTIPLIER) });
+      const minutes = (t.minutes ?? DEFAULT_RECORDING_MINUTES) * RECORDING_MULTIPLIER;
+      tasks.push({ topic: t.topic, title: t.title, kind: 'recording', estimatedMinutes: minutes });
     }
   }
 
   // Walk backwards from the delivery date: the last task's deadline sits closest to
-  // delivery, each earlier task's deadline is pushed back by its own estimated days.
+  // delivery, each earlier task's deadline is pushed back by its own estimated time.
   // Fractional days accumulate across the whole walk (carried in `accrued`) rather than
   // being rounded away per task, so a run of several sub-day tasks still separates onto
   // distinct dates instead of collapsing onto the same one.
@@ -106,7 +118,7 @@ export function computeModulePlan(topics: PlannedTopicInput[], deliveryDate: str
     let cursor = deliveryDate;
     let accrued = 0; // fractional days owed but not yet stepped off the calendar
     for (let i = tasks.length - 1; i >= 0; i--) {
-      accrued += tasks[i].estimatedDays;
+      accrued += rawDaysFor(tasks[i].estimatedMinutes);
       const wholeDays = Math.floor(accrued);
       if (wholeDays > 0) {
         cursor = minusDays(cursor, wholeDays);
@@ -146,9 +158,12 @@ export function computeModulePlan(topics: PlannedTopicInput[], deliveryDate: str
   const deadlines = dated.map((t) => t.deadline).filter((d): d is string => d !== null);
   const earliestDeadline = deadlines.length ? deadlines.reduce((a, b) => (a < b ? a : b)) : null;
   const onTrack = deliveryDate === null ? null : (earliestDeadline === null || earliestDeadline >= today());
+  const daysBehind = earliestDeadline !== null && earliestDeadline < today()
+    ? Math.round((Date.parse(`${today()}T00:00:00Z`) - Date.parse(`${earliestDeadline}T00:00:00Z`)) / 86_400_000)
+    : 0;
 
   return {
     deliveryDate, topicsTotal: topics.length, topicsRecorded, topicsRemaining, topicsNotDrafted,
-    onTrack, milestones, tasks: dated,
+    onTrack, daysBehind, milestones, tasks: dated,
   };
 }

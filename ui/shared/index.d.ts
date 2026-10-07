@@ -190,7 +190,7 @@ export interface TransferImportRequest { source: string; path?: string; dry_run?
 // -- delivery planning: backward-scheduled briefs/recording, milestones, ICS, reminders ---------
 /** One outstanding task against one topic: writing its brief, or recording it. */
 export interface PlannedTask {
-  topic: string; title: string; kind: 'brief' | 'recording'; estimatedDays: number; deadline: string | null;
+  topic: string; title: string; kind: 'brief' | 'recording'; estimatedMinutes: number; deadline: string | null;
 }
 export type MilestoneKind = 'briefs_done' | 'recorded' | 'translated' | 'packaged';
 /** One module-wide checkpoint: every topic reaching a given stage. dueDate is only
@@ -201,6 +201,7 @@ export interface ModulePlanComputed {
   deliveryDate: string | null;
   topicsTotal: number; topicsRecorded: number; topicsRemaining: number; topicsNotDrafted: number;
   onTrack: boolean | null;       // null if no delivery_date set
+  daysBehind: number;            // how far the earliest outstanding deadline has slipped past today; 0 if on track
   milestones: Milestone[];       // always 4, in pipeline order — the producer's headline view
   tasks: PlannedTask[];          // outstanding brief/recording tasks, course-map order — the content creator's detail view
 }
@@ -210,9 +211,9 @@ export interface ModulePlanResponse {
 }
 export interface ModulePlanRequest { deliveryDate?: string | null; ownerName?: string; ownerEmail?: string }
 export interface ModulePlanRemindResponse { ok: true; sentTo: string }
-/** The producer's cross-module view (GET /api/plans): milestones only, no topic-level task detail. */
+/** The producer's cross-module view (GET /api/plans): milestones and daysBehind only, no topic-level task detail. */
 export type PlansSummaryResponse = Record<string, {
-  deliveryDate: string | null; onTrack: boolean | null; milestones: Milestone[];
+  deliveryDate: string | null; onTrack: boolean | null; daysBehind: number; milestones: Milestone[];
 }>;
 
 export interface ErrorResponse { error: string }

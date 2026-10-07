@@ -36,7 +36,10 @@ const TRANSFER_UPLOAD_MAX = 20 * 1024 * 1024 * 1024;
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const TOPIC = '^[A-Z]{2}\\d{4}-U\\d{2}-T\\d{2}$';
 const MODULE = '^[A-Z]{2}\\d{4}$';
-const ICS_PATH = /^\/api\/module\/[A-Z]{2}\d{4}\/plan\.ics$/;
+// The feed's secret lives in the path, not a query string: some calendar clients
+// (desktop Outlook among them) silently drop query parameters when subscribing to an
+// internet calendar, which otherwise turns every ICS fetch into a 404.
+const ICS_PATH = /^\/api\/module\/[A-Z]{2}\d{4}\/plan\/[^/]+\/calendar\.ics$/;
 const PING_MS = 15_000;
 const ADMIN_EMAILS = new Set((process.env.ADMIN_EMAILS || '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean));
 const SSE_BACKLOG = 4 * 1024 * 1024;  // a tab that falls this far behind is dropped; it resyncs on reconnect
@@ -279,12 +282,19 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   });
 
   // -- delivery planning: backward-scheduled briefs/recording, milestones, ICS, reminders -----
+  const fmtMinutes = (min: number): string => {
+    if (min < 60) return `${Math.round(min)} min`;
+    const h = Math.floor(min / 60);
+    const m = Math.round(min % 60);
+    return m ? `${h}h ${m}m` : `${h}h`;
+  };
+
   async function planFor(module: string): Promise<ModulePlanResponse> {
     const row = await app.db.getPlan(module);
     const status = await app.status.get();
     const topics = status ? moduleTopicsFor(status, module) : [];
     const plan = computeModulePlan(topics, row.delivery_date);
-    const icsUrl = `${app.auth.baseUrl}/api/module/${module}/plan.ics?token=${row.ics_token}`;
+    const icsUrl = `${app.auth.baseUrl}/api/module/${module}/plan/${row.ics_token}/calendar.ics`;
     return { module, deliveryDate: row.delivery_date, ownerName: row.owner_name, ownerEmail: row.owner_email, icsUrl, plan };
   }
 
@@ -309,12 +319,13 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   });
 
   // Not session-guarded (see the onRequest hook above) — token-guarded instead, since a
-  // calendar client can't send a cookie. A wrong or missing token looks like a 404, same
-  // as a module that doesn't exist, so a guessed token can't confirm a module's name.
-  f.get(`/api/module/:name(${MODULE})/plan.ics`, async (req: Req, reply) => {
+  // calendar client can't send a cookie. The token is a path segment, not a query string
+  // (see the ICS_PATH comment), and a wrong or missing one looks like a 404, same as a
+  // module that doesn't exist, so a guessed token can't confirm a module's name.
+  f.get(`/api/module/:name(${MODULE})/plan/:token/calendar.ics`, async (req: Req, reply) => {
     const module = req.params.name;
     const row = await app.db.getPlan(module);
-    const given = Buffer.from(String(req.query.token || ''));
+    const given = Buffer.from(String(req.params.token || ''));
     const expected = Buffer.from(row.ics_token);
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
       return reply.code(404).send({ error: 'Not found.' });
@@ -326,7 +337,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
       uid: `${t.topic}-${t.kind}@beacon-ui`,
       date: t.deadline as string,
       summary: t.kind === 'brief' ? `Brief due: ${t.topic} — ${t.title}` : `Record by: ${t.topic} — ${t.title}`,
-      description: t.kind === 'brief' ? `Est. 20 min to write the brief.` : `Est. recording ${t.estimatedDays} day(s).`,
+      description: t.kind === 'brief' ? `Est. 20 min to write the brief.` : `Est. recording ${fmtMinutes(t.estimatedMinutes)}.`,
     }));
     if (plan.deliveryDate) events.push({ uid: `${module}-delivery@beacon-ui`, date: plan.deliveryDate, summary: `Delivery: ${module}` });
     const ics = buildIcs(module, events);
@@ -358,7 +369,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     for (const row of rows) {
       const topics = status ? moduleTopicsFor(status, row.module) : [];
       const plan = computeModulePlan(topics, row.delivery_date);
-      out[row.module] = { deliveryDate: row.delivery_date, onTrack: plan.onTrack, milestones: plan.milestones };
+      out[row.module] = { deliveryDate: row.delivery_date, onTrack: plan.onTrack, daysBehind: plan.daysBehind, milestones: plan.milestones };
     }
     return out;
   });
