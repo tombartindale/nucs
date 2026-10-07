@@ -234,9 +234,6 @@ async function bumpers(lang: 'en' | 'zh') {
         <q-tooltip max-width="320px">Leave the intro and outro off the draft video made by compose. Quicker, and the player's times then match the cue sheet exactly. Delivered files are unaffected.</q-tooltip>
       </q-checkbox>
       <q-space />
-      <q-btn flat dense no-caps icon="slideshow" label="Teleprompter" :href="`#/prompt/${t.id}`" target="_blank">
-        <q-tooltip max-width="320px">Open the narration as a full-screen teleprompter in a new tab. Space plays and pauses; the arrow keys change speed and jump between slides.</q-tooltip>
-      </q-btn>
       <q-btn flat dense no-caps icon="verified" label="Verify files" @click="emit('verify')">
         <q-tooltip max-width="320px">Open each of this topic's files to confirm it is what it claims (not empty, not corrupt), and that delivered files match their checksums. Results show in the Artefacts table.</q-tooltip>
       </q-btn>

@@ -7,7 +7,7 @@ import { fmtAgo, fmtBytes } from '@/format';
 import { useBeacon } from '@/stores/beacon';
 import { TOPIC } from './context';
 
-const props = defineProps<{ verify: TopicVerifyResponse | null; verifying: boolean }>();
+const props = defineProps<{ verify: TopicVerifyResponse | null; verifying: boolean; flat?: boolean }>();
 const t = inject(TOPIC)!;
 const beacon = useBeacon();
 const rows = computed(() => (t.status.value?.artifacts || []).filter((a) => a.exists || a.kind === 'source'));
@@ -21,9 +21,9 @@ const verifyOk = computed(() => props.verify?.results?.[0]?.ok);
 </script>
 
 <template>
-  <q-card flat bordered>
+  <q-card flat :bordered="!flat">
     <q-card-section class="row items-center q-pb-sm">
-      <div class="text-subtitle1 text-weight-medium">Artefacts</div>
+      <div v-if="!flat" class="text-subtitle1 text-weight-medium">Artefacts</div>
       <q-space />
       <span v-if="verifying" class="text-caption text-grey-7"><q-spinner size="xs" /> verifying…</span>
       <StateChip v-else-if="verify" :kind="verifyOk ? 'ok' : 'blocked'" :label="verifyOk ? 'verified' : 'verify found problems'" />

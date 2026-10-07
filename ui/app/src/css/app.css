@@ -71,6 +71,7 @@ body.body--dark a:not(.q-btn):not(.q-item):not(.q-tab):not(.cell) { color: var(-
 .cell.planned { background: transparent; border-style: dotted; }
 .cell.dim { opacity: .25; }
 .cell .unrev { position: absolute; bottom: 2px; right: 4px; font-size: 10px; color: var(--q-warning); font-weight: 700; }
+.cell.activity { display: flex; align-items: center; justify-content: center; border-style: dashed; }
 
 /* -- topic: the pipeline as a row of steps ---------------------------------------------- */
 .stepflow { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding-bottom: 2px; }

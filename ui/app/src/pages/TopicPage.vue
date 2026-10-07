@@ -24,6 +24,7 @@ const verify = shallowRef<TopicVerifyResponse | null>(null);
 const verifying = ref(false);
 const error = ref<string | null>(null);
 const layout = ref<'side' | 'stacked'>(beacon.boot?.prefs.topic_layout || 'side');
+const bottomTab = ref<'diagnostics' | 'artefacts'>('diagnostics');
 
 const show = computed(() => data.value?.show.results?.[0] ?? null);
 const status = computed(() => data.value?.status ?? null);
@@ -77,10 +78,17 @@ const allDiags = computed(() => [...((verify.value?.diagnostics || []) as Diagno
         <SlidesPane />
         <VideoPane :start-at="startAt" />
       </div>
-      <div class="row q-col-gutter-md">
-        <div class="col-12 col-lg-6"><TopicDiagnostics :diags="allDiags" /></div>
-        <div class="col-12 col-lg-6"><ArtefactsTable :verify="verify" :verifying="verifying" /></div>
-      </div>
+      <q-card flat bordered>
+        <q-tabs v-model="bottomTab" dense no-caps align="left" active-color="primary" indicator-color="primary">
+          <q-tab name="diagnostics" :label="`Diagnostics${allDiags.length ? ` (${allDiags.length})` : ''}`" />
+          <q-tab name="artefacts" label="Artefacts" />
+        </q-tabs>
+        <q-separator />
+        <q-tab-panels v-model="bottomTab" animated>
+          <q-tab-panel name="diagnostics" class="q-pa-none"><TopicDiagnostics :diags="allDiags" flat /></q-tab-panel>
+          <q-tab-panel name="artefacts" class="q-pa-none"><ArtefactsTable :verify="verify" :verifying="verifying" flat /></q-tab-panel>
+        </q-tab-panels>
+      </q-card>
     </template>
   </q-page>
 </template>

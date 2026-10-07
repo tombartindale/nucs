@@ -6,16 +6,16 @@ import DiagnosticItem from '@/components/DiagnosticItem.vue';
 import { fmtTime, LEVEL_ORDER } from '@/format';
 import { TOPIC } from './context';
 
-const props = defineProps<{ diags: Diagnostic[] }>();
+const props = defineProps<{ diags: Diagnostic[]; flat?: boolean }>();
 const t = inject(TOPIC)!;
 const sorted = computed(() => [...props.diags].sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]));
 const scriptLang = (d: Diagnostic) => (d.file === 'topic.zh.md' ? 'zh' : 'en');
 </script>
 
 <template>
-  <q-card flat bordered>
+  <q-card flat :bordered="!flat">
     <q-card-section class="row items-center q-pb-sm">
-      <div class="text-subtitle1 text-weight-medium">Diagnostics</div>
+      <div v-if="!flat" class="text-subtitle1 text-weight-medium">Diagnostics</div>
       <q-space />
       <router-link to="/diagnostics/mistranscriptions" class="text-caption">Proofread mis-transcriptions →</router-link>
     </q-card-section>

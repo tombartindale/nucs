@@ -18,6 +18,9 @@ const scriptFiles = computed(() => (t.status.value?.artifacts || []).filter((a) 
     <q-card-section class="row items-center gap-sm q-pb-sm">
       <div class="text-subtitle1 text-weight-medium">Script</div>
       <q-btn flat dense size="sm" no-caps icon="edit" label="Edit" :to="`/edit/${t.id}?lang=${lang}`" />
+      <q-btn flat dense size="sm" no-caps icon="slideshow" label="Teleprompter" :href="`#/prompt/${t.id}`" target="_blank">
+        <q-tooltip max-width="320px">Open the narration as a full-screen teleprompter in a new tab. Space plays and pauses; the arrow keys change speed and jump between slides.</q-tooltip>
+      </q-btn>
       <q-space />
       <q-btn-toggle v-if="t.show.value?.zh" v-model="lang" dense no-caps unelevated size="sm" toggle-color="primary"
         :options="[{ label: 'EN', value: 'en' }, { label: 'ZH', value: 'zh' }]" />
