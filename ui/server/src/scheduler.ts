@@ -224,8 +224,21 @@ export class Scheduler {
         }
         this.bus.publish({ type: 'job-event', job: job.id, target_index: job.targetIndex, target_count: job.targets.length, event: ev });
       });
-      p.on('error', reject);
+      // run()'s own cancelRequested() check only runs between targets, before invoke() is
+      // called for the next one — it never re-checks while this process is actually running,
+      // so a single-target job (the common case) ignored Cancel entirely until it finished on
+      // its own. This polls the same flag while the process is alive and signals it directly.
+      const watchCancel = setInterval(() => {
+        void this.cancelRequested(job.id).then((requested) => {
+          if (!requested || job.proc !== p) return;
+          clearInterval(watchCancel);
+          job.cancelRequested = true;
+          p.kill('SIGINT');
+        });
+      }, 1000);
+      p.on('error', (e) => { clearInterval(watchCancel); reject(e); });
       p.on('close', (code, signal) => {
+        clearInterval(watchCancel);
         job.proc = null;
         const text = Buffer.concat(out).toString('utf8');
         let env: AnyEnvelope | null = null;
