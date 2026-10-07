@@ -14,7 +14,6 @@ which is content rather than build output, so it survives build/ being cleared.
 from __future__ import annotations
 
 import argparse
-import datetime as _dt
 import hashlib
 from pathlib import Path
 
@@ -81,12 +80,7 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
         r.extra.update({"written": False, "sha256": current_sha})
     else:
         if old_bytes is not None:
-            hist = t.dir / ".history"
-            hist.mkdir(exist_ok=True)
-            stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-            fsutil.write_bytes(hist / f"{src.stem}.{stamp}{src.suffix}", old_bytes)
-            for old in sorted(hist.glob(f"{src.stem}.*{src.suffix}"))[:-KEEP_VERSIONS]:
-                old.unlink(missing_ok=True)
+            fsutil.save_with_history(src, old_bytes, keep=KEEP_VERSIONS)
         fsutil.write_bytes(src, new_bytes)
         r.extra.update({"written": True, "sha256": _sha(new_bytes)})
         r.diagnostics.append(Diagnostic("EDIT_SAVED", f"Saved {src.name}.", topic=t.id, lang=lang, file=src.name))

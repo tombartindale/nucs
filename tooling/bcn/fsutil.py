@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime as _dt
 import json
 import os
 import struct
@@ -103,6 +104,18 @@ def write_text(dest: Path, text: str) -> None:
 def write_bytes(dest: Path, data: bytes) -> None:
     with atomic_path(dest) as tmp:
         tmp.write_bytes(data)
+
+
+def save_with_history(path: Path, old_bytes: bytes, keep: int = 30) -> None:
+    """Keeps the version a save is about to replace, in a .history/ folder beside the file
+    (content, not build output, so it survives build/ being cleared) — the last `keep`
+    versions, pruned by name, which sorts chronologically since the stamp format does."""
+    hist = path.parent / ".history"
+    hist.mkdir(exist_ok=True)
+    stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    write_bytes(hist / f"{path.stem}.{stamp}{path.suffix}", old_bytes)
+    for old in sorted(hist.glob(f"{path.stem}.*{path.suffix}"))[:-keep]:
+        old.unlink(missing_ok=True)
 
 
 def write_json(dest: Path, data: Any) -> None:

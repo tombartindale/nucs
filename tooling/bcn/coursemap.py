@@ -95,15 +95,20 @@ def _check_headings(lines: list[str], required: list[str], rel: str, diags: list
                                     hint=f"Add a '## {want}' section."))
 
 
-def load_course_map(module_dir: Path, required_headings: list[str] | None = None) -> CourseMap:
+def load_course_map(module_dir: Path, required_headings: list[str] | None = None, text: str | None = None) -> CourseMap:
+    """text overrides the file's real content (e.g. an unsaved edit) without touching disk —
+    the same in-memory-override idea rules.py's validate_topic() already uses for topic.md."""
     module = module_dir.name
     path = module_dir / "course-map.md"
     rel = f"{module}/course-map.md"
     cm = CourseMap(module, path)
-    if not path.is_file():
-        cm.diagnostics.append(Diagnostic("DOC_MISSING", f"{rel} does not exist.", file=rel))
-        return cm
-    lines = path.read_text(encoding="utf-8-sig").splitlines()
+    if text is None:
+        if not path.is_file():
+            cm.diagnostics.append(Diagnostic("DOC_MISSING", f"{rel} does not exist.", file=rel))
+            return cm
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
+    else:
+        lines = text.replace("\r\n", "\n").replace("\r", "\n").splitlines()
     if required_headings:
         _check_headings(lines, required_headings, rel, cm.diagnostics)
 
@@ -265,9 +270,11 @@ def load_assets(module_dir: Path) -> list[AssetRequest]:
     return out
 
 
-def validate_doc(path: Path, rel: str, required: list[str], outcomes: dict[str, str], unit: str | None = None) -> list[Diagnostic]:
+def validate_doc(path: Path, rel: str, required: list[str], outcomes: dict[str, str], unit: str | None = None,
+                 text: str | None = None) -> list[Diagnostic]:
     diags: list[Diagnostic] = []
-    lines = path.read_text(encoding="utf-8-sig").splitlines()
+    lines = (text.replace("\r\n", "\n").replace("\r", "\n").splitlines() if text is not None
+             else path.read_text(encoding="utf-8-sig").splitlines())
     _check_headings(lines, required, rel, diags)
     for i, line in enumerate(lines):
         for lo in LO_RE.findall(line):
@@ -280,10 +287,14 @@ def validate_doc(path: Path, rel: str, required: list[str], outcomes: dict[str, 
 
 
 def validate_activity(path: Path, rel: str, required: list[str], outcomes: dict[str, str], module: str, unit: str,
-                      types: list[str]) -> list[Diagnostic]:
-    """An activity: optional front matter (unit, type, lang), required headings if configured, outcome refs."""
-    diags = validate_doc(path, rel, required, outcomes, unit)
-    lines = path.read_text(encoding="utf-8-sig").splitlines()
+                      types: list[str], text: str | None = None) -> list[Diagnostic]:
+    """An activity: optional front matter (unit, type, lang), required headings if configured, outcome refs.
+    text overrides the file's real content; a quiz-type activity's question content is still
+    read from disk even then (bcn qti's parser has no text-override hook), so a dry-run of an
+    edited quiz won't reflect unsaved question changes until it is actually saved."""
+    diags = validate_doc(path, rel, required, outcomes, unit, text=text)
+    lines = (text.replace("\r\n", "\n").replace("\r", "\n").splitlines() if text is not None
+             else path.read_text(encoding="utf-8-sig").splitlines())
     if lines and lines[0].strip() == "---":
         fm: dict[str, tuple[str, int]] = {}
         for i in range(1, min(len(lines), 30)):

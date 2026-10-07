@@ -92,6 +92,7 @@ RESULT_EXTRAS: dict[str, dict[str, Any]] = {
                 "resolution": {"type": "array"}, "fps": {"type": "number"}},
     "edit": {"slides": {"type": "integer"}, "words": {"type": "integer"}, "target_words": {"type": ["integer", "null"]},
              "written": {"type": "boolean"}, "sha256": {"type": ["string", "null"]}, "current_sha256": {"type": "string"}},
+    "docedit": {"written": {"type": "boolean"}, "sha256": {"type": ["string", "null"]}, "current_sha256": {"type": "string"}},
     "diagnostics": {}, "codes": {}, "schema": {},
 }
 
@@ -108,6 +109,7 @@ TOP_EXTRAS: dict[str, dict[str, Any]] = {
     "qa": {"unit_minutes": {"type": "object"}},
     "ack": {"acknowledged": {"type": "object"}},
     "edit": {"validation_ok": {"type": "boolean"}, "counts": {"type": "object"}, "diagnostics_are_validation": {"type": "boolean"}},
+    "docedit": {"validation_ok": {"type": "boolean"}, "counts": {"type": "object"}, "diagnostics_are_validation": {"type": "boolean"}},
     "sync": {"direction": {"enum": ["pull", "push"]}, "dry_run": {"type": "boolean"}, "remote": {"type": "string"},
              "counts": {"type": "object"}, "plan": {"type": "array"}, "ignored": {"type": "array"},
              "last_pull": _str_or_null, "last_push": _str_or_null},
