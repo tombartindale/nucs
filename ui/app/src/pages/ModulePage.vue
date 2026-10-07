@@ -198,10 +198,10 @@ async function sendReminder() {
         <StateChip v-if="m.blocked" kind="blocked" :label="`${m.blocked} blocked`" />
         <StateChip v-if="m.stale" kind="stale" :label="`${m.stale} stale`" />
         <StateChip v-if="m.cloud" kind="cloud" :label="`☁ ${m.cloud} cloud-only`" />
-        <q-btn v-if="quizzes.length" outline no-caps icon="quiz" label="Export quizzes to LMS" @click="exportQuizzes">
+        <q-btn v-if="quizzes.length" outline dense no-caps icon="quiz" label="Export quizzes to LMS" @click="exportQuizzes">
           <q-tooltip max-width="320px">{{ STEP_HELP.qti }}</q-tooltip>
         </q-btn>
-        <q-btn outline no-caps label="Run QA on module" @click="beacon.runJob('qa', [module], {})" />
+        <q-btn outline dense no-caps label="Run QA on module" @click="beacon.runJob('qa', [module], {})" />
         <template v-if="moduleMap">
           <q-btn-dropdown v-if="moduleMap.exists" split outline dense no-caps label="Module map" :to="`/edit-doc/${moduleMap.path}`">
             <q-badge v-if="moduleMap.errors" color="negative" floating>{{ moduleMap.errors }}</q-badge>
@@ -252,8 +252,10 @@ async function sendReminder() {
               <span v-if="plan.ownerName || plan.ownerEmail"> · {{ plan.ownerName }}{{ plan.ownerName && plan.ownerEmail ? ' · ' : '' }}{{ plan.ownerEmail }}</span>
             </q-item-label>
           </q-item-section>
-          <StateChip v-if="plan.plan.onTrack !== null" :kind="plan.plan.onTrack ? 'ok' : 'blocked'"
-            :label="plan.plan.onTrack ? 'on track' : `${plural(plan.plan.daysBehind, 'day')} behind`" />
+          <q-item-section v-if="plan.plan.onTrack !== null" side>
+            <StateChip :kind="plan.plan.onTrack ? 'ok' : 'blocked'"
+              :label="plan.plan.onTrack ? 'on track' : `${plural(plan.plan.daysBehind, 'day')} behind`" />
+          </q-item-section>
         </template>
         <q-card flat bordered>
           <q-card-section class="row items-end gap-md">

@@ -151,6 +151,9 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `28px repeat(${ladder.v
               <div class="ladder" :style="gridStyle">
                 <template v-for="lang in LANGS" :key="lang">
                   <span class="ladder-lang" :style="{ gridRow: lang === 'en' ? 1 : 2 }">{{ lang.toUpperCase() }}</span>
+                  <span v-if="lang === 'zh'" class="ladder-branch" :style="{ gridRow: 2, gridColumn: ladder.branch + 1 }">
+                    ↳ after subtitles
+                  </span>
                   <div v-for="c in cells(m, lang)" :key="c.st" :class="['ladder-cell', lang, { done: c.n === m.topics && c.n > 0 }]"
                     :style="{ gridRow: lang === 'en' ? 1 : 2, gridColumn: c.col }">
                     <span class="fill" :style="{ width: `${c.pct}%` }"></span>
@@ -176,10 +179,6 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `28px repeat(${ladder.v
           </q-item>
           <q-item v-if="!modules.length"><q-item-section class="text-grey-7">No modules found.</q-item-section></q-item>
         </q-list>
-        <q-card-section class="text-caption text-grey-7">
-          Each cell counts the topics that have reached at least that stage. Mandarin starts once the English
-          subtitles are done, when a topic can be sent for translation.
-        </q-card-section>
       </q-card>
     </template>
   </q-page>
