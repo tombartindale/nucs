@@ -25,7 +25,7 @@ const s = computed(() => STYLE[props.kind || ''] || { outline: true });
 
 <template>
   <q-chip dense square size="12px" :icon="icon" :color="s.color" :text-color="s.textColor" :outline="s.outline"
-    :class="['q-ma-none', s.cls]"><slot>{{ label ?? kind }}</slot></q-chip>
+    :class="['q-ma-none', s.cls]">{{ label ?? kind }}<slot /></q-chip>
 </template>
 
 <style scoped>
