@@ -105,6 +105,13 @@ const PUBLIC_PATHS = new Set(['/api/auth/request-link', '/api/auth/verify', '/ap
 export async function buildServer({ app, staticDir, testDisableAuth }: ServerOptions): Promise<FastifyInstance> {
   // Live event streams never finish by themselves, so closing must not wait for them.
   const f = Fastify({ logger: false, exposeHeadRoutes: true, bodyLimit: UPLOAD_MAX, forceCloseConnections: true });
+  // Node's http.Server defaults requestTimeout to 5 minutes (a slow-loris mitigation): any
+  // request whose body is not fully received by then is silently aborted, truncating
+  // whatever had arrived rather than erroring clearly. A large upload (video, a full-backup
+  // zip) on a slow connection can easily take longer than that, so it is disabled here —
+  // every upload route already bounds size with its own bodyLimit, and every route needs a
+  // session cookie except the handful of public auth/static paths.
+  f.server.requestTimeout = 0;
   await f.register(cookie);
   const streams = new Set<import('node:http').ServerResponse>();
   f.addHook('onClose', async () => { for (const res of streams) res.end(); });
