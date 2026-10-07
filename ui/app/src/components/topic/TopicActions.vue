@@ -47,6 +47,7 @@ const t = inject(TOPIC)!;
 const beacon = useBeacon();
 const force = ref(false);
 const noBumpers = ref(true);
+const draftMode = ref(true);
 
 const stateOf = (lang: 'en' | 'zh') => t.status.value?.[lang] ?? null;
 
@@ -156,6 +157,7 @@ async function run(step: string, lang: 'en' | 'zh') {
   const args: Record<string, string | boolean> = { lang: step === 'cues' ? 'en' : lang };
   if (force.value) args.force = true;
   if (step === 'compose' && noBumpers.value) args.no_bumpers = true;
+  if (step === 'compose' && draftMode.value) args.draft = true;
   if (step === 'qa') delete args.lang;
   await beacon.runJob(step, [t.rel], args);
 }
@@ -230,8 +232,11 @@ async function bumpers(lang: 'en' | 'zh') {
       <q-checkbox v-model="force" dense label="force re-run">
         <q-tooltip max-width="320px">Rebuild even if the result is already up to date. Normally a step is skipped when nothing it depends on has changed.</q-tooltip>
       </q-checkbox>
+      <q-checkbox v-model="draftMode" dense label="draft">
+        <q-tooltip max-width="320px">{{ STEP_HELP.compose }} Much faster than a full compose; never delivered.</q-tooltip>
+      </q-checkbox>
       <q-checkbox v-model="noBumpers" dense label="no bumpers">
-        <q-tooltip max-width="320px">Leave the intro and outro off the draft video made by compose. Quicker, and the player's times then match the cue sheet exactly. Delivered files are unaffected.</q-tooltip>
+        <q-tooltip max-width="320px">Leave the intro and outro off the video compose makes. Quicker, and the player's times then match the cue sheet exactly. Delivered files are unaffected.</q-tooltip>
       </q-checkbox>
       <q-space />
       <q-btn flat dense no-caps icon="verified" label="Verify files" @click="emit('verify')">
