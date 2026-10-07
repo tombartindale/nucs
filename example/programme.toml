@@ -19,7 +19,7 @@ max_divergence = 0.10
 format = "srt"           # PLACEHOLDER: "srt", "vtt" or "both"
 
 [delivery]
-transcode = false        # PLACEHOLDER: partner delivery spec unconfirmed
+# PLACEHOLDER: partner delivery spec unconfirmed; the defaults are 1920x1080, 25 fps, h264/aac.
 
 [compose]
 layout = "side_by_side"  # presenter fills the right half: export the edit at 960x1080, square pixels

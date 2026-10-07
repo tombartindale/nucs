@@ -101,8 +101,9 @@ DEFAULTS: dict[str, Any] = {
         "audio_bitrate": "192k",
     },
     "compose": {
-        # Placeholder: the partner's composite layout is not agreed.
-        "layout": "inset",  # "inset" or "side_by_side"
+        # side_by_side: slides on the left, the presenter filling the right share the theme's
+        # safe_area.right keeps clear (export the edit at 960x1080). inset is the alternative.
+        "layout": "side_by_side",  # "side_by_side" or "inset"
         "inset_scale": 0.3,
         "inset_position": "top-right",  # top-left, top-right, bottom-left, bottom-right; bottom sits over subtitles
         "inset_margin": 16,
