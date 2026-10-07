@@ -13,7 +13,7 @@ import StateChip from '@/components/StateChip.vue';
 import { fmtTime, LEVEL_ORDER, topicPath } from '@/format';
 import { useBeacon } from '@/stores/beacon';
 
-const props = defineProps<{ tab: string }>();
+const props = defineProps<{ tab: string; topic?: string }>();
 const beacon = useBeacon();
 const router = useRouter();
 const f = reactive({ level: 'warn', module: '', lang: '', code: '' });
@@ -41,7 +41,7 @@ const tab = computed({
 const groups = computed(() => {
   const list = outstanding.value.filter((d) =>
     LEVEL_ORDER[d.level] <= LEVEL_ORDER[f.level] &&
-    (!f.module || (d.topic || d.file || '').startsWith(f.module)) &&
+    (props.topic ? d.topic === props.topic : !f.module || (d.topic || d.file || '').startsWith(f.module)) &&
     (!f.lang || d.lang === f.lang) &&
     (!f.code || d.code === f.code) &&
     (d.code !== 'CUE_MISTRANSCRIPTION' || d.level !== 'info'));
@@ -67,7 +67,8 @@ function rerun(g: (typeof groups.value)[number]) {
 }
 
 const mt = computed(() => {
-  const items = outstanding.value.filter((d) => d.code === 'CUE_MISTRANSCRIPTION' && (!f.module || (d.topic || '').startsWith(f.module)));
+  const items = outstanding.value.filter((d) => d.code === 'CUE_MISTRANSCRIPTION' &&
+    (props.topic ? d.topic === props.topic : !f.module || (d.topic || '').startsWith(f.module)));
   return [
     { title: 'To review', rows: items.filter((d) => !d.data?.review), empty: 'All reviewed.' },
     { title: 'Reviewed', rows: items.filter((d) => d.data?.review), empty: '' },
@@ -96,11 +97,15 @@ function correct(d: Diagnostic) {
       <q-tab name="codes" label="By code" />
       <q-tab name="mistranscriptions" :label="`Mis-transcriptions${mtOpen ? ` (${mtOpen})` : ''}`" />
     </q-tabs>
+    <q-banner v-if="props.topic" class="bg-blue-1 q-mb-md" rounded>
+      Showing only <strong>{{ props.topic }}</strong>.
+      <template #action><q-btn flat dense no-caps label="Clear" :to="tab === 'mistranscriptions' ? '/diagnostics/mistranscriptions' : '/diagnostics'" /></template>
+    </q-banner>
     <q-card flat bordered class="q-mb-md">
       <q-card-section class="row items-center gap-sm">
         <q-select v-if="tab === 'codes'" v-model="f.level" dense outlined emit-value map-options style="min-width: 190px" aria-label="Level"
           :options="[{ label: 'errors', value: 'error' }, { label: 'errors and warnings', value: 'warn' }, { label: 'everything', value: 'info' }]" />
-        <q-select v-model="f.module" dense outlined emit-value map-options :options="moduleOptions" style="min-width: 150px" aria-label="Module" />
+        <q-select v-if="!props.topic" v-model="f.module" dense outlined emit-value map-options :options="moduleOptions" style="min-width: 150px" aria-label="Module" />
         <q-select v-if="tab === 'codes'" v-model="f.lang" dense outlined emit-value map-options style="min-width: 150px" aria-label="Language"
           :options="[{ label: 'both languages', value: '' }, { label: 'English', value: 'en' }, { label: 'Mandarin', value: 'zh' }]" />
         <q-select v-if="tab === 'codes'" v-model="f.code" dense outlined emit-value map-options :options="codeOptions" style="min-width: 220px" aria-label="Code" />

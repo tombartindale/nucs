@@ -25,6 +25,7 @@ let resumeAt = 0;
 
 const show = computed(() => t.show.value);
 const media = computed(() => show.value?.media ?? null);
+const unreviewed = computed(() => t.status.value?.unreviewed_mistranscriptions ?? 0);
 const cues = computed<ShowCue[]>(() => show.value?.cues || []);
 const threshold = computed(() => show.value?.cue_threshold ?? 0);
 const draftLang = computed(() => (source.value === 'master' ? null : (source.value.split('-')[1] as 'en' | 'zh')));
@@ -122,7 +123,11 @@ onBeforeUnmount(() => {
     <q-card-section class="row items-center q-pb-sm">
       <div class="text-subtitle1 text-weight-medium">Video</div>
       <q-space />
-      <span class="text-caption text-grey-7">Cue markers from the cue sheet</span>
+      <q-btn v-if="unreviewed" unelevated dense no-caps size="sm" color="warning" text-color="black" icon="edit_note"
+        :label="`Proofread ${unreviewed} mis-transcription${unreviewed === 1 ? '' : 's'}`" :to="`/diagnostics/mistranscriptions?topic=${t.id}`">
+        <q-tooltip max-width="320px">The editor's auto-captions may have misheard a name, an acronym or jargon. The partner translates from this SRT, so it reaches Mandarin if left uncorrected.</q-tooltip>
+      </q-btn>
+      <span v-else class="text-caption text-grey-7">Cue markers from the cue sheet</span>
     </q-card-section>
     <MediaUpload />
     <q-card-section v-if="!media?.master" class="text-grey-7">No edited video yet (edit/master.mp4).</q-card-section>

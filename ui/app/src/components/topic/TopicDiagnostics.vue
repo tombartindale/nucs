@@ -14,10 +14,8 @@ const scriptLang = (d: Diagnostic) => (d.file === 'topic.zh.md' ? 'zh' : 'en');
 
 <template>
   <q-card flat :bordered="!flat">
-    <q-card-section class="row items-center q-pb-sm">
-      <div v-if="!flat" class="text-subtitle1 text-weight-medium">Diagnostics</div>
-      <q-space />
-      <router-link to="/diagnostics/mistranscriptions" class="text-caption">Proofread mis-transcriptions →</router-link>
+    <q-card-section v-if="!flat" class="row items-center q-pb-sm">
+      <div class="text-subtitle1 text-weight-medium">Diagnostics</div>
     </q-card-section>
     <q-list v-if="sorted.length" separator>
       <DiagnosticItem v-for="(d, i) in sorted" :key="i" :d="d" show-lang>
