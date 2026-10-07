@@ -5,3 +5,6 @@
 [programme]
 name = "New Beacon programme"
 theme = "default"
+
+[compose]
+layout = "side_by_side"  # presenter fills the right half: export the edit at 960x1080, square pixels

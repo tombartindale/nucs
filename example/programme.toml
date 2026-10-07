@@ -22,7 +22,7 @@ format = "srt"           # PLACEHOLDER: "srt", "vtt" or "both"
 transcode = false        # PLACEHOLDER: partner delivery spec unconfirmed
 
 [compose]
-layout = "inset"         # PLACEHOLDER: "inset" or "side_by_side"
+layout = "side_by_side"  # presenter fills the right half: export the edit at 960x1080, square pixels
 
 [bumpers]
 intro = ""
