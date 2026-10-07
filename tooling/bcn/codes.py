@@ -79,7 +79,7 @@ CODES: dict[str, tuple[str, str]] = {
     "CUE_SRT_ORDER": ("error", "SRT cue timecodes are not strictly ascending."),
     "CUE_SRT_PAST_END": ("error", "The final SRT cue ends after the video does."),
     "CUE_SRT_SHORT": ("warn", "The final SRT cue ends well before the video does."),
-    "CUE_PAIR_MISMATCH": ("error", "The SRT and the video do not look like a matching pair."),
+    "CUE_PAIR_MISMATCH": ("warn", "The SRT and the video do not look like a matching pair."),
     "CUE_HEAVY_DIVERGENCE": ("error", "Too much of the script is absent from or differs from the SRT."),
     "CUE_CUT": ("info", "A span of script is absent from the SRT."),
     "CUE_CUT_AT_BOUNDARY": ("error", "A cut spans a slide boundary; a human must place it."),

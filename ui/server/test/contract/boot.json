@@ -83,7 +83,7 @@
     "area": "CUE",
     "code": "CUE_PAIR_MISMATCH",
     "description": "The SRT and the video do not look like a matching pair.",
-    "level": "error"
+    "level": "warn"
    },
    {
     "area": "CUE",
