@@ -18,10 +18,10 @@ from .tree import find_root, resolve
 COMMANDS = [
     "validate", "render", "script", "bumpers", "cues", "subtitles", "compose", "status", "package", "qa",
     "show", "diagnostics", "review", "ack", "edit", "docedit", "intake", "translation", "transfer", "qti", "coursemap",
-    "readinglist", "sync", "schema", "codes", "doctor",
+    "readinglist", "sync", "schema", "codes", "doctor", "themecheck",
 ]
 # Commands whose positional argument is not a tree path.
-NO_TARGET = {"schema", "codes", "doctor"}
+NO_TARGET = {"schema", "codes", "doctor", "themecheck"}
 
 
 class UsageError(Exception):

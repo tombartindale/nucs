@@ -15,8 +15,8 @@ import cookie from '@fastify/cookie';
 import extractZip from 'extract-zip';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type {
-  BcnDiagnosticsEnvelope, BcnDoceditEnvelope, BcnEditEnvelope, BcnReviewEnvelope, BcnStatusEnvelope, BcnSyncEnvelope, BootResponse, JobArgs,
-  ModulePlanRemindResponse, ModulePlanRequest, ModulePlanResponse, PlansSummaryResponse, ShowEnvelope, TranslationItem,
+  BcnDiagnosticsEnvelope, BcnDoceditEnvelope, BcnEditEnvelope, BcnReviewEnvelope, BcnStatusEnvelope, BcnSyncEnvelope, BcnThemecheckEnvelope,
+  BootResponse, JobArgs, ModulePlanRemindResponse, ModulePlanRequest, ModulePlanResponse, PlansSummaryResponse, ShowEnvelope, TranslationItem,
 } from '@beacon/shared';
 import { jobLabel, type App } from './app.js';
 import { SESSION_COOKIE } from './auth.js';
@@ -600,6 +600,14 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   f.get('/api/admin/backups', async (req: Req) => {
     requireAdmin(req);
     return { enabled: backups.enabled, items: await backups.list() };
+  });
+
+  // Confirms which theme is actually resolved on this server and whether it's complete --
+  // load_theme() validates everything that matters (the right files exist, the CSS declares
+  // the right name), so this surfaces the exact same check bumpers/render would hit.
+  f.get('/api/admin/theme', async (req: Req) => {
+    requireAdmin(req);
+    return app.bcn.query<BcnThemecheckEnvelope>('themecheck', [app.root], 15_000);
   });
 
   f.get('/api/admin/backups/download', async (req: Req, reply) => {
