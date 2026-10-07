@@ -186,7 +186,11 @@ export class Scheduler {
   }
 
   private argv(command: string, args: JobArgs, target: string): string[] {
-    const path = target !== '.' ? join(this.root, target) : this.root;
+    // docedit's job target is the specific document (e.g. "KV7016/course-map.md"), not the
+    // module -- see the comment at its submit() call in server.ts -- so the module directory
+    // bcn docedit actually takes positionally is only the target's first path segment here.
+    const resolved = command === 'docedit' ? target.split('/')[0] : target;
+    const path = resolved !== '.' ? join(this.root, resolved) : this.root;
     const argv = [command, path];
     for (const k of VALUE_ORDER) {
       if (k in args && args[k] !== null && args[k] !== '') argv.push(`--${k.replace(/_/g, '-')}`, String(args[k]));

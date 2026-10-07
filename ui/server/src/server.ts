@@ -299,7 +299,15 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const file = editTextFile(String(data.text ?? ''));
     const args: JobArgs = { doc: relDoc, from: file };
     if (data.expect_sha && !data.overwrite) args.expect_sha = String(data.expect_sha);
-    const job = await app.jobs.submit('docedit', [module], args, `edit ${relDoc} · ${module}`, await app.operator());
+    // The job's target is the specific doc, not the whole module: the scheduler's overlap
+    // check (jobs.ts's overlaps()) treats one target as blocking another whenever one is a
+    // path-prefix of the other, so a module-wide target would make saving course-map.md wait
+    // behind any unrelated video job running on a topic underneath that module. docedit only
+    // ever writes the one file named here, so only another job on that same file (or a
+    // genuinely module-wide job, which does read module documents) needs to serialize with it.
+    // scheduler.ts's argv() strips this back down to the module directory for the actual bcn
+    // invocation, since docedit takes a module path positionally.
+    const job = await app.jobs.submit('docedit', [`${module}/${relDoc}`], args, `edit ${relDoc} · ${module}`, await app.operator());
     return reply.code(202).send(job);
   });
 

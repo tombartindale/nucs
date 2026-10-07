@@ -77,6 +77,19 @@ describe('overlaps', () => {
     expect(overlaps('KV7015/U01/T01', 'KV7015/U01/T02')).toBe(false);
     expect(overlaps('KV7015', 'KV7016')).toBe(false);
   });
+
+  // docedit's job target is the doc itself ("KV7015/course-map.md"), not the module, so
+  // saving a module document doesn't queue behind an unrelated topic's long-running job --
+  // only another job on that same doc, or a genuinely module-wide job, should serialize with it.
+  it('a module document target does not overlap an unrelated topic', () => {
+    expect(overlaps('KV7015/course-map.md', 'KV7015/U01/T01')).toBe(false);
+    expect(overlaps('KV7015/U01/activity.md', 'KV7015/U01/T01')).toBe(false);
+    expect(overlaps('KV7015/U01/activity.md', 'KV7015/U02/activity.md')).toBe(false);
+  });
+  it('a module document target still overlaps itself and a module-wide job', () => {
+    expect(overlaps('KV7015/course-map.md', 'KV7015/course-map.md')).toBe(true);
+    expect(overlaps('KV7015/course-map.md', 'KV7015')).toBe(true);
+  });
 });
 
 describe('job queue', () => {
