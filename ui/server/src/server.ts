@@ -5,7 +5,7 @@
 // via ALLOWED_HOSTS, since this now typically runs behind a reverse proxy on a real
 // hostname rather than only ever being reached at localhost. Login (see auth.ts) is the
 // actual access control; this check is a defense-in-depth CSRF guard, not the only gate.
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
@@ -595,7 +595,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   const backups = new Backups();
   const isAdmin = (req: Req) => testDisableAuth
     || ADMIN_EMAILS.has(String((req as FastifyRequest & { email?: string }).email ?? '').toLowerCase());
-  const requireAdmin = (req: Req) => { if (!isAdmin(req)) throw new Forbidden('Backups are for administrators only.'); };
+  const requireAdmin = (req: Req) => { if (!isAdmin(req)) throw new Forbidden('This is for administrators only.'); };
 
   f.get('/api/admin/backups', async (req: Req) => {
     requireAdmin(req);
@@ -608,6 +608,44 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   f.get('/api/admin/theme', async (req: Req) => {
     requireAdmin(req);
     return app.bcn.query<BcnThemecheckEnvelope>('themecheck', [app.root], 15_000);
+  });
+
+  // programme.toml as plain text, for hand-editing until each setting has its own control.
+  // A save is checked by bcn itself first (themecheck loads the config exactly as every job
+  // does), so a syntax error or an unknown key is refused rather than breaking every job.
+  // The hash guards against overwriting a change made since the editor loaded the file.
+  const programmeToml = () => join(app.root, 'programme.toml');
+
+  f.get('/api/admin/programme-toml', async (req: Req) => {
+    requireAdmin(req);
+    const text = readFileSync(programmeToml(), 'utf8');
+    return { text, sha256: sha256(text) };
+  });
+
+  f.put('/api/admin/programme-toml', async (req: Req) => {
+    requireAdmin(req);
+    const data = await readJson(req);
+    const text = data.text;
+    if (typeof text !== 'string') throw new BadRequest('Send the file as text.');
+    if (text.length > 256 * 1024) throw new BadRequest('programme.toml is too large.');
+    if (sha256(readFileSync(programmeToml(), 'utf8')) !== data.sha256) {
+      throw new BadRequest('programme.toml has changed since you opened it. Reload it and make your edit again.');
+    }
+    mkdirSync(app.dataDir, { recursive: true });
+    const check = realpathSync(mkdtempSync(join(app.dataDir, '.programme-toml-')));
+    try {
+      writeFileSync(join(check, 'programme.toml'), text, 'utf8');
+      const env = await app.bcn.query<BcnThemecheckEnvelope>('themecheck', [check], 15_000);
+      const bad = (env.diagnostics || []).filter((d) => d.code === 'CONFIG_INVALID');
+      if (bad.length) throw new BadRequest(`Not saved: ${bad.map((d) => d.message).join(' ')}`);
+    } finally {
+      rmSync(check, { recursive: true, force: true });
+    }
+    // Written beside the original and renamed over it, so a job never reads half a file.
+    const tmp = join(app.root, `.programme.toml.${stamp()}.partial`);
+    writeFileSync(tmp, text, 'utf8');
+    renameSync(tmp, programmeToml());
+    return { text, sha256: sha256(text) };
   });
 
   f.get('/api/admin/backups/download', async (req: Req, reply) => {
@@ -636,6 +674,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   });
 
   // -- theme (drop in a whole custom theme as one zip; no form, no per-field editing) -------
+  // Admin only, like the rest of the Admin page these are used from.
   // Fixed location and name: uploading always replaces the one themes/custom/ directory.
   // bcn's own load_theme() already prefers <root>/themes/<name>/ over the bundled theme
   // baked into the image (tooling/bcn/config.py), so nothing about theme *resolution*
@@ -660,7 +699,8 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     return m ? m[1] : 'default';
   }
 
-  f.get('/api/theme', async () => {
+  f.get('/api/theme', async (req: Req) => {
+    requireAdmin(req);
     const d = themeDir();
     const uploaded = existsSync(d) && statSync(d).isDirectory();
     const files = uploaded ? readdirSync(d).filter((n) => !n.startsWith('.')).sort() : [];
@@ -670,6 +710,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   });
 
   f.post('/api/theme/upload', async (req: Req, reply) => {
+    requireAdmin(req);
     const n = Number(req.headers['content-length'] || 0);
     if (!(n > 0) || n > UPLOAD_MAX) throw new BadRequest('Upload is empty or too large.');
     // The temp zip and extract dir must be staged under app.root, not app.dataDir: the two
@@ -697,7 +738,8 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     }
   });
 
-  f.post('/api/theme/activate', async (req, reply) => {
+  f.post('/api/theme/activate', async (req: Req, reply) => {
+    requireAdmin(req);
     const data = await readJson(req);
     const active = Boolean(data.active);
     if (active && !existsSync(themeDir())) throw new BadRequest('Upload a theme before activating it.');

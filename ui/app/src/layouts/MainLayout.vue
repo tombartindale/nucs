@@ -10,7 +10,7 @@ const NAV = [
   { to: '/translation', label: 'Translation', icon: 'translate' },
   { to: '/transfer', label: 'Transfer', icon: 'drive_file_move' },
 ];
-const ADMIN_NAV = { to: '/admin', label: 'Backups', icon: 'backup' };
+const ADMIN_NAV = { to: '/admin', label: 'Admin', icon: 'admin_panel_settings' };
 const navItems = computed(() => (beacon.boot?.admin ? [...NAV, ADMIN_NAV] : NAV));
 const LIVE = {
   connecting: { color: 'grey', label: 'connecting' },
