@@ -283,15 +283,24 @@ async function sendReminder() {
           </q-card-section>
           <q-separator />
 
-          <!-- Task table: the content creator's detail view, outstanding briefs/recordings in order. -->
+          <!-- Task table: the content creator's detail view. Production runs one unit at a
+               time — every topic's script in a unit must be ready before that unit's single
+               recording session, where every topic in it is recorded together — so each row
+               is a whole unit's batch of outstanding scripts or its one recording session,
+               not a per-topic task. -->
           <q-card-section v-if="plan.plan.tasks.length">
             <table class="plan-tasks">
-              <thead><tr><th>Topic</th><th>Task</th><th>Est.</th><th>Deadline</th></tr></thead>
+              <thead><tr><th>Unit</th><th>Task</th><th>Topics</th><th>Est.</th><th>Deadline</th></tr></thead>
               <tbody>
-                <tr v-for="t in plan.plan.tasks" :key="`${t.topic}-${t.kind}`">
-                  <td><a :href="`#/topic/${t.topic}`">{{ t.topic }}</a> {{ t.title }}</td>
-                  <td>{{ t.kind === 'brief' ? 'Write brief' : 'Record' }}</td>
-                  <td>{{ fmtMinutes(t.estimatedMinutes) }}</td>
+                <tr v-for="t in plan.plan.tasks" :key="`${t.unit}-${t.kind}`">
+                  <td>{{ t.unit }}<span v-if="m.unit_titles?.[t.unit]"> — {{ m.unit_titles[t.unit] }}</span></td>
+                  <td>{{ t.kind === 'scripts' ? 'Write scripts' : 'Record (one session)' }}</td>
+                  <td>
+                    <template v-for="(code, i) in t.topics" :key="code">
+                      <span v-if="i > 0">, </span><a :href="`#/topic/${code}`">{{ code.split('-').pop() }}</a>
+                    </template>
+                  </td>
+                  <td>{{ fmtMinutes(t.estimatedMinutes) }}{{ t.kind === 'recording' ? ' total' : '' }}</td>
                   <td>{{ t.deadline || '—' }}</td>
                 </tr>
               </tbody>

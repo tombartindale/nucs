@@ -330,13 +330,14 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     return app.cachedQuery<BcnReviewEnvelope>(`review|${rel}`, 10_000, 'review', [app.targetPath(rel)]);
   });
 
-  // -- delivery planning: backward-scheduled briefs/recording, milestones, ICS, reminders -----
+  // -- delivery planning: backward-scheduled unit scripts/recording, milestones, ICS, reminders -
   const fmtMinutes = (min: number): string => {
     if (min < 60) return `${Math.round(min)} min`;
     const h = Math.floor(min / 60);
     const m = Math.round(min % 60);
     return m ? `${h}h ${m}m` : `${h}h`;
   };
+  const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
 
   async function planFor(module: string): Promise<ModulePlanResponse> {
     const row = await app.db.getPlan(module);
@@ -383,10 +384,12 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const topics = status ? moduleTopicsFor(status, module) : [];
     const plan = computeModulePlan(topics, row.delivery_date);
     const events: IcsEvent[] = plan.tasks.filter((t) => t.deadline).map((t) => ({
-      uid: `${t.topic}-${t.kind}@beacon-ui`,
+      uid: `${module}-${t.unit}-${t.kind}@beacon-ui`,
       date: t.deadline as string,
-      summary: t.kind === 'brief' ? `Brief due: ${t.topic} — ${t.title}` : `Record by: ${t.topic} — ${t.title}`,
-      description: t.kind === 'brief' ? `Est. 20 min to write the brief.` : `Est. recording ${fmtMinutes(t.estimatedMinutes)}.`,
+      summary: t.kind === 'scripts' ? `Scripts ready: ${module} ${t.unit}` : `Record: ${module} ${t.unit}`,
+      description: t.kind === 'scripts'
+        ? `${plural(t.topics.length, 'script')} to write.`
+        : `${plural(t.topics.length, 'topic')}, ~${fmtMinutes(t.estimatedMinutes)} total, in one session.`,
     }));
     if (plan.deliveryDate) events.push({ uid: `${module}-delivery@beacon-ui`, date: plan.deliveryDate, summary: `Delivery: ${module}` });
     const ics = buildIcs(module, events);
@@ -404,7 +407,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
       `Hi ${ownerName || 'there'},`, '',
       `Progress on ${module}: ${plan.topicsRecorded}/${plan.topicsTotal} recorded, ${plan.topicsNotDrafted} not yet drafted.`,
       deliveryDate ? `Delivery date: ${deliveryDate}.` : 'No delivery date set yet.', '',
-      ...(upcoming.length ? ['Upcoming:', ...upcoming.map((t) => `- ${t.deadline}: ${t.kind === 'brief' ? 'write brief' : 'record'} ${t.topic} — ${t.title}`)] : []),
+      ...(upcoming.length ? ['Upcoming:', ...upcoming.map((t) => `- ${t.deadline}: ${t.kind === 'scripts' ? `write ${plural(t.topics.length, 'script')} for` : 'record'} ${module} ${t.unit}`)] : []),
       '', `${app.auth.baseUrl}/#/module/${module}`,
     ];
     await app.auth.mailer.send(ownerEmail, `NUCS: progress on ${module}`, lines.join('\n'));

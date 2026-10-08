@@ -193,10 +193,18 @@ export interface TranslationImportRequest { source: string; path?: string }
 export interface TransferListResponse { exports: TranslationItem[] }
 export interface TransferImportRequest { source: string; path?: string; dry_run?: boolean }
 
-// -- delivery planning: backward-scheduled briefs/recording, milestones, ICS, reminders ---------
-/** One outstanding task against one topic: writing its brief, or recording it. */
-export interface PlannedTask {
-  topic: string; title: string; kind: 'brief' | 'recording'; estimatedMinutes: number; deadline: string | null;
+// -- delivery planning: backward-scheduled unit scripts/recording, milestones, ICS, reminders ---
+// Batched per unit, not per topic: production happens one unit at a time, every topic's
+// script in it must be ready before its single recording session, and every topic in the
+// unit is recorded together in that one session.
+/** One outstanding batch of work against one unit: writing the scripts still missing in
+ *  it, or recording it (every outstanding topic in the unit, in a single session). */
+export interface UnitTask {
+  unit: string; kind: 'scripts' | 'recording';
+  topics: string[];          // the outstanding topic ids this batch covers
+  estimatedMinutes: number;  // summed across topics; for 'recording' this is informational
+                              // only — the task always costs exactly one calendar day
+  deadline: string | null;
 }
 export type MilestoneKind = 'briefs_done' | 'recorded' | 'translated' | 'packaged';
 /** One module-wide checkpoint: every topic reaching a given stage. dueDate is only
@@ -209,7 +217,7 @@ export interface ModulePlanComputed {
   onTrack: boolean | null;       // null if no delivery_date set
   daysBehind: number;            // how far the earliest outstanding deadline has slipped past today; 0 if on track
   milestones: Milestone[];       // always 4, in pipeline order — the producer's headline view
-  tasks: PlannedTask[];          // outstanding brief/recording tasks, course-map order — the content creator's detail view
+  tasks: UnitTask[];             // outstanding scripts/recording batches, one per unit, in course-map order
 }
 export interface ModulePlanResponse {
   module: string; deliveryDate: string | null; ownerName: string; ownerEmail: string; icsUrl: string;

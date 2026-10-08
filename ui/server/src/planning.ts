@@ -1,7 +1,13 @@
 // Backward scheduling for a module's delivery: given a delivery date and current pipeline
-// state (from bcn status), when does each outstanding task need to be done, and when is
-// each module-wide milestone due. Pure functions only — no DB, no HTTP — so the math is
-// directly unit-testable against fixture data.
+// state (from bcn status), when does each unit's prep need to be ready, when does its
+// recording session need to happen, and when is each module-wide milestone due. Pure
+// functions only — no DB, no HTTP — so the math is directly unit-testable against fixture
+// data.
+//
+// Production happens one unit at a time: every topic's script in a unit must be ready
+// before that unit's recording, and every topic in the unit is recorded together, in one
+// session, not individually. So the schedule is batched per unit, not per topic — a unit's
+// worth of scripts is one task, its recording is another, not N of each.
 //
 // Nothing here is persisted beyond the module's delivery date and owner (see db.ts). Every
 // task/milestone deadline is recomputed from current status on every request: consistent
@@ -10,11 +16,15 @@
 import type { StatusEnvelope } from '@beacon/shared';
 
 // Assumptions, not measured rates — surfaced here, not buried in the math:
-// - Writing a topic's brief (topic.md) takes about 20 minutes, a fixed estimate
-//   independent of the topic's declared length.
-// - Recording (+ review) takes about 1.5x a topic's declared length.
-// - A producer has about this many focused hours per day available for this work,
-//   before other duties.
+// - Writing one topic's script (topic.md) takes about 20 minutes, a fixed estimate
+//   independent of the topic's declared length. A unit's script task is this, summed
+//   across however many of its topics aren't drafted yet.
+// - Recording (+ review) takes about 1.5x a topic's declared length, summed across a
+//   unit's outstanding topics — but a unit's recording always happens in one calendar-day
+//   session, however long that session actually runs. It is never spread across days: the
+//   total is informational (how long the session will be), not a scheduling cost.
+// - A producer has about this many focused hours per day available for script-writing,
+//   before other duties. (Recording doesn't use this budget — see above.)
 // Dates are calendar days (no weekends/holiday calendar); treat as advisory, not a
 // hard commitment. Translation turnaround and packaging are not independently
 // estimated per topic in v1 (translation happens off-pipeline, by the partner;
@@ -44,12 +54,18 @@ function minusDays(date: string, days: number): string {
 function today(): string { return new Date().toISOString().slice(0, 10); }
 
 export interface PlannedTopicInput {
-  topic: string; title: string; minutes: number | null;
+  topic: string; unit: string; title: string; minutes: number | null;
   drafted: boolean; recorded: boolean; translated: boolean; packaged: boolean;
 }
 
-export interface PlannedTask {
-  topic: string; title: string; kind: 'brief' | 'recording'; estimatedMinutes: number; deadline: string | null;
+/** One outstanding batch of work against one unit: writing the scripts still missing in
+ *  it, or recording it (every topic in the unit, in a single session). */
+export interface UnitTask {
+  unit: string; kind: 'scripts' | 'recording';
+  topics: string[];           // the outstanding topic ids this batch covers
+  estimatedMinutes: number;   // summed across topics; for 'recording' this is informational
+                              // only — the task always costs exactly one calendar day (below)
+  deadline: string | null;
 }
 
 export interface Milestone {
@@ -65,7 +81,7 @@ export interface ModulePlanComputed {
    *  task's deadline is this many days before today. 0 when on track or no delivery date. */
   daysBehind: number;
   milestones: Milestone[];
-  tasks: PlannedTask[];
+  tasks: UnitTask[];
 }
 
 /** Filters bcn status to one module's topics, in course-map order, mapped to the stage
@@ -80,6 +96,7 @@ export function moduleTopicsFor(status: StatusEnvelope, module: string): Planned
       const zhAt = (stage: string) => r.zh.stage_index >= r.zh.stages.indexOf(stage);
       return {
         topic: r.topic,
+        unit: r.unit,
         title: r.title,
         minutes: r.minutes,
         drafted: enAt('drafted'),
@@ -91,34 +108,45 @@ export function moduleTopicsFor(status: StatusEnvelope, module: string): Planned
 }
 
 export function computeModulePlan(topics: PlannedTopicInput[], deliveryDate: string | null): ModulePlanComputed {
-  // Outstanding tasks, course-map order, each topic's brief task immediately before its
-  // recording task so a not-yet-drafted topic schedules both in the right sequence.
-  // estimatedMinutes is the real, displayed estimate (brief: a fixed 20 min; recording:
-  // 1.5x the topic's declared length) — never rounded here. Scheduling needs whole
-  // calendar days, but rounding each task's own minutes to a day (or even a quarter-day)
-  // before accumulating would make most topics, whose work is under a quarter-day, show
-  // identically regardless of actual length. The walk below rounds only once, when
-  // stepping days off the calendar, carrying the remainder forward across tasks instead.
-  const tasks: Omit<PlannedTask, 'deadline'>[] = [];
+  // Group into units, preserving the order units first appear in course-map order.
+  const unitOrder: string[] = [];
+  const byUnit = new Map<string, PlannedTopicInput[]>();
   for (const t of topics) {
-    if (!t.drafted) tasks.push({ topic: t.topic, title: t.title, kind: 'brief', estimatedMinutes: BRIEF_MINUTES });
-    if (!t.recorded) {
-      const minutes = (t.minutes ?? DEFAULT_RECORDING_MINUTES) * RECORDING_MULTIPLIER;
-      tasks.push({ topic: t.topic, title: t.title, kind: 'recording', estimatedMinutes: minutes });
+    if (!byUnit.has(t.unit)) { byUnit.set(t.unit, []); unitOrder.push(t.unit); }
+    byUnit.get(t.unit)!.push(t);
+  }
+
+  // One scripts batch and one recording batch per unit, in that order — a unit's prep
+  // must finish before its own recording session, matching how production actually
+  // happens: one unit at a time, not topic by topic.
+  const tasks: Omit<UnitTask, 'deadline'>[] = [];
+  for (const unit of unitOrder) {
+    const unitTopics = byUnit.get(unit)!;
+    const notDrafted = unitTopics.filter((t) => !t.drafted);
+    const notRecorded = unitTopics.filter((t) => !t.recorded);
+    if (notDrafted.length) {
+      tasks.push({ unit, kind: 'scripts', topics: notDrafted.map((t) => t.topic), estimatedMinutes: notDrafted.length * BRIEF_MINUTES });
+    }
+    if (notRecorded.length) {
+      const minutes = notRecorded.reduce((sum, t) => sum + (t.minutes ?? DEFAULT_RECORDING_MINUTES) * RECORDING_MULTIPLIER, 0);
+      tasks.push({ unit, kind: 'recording', topics: notRecorded.map((t) => t.topic), estimatedMinutes: minutes });
     }
   }
 
   // Walk backwards from the delivery date: the last task's deadline sits closest to
-  // delivery, each earlier task's deadline is pushed back by its own estimated time.
-  // Fractional days accumulate across the whole walk (carried in `accrued`) rather than
-  // being rounded away per task, so a run of several sub-day tasks still separates onto
-  // distinct dates instead of collapsing onto the same one.
-  const dated: PlannedTask[] = [];
+  // delivery, each earlier task's deadline is pushed back by its own cost. A recording
+  // task always costs exactly one day — the session happens on a single day however long
+  // it runs — while a scripts task costs its real proportional share of the daily hours
+  // budget. Fractional days accumulate across the whole walk (carried in `accrued`)
+  // rather than being rounded away per task, so a run of short scripts batches still
+  // separates onto distinct dates instead of collapsing onto the same one.
+  const dated: UnitTask[] = [];
   if (deliveryDate) {
     let cursor = deliveryDate;
     let accrued = 0; // fractional days owed but not yet stepped off the calendar
     for (let i = tasks.length - 1; i >= 0; i--) {
-      accrued += rawDaysFor(tasks[i].estimatedMinutes);
+      const cost = tasks[i].kind === 'recording' ? 1 : rawDaysFor(tasks[i].estimatedMinutes);
+      accrued += cost;
       const wholeDays = Math.floor(accrued);
       if (wholeDays > 0) {
         cursor = minusDays(cursor, wholeDays);
@@ -136,11 +164,11 @@ export function computeModulePlan(topics: PlannedTopicInput[], deliveryDate: str
   const topicsNotTranslated = topics.filter((t) => !t.translated).length;
   const topicsNotPackaged = topics.filter((t) => !t.packaged).length;
 
-  const latestDeadline = (kind: PlannedTask['kind']): string | null => {
+  const latestDeadline = (kind: UnitTask['kind']): string | null => {
     const ds = dated.filter((t) => t.kind === kind).map((t) => t.deadline).filter((d): d is string => d !== null);
     return ds.length ? ds.reduce((a, b) => (a > b ? a : b)) : null;
   };
-  const briefsDueDate = latestDeadline('brief');
+  const briefsDueDate = latestDeadline('scripts');
   const recordedDueDate = latestDeadline('recording');
 
   const milestones: Milestone[] = [

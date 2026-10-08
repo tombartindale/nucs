@@ -4,7 +4,7 @@ import { computeModulePlan, type PlannedTopicInput } from '../src/planning.js';
 
 function topic(overrides: Partial<PlannedTopicInput> = {}): PlannedTopicInput {
   return {
-    topic: 'KV7015-U01-T01', title: 'A topic', minutes: 12,
+    topic: 'KV7015-U01-T01', unit: 'U01', title: 'A topic', minutes: 12,
     drafted: true, recorded: false, translated: false, packaged: false,
     ...overrides,
   };
@@ -18,65 +18,94 @@ describe('computeModulePlan', () => {
     for (const m of plan.milestones) expect(m.dueDate).toBeNull();
   });
 
-  it('gives a not-yet-drafted topic both a brief and a recording task, brief first', () => {
-    const plan = computeModulePlan([topic({ topic: 'KV7015-U01-T01', drafted: false, minutes: 12 })], '2026-12-01');
-    expect(plan.tasks.map((t) => t.kind)).toEqual(['brief', 'recording']);
-    // brief's deadline must be no later than the recording deadline that follows it
-    expect(plan.tasks[0].deadline! <= plan.tasks[1].deadline!).toBe(true);
+  it('batches every not-yet-drafted topic in a unit into one scripts task, listing them all', () => {
+    const plan = computeModulePlan([
+      topic({ topic: 'KV7015-U01-T01', unit: 'U01', drafted: false, recorded: true }),
+      topic({ topic: 'KV7015-U01-T02', unit: 'U01', drafted: false, recorded: true }),
+      topic({ topic: 'KV7015-U01-T03', unit: 'U01', drafted: true, recorded: true }), // already drafted: excluded
+    ], '2026-12-01');
+    expect(plan.tasks).toHaveLength(1);
+    expect(plan.tasks[0].kind).toBe('scripts');
+    expect(plan.tasks[0].topics).toEqual(['KV7015-U01-T01', 'KV7015-U01-T02']);
+    expect(plan.tasks[0].estimatedMinutes).toBe(40); // 2 topics x 20 min
   });
 
-  it('gives an already-drafted topic only a recording task', () => {
-    const plan = computeModulePlan([topic({ drafted: true })], '2026-12-01');
+  it('batches every not-yet-recorded topic in a unit into one recording task, listing them all', () => {
+    const plan = computeModulePlan([
+      topic({ topic: 'KV7015-U01-T01', unit: 'U01', drafted: true, recorded: false, minutes: 10 }),
+      topic({ topic: 'KV7015-U01-T02', unit: 'U01', drafted: true, recorded: false, minutes: 40 }),
+      topic({ topic: 'KV7015-U01-T03', unit: 'U01', drafted: true, recorded: true }), // already recorded: excluded
+    ], '2026-12-01');
+    expect(plan.tasks).toHaveLength(1);
+    expect(plan.tasks[0].kind).toBe('recording');
+    expect(plan.tasks[0].topics).toEqual(['KV7015-U01-T01', 'KV7015-U01-T02']);
+    expect(plan.tasks[0].estimatedMinutes).toBe(75); // (10 + 40) x 1.5
+  });
+
+  it('gives a unit both a scripts and a recording task, scripts first, when neither is done', () => {
+    const plan = computeModulePlan([topic({ drafted: false, recorded: false, minutes: 12 })], '2026-12-01');
+    expect(plan.tasks.map((t) => t.kind)).toEqual(['scripts', 'recording']);
+  });
+
+  it('gives a unit with already-drafted topics only a recording task', () => {
+    const plan = computeModulePlan([topic({ drafted: true, recorded: false })], '2026-12-01');
     expect(plan.tasks.map((t) => t.kind)).toEqual(['recording']);
   });
 
-  it('chains deadlines backward: later course-map topics get deadlines closer to delivery', () => {
-    // Each recording here is 1.5x 100 = 150 min: under the 180-minute daily budget (3h/day)
-    // alone, so the last task's deadline is still the delivery date itself, but the two
-    // together (300 min) exceed one day, so the earlier task must land a day before it.
-    const plan = computeModulePlan([
-      topic({ topic: 'KV7015-U01-T01', drafted: true, minutes: 100 }),
-      topic({ topic: 'KV7015-U01-T02', drafted: true, minutes: 100 }),
-    ], '2026-12-01');
-    const [first, second] = plan.tasks;
-    expect(first.deadline! < second.deadline!).toBe(true);
-    expect(second.deadline).toBe('2026-12-01');
+  it('costs a recording session exactly one day regardless of total minutes, unlike scripts\' proportional cost', () => {
+    // Scripts: 5 topics not drafted, 20 min each = 100 min, under the 180-minute daily
+    // budget, so its deadline is the delivery date itself.
+    const scriptsOnly = Array.from({ length: 5 }, (_, i) =>
+      topic({ topic: `KV7015-U01-T${i + 1}`, drafted: false, recorded: true }));
+    const scriptsPlan = computeModulePlan(scriptsOnly, '2026-12-01');
+    expect(scriptsPlan.tasks).toHaveLength(1);
+    expect(scriptsPlan.tasks[0].deadline).toBe('2026-12-01');
+
+    // Recording: same five topics, same small total length — but a recording session
+    // always reserves a whole day, so its deadline sits one day before delivery even
+    // though the work itself would fit in well under a day.
+    const recordingOnly = Array.from({ length: 5 }, (_, i) =>
+      topic({ topic: `KV7015-U01-T${i + 1}`, drafted: true, recorded: false, minutes: 10 }));
+    const recordingPlan = computeModulePlan(recordingOnly, '2026-12-01');
+    expect(recordingPlan.tasks).toHaveLength(1);
+    expect(recordingPlan.tasks[0].deadline).toBe('2026-11-30');
   });
 
-  it('lets two short tasks share the same deadline when both fit inside one day\'s budget', () => {
-    // Each is only 1.5x 40 = 60 min of work; two of them (120 min) fit inside the 180-minute
-    // daily budget, so the accurate estimate (unlike the old, over-quantized one) correctly
-    // gives them the same deadline rather than inventing a day of separation that isn't real.
+  it('chains two units backward: the later unit\'s tasks sit closer to delivery than the earlier unit\'s', () => {
     const plan = computeModulePlan([
-      topic({ topic: 'KV7015-U01-T01', drafted: true, minutes: 40 }),
-      topic({ topic: 'KV7015-U01-T02', drafted: true, minutes: 40 }),
+      topic({ topic: 'KV7015-U01-T01', unit: 'U01', drafted: false, recorded: false, minutes: 10 }),
+      topic({ topic: 'KV7015-U02-T01', unit: 'U02', drafted: false, recorded: false, minutes: 10 }),
     ], '2026-12-01');
-    const [first, second] = plan.tasks;
-    expect(first.deadline).toBe(second.deadline);
-    expect(second.deadline).toBe('2026-12-01');
+    expect(plan.tasks.map((t) => `${t.unit}-${t.kind}`)).toEqual(['U01-scripts', 'U01-recording', 'U02-scripts', 'U02-recording']);
+    const u01Recording = plan.tasks[1].deadline!;
+    const u02Recording = plan.tasks[3].deadline!;
+    expect(u01Recording < u02Recording).toBe(true);
+    expect(u02Recording).toBe('2026-11-30'); // the very last task still reserves recording's one-day session before delivery
   });
 
   it('falls back to a default estimate when minutes is null, without throwing', () => {
-    expect(() => computeModulePlan([topic({ drafted: true, minutes: null })], '2026-12-01')).not.toThrow();
-    const plan = computeModulePlan([topic({ drafted: true, minutes: null })], '2026-12-01');
+    expect(() => computeModulePlan([topic({ drafted: true, recorded: false, minutes: null })], '2026-12-01')).not.toThrow();
+    const plan = computeModulePlan([topic({ drafted: true, recorded: false, minutes: null })], '2026-12-01');
     expect(plan.tasks[0].estimatedMinutes).toBeGreaterThan(0);
   });
 
-  it('estimates recording time as exactly 1.5x the declared minutes, distinct per topic', () => {
+  it('estimates a unit\'s recording total as exactly 1.5x the sum of its topics\' declared minutes', () => {
     const plan = computeModulePlan([
-      topic({ topic: 'KV7015-U01-T01', drafted: true, minutes: 10 }),
-      topic({ topic: 'KV7015-U01-T02', drafted: true, minutes: 40 }),
+      topic({ topic: 'KV7015-U01-T01', unit: 'U01', drafted: true, recorded: false, minutes: 10 }),
+      topic({ topic: 'KV7015-U02-T01', unit: 'U02', drafted: true, recorded: false, minutes: 40 }),
     ], '2026-12-01');
-    const [short, long] = plan.tasks;
-    expect(short.estimatedMinutes).toBe(15);   // 10 * 1.5
-    expect(long.estimatedMinutes).toBe(60);    // 40 * 1.5
-    expect(short.estimatedMinutes).not.toBe(long.estimatedMinutes);
+    const byUnit = Object.fromEntries(plan.tasks.map((t) => [t.unit, t]));
+    expect(byUnit.U01.estimatedMinutes).toBe(15);   // 10 * 1.5
+    expect(byUnit.U02.estimatedMinutes).toBe(60);   // 40 * 1.5
   });
 
-  it('estimates a brief at a fixed 20 minutes regardless of the topic\'s declared length', () => {
-    const plan = computeModulePlan([topic({ drafted: false, minutes: 90 })], '2026-12-01');
-    expect(plan.tasks[0].kind).toBe('brief');
-    expect(plan.tasks[0].estimatedMinutes).toBe(20);
+  it('estimates a scripts batch at a fixed 20 minutes per topic, summed across the unit', () => {
+    const plan = computeModulePlan([
+      topic({ topic: 'KV7015-U01-T01', drafted: false, recorded: true, minutes: 90 }),
+      topic({ topic: 'KV7015-U01-T02', drafted: false, recorded: true, minutes: 5 }),
+    ], '2026-12-01');
+    expect(plan.tasks[0].kind).toBe('scripts');
+    expect(plan.tasks[0].estimatedMinutes).toBe(40); // 2 x 20, independent of declared length
   });
 
   it('reports milestone remaining counts and done flags correctly', () => {
@@ -100,7 +129,7 @@ describe('computeModulePlan', () => {
   });
 
   it('only projects dueDate for briefs_done/recorded, never for translated/packaged', () => {
-    const plan = computeModulePlan([topic({ drafted: false, minutes: 12 })], '2026-12-01');
+    const plan = computeModulePlan([topic({ drafted: false, recorded: false, minutes: 12 })], '2026-12-01');
     const byKind = Object.fromEntries(plan.milestones.map((m) => [m.kind, m]));
     expect(byKind.briefs_done.dueDate).not.toBeNull();
     expect(byKind.recorded.dueDate).not.toBeNull();
@@ -115,12 +144,10 @@ describe('computeModulePlan', () => {
   });
 
   it('flags off track when there is more outstanding work than time left before delivery', () => {
-    // Every task's deadline is chained backward from deliveryDate, so no deadline can ever
-    // land after it — "on track" instead means the earliest deadline hasn't already been
-    // pushed into the past relative to today. A huge backlog against a near-term delivery
-    // date does exactly that: the chain runs out of room and the earliest task's deadline
-    // ends up before today, even though it's still <= deliveryDate.
-    const many = Array.from({ length: 50 }, (_, i) => topic({ topic: `KV7015-U01-T${i + 1}`, drafted: false, minutes: 600 }));
+    // A large backlog batched into one unit, against a delivery date only two days away:
+    // the chain (scripts + a one-day recording session) can't possibly fit, so the
+    // earliest task's deadline ends up before today even though it's still <= deliveryDate.
+    const many = Array.from({ length: 50 }, (_, i) => topic({ topic: `KV7015-U01-T${i + 1}`, drafted: false, recorded: false, minutes: 600 }));
     const soon = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10); // delivery in 2 days
     const plan = computeModulePlan(many, soon);
     expect(plan.onTrack).toBe(false);
