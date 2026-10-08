@@ -21,6 +21,11 @@ OUTSTANDING_DONE = {"delivered", "done", "received", "complete", "closed"}
 # Interactive element paragraphs that already appear between a unit heading and its topic
 # table. Free text, not a citation format bcn can validate — see read_unit_reading().
 READING_RE = re.compile(r"^\*\*Reading\.?\*\*\s*(.*)$", re.IGNORECASE)
+# Who is speaking, for compose's name tag: "**Speaker.** Dr Jane Smith, Associate Professor, ..."
+# Above the first unit it covers the whole module; inside a unit it overrides that for the
+# unit's topics. "**Speaker (zh).**" gives the Mandarin text. The first comma separates the
+# name from the role line.
+SPEAKER_RE = re.compile(r"^\*\*Speaker(?:\s*\((en|zh)\))?\.?\*\*\s*(.*)$", re.IGNORECASE)
 # A citation boundary: end of sentence, followed by a capital letter — not by "(" or a
 # lowercase letter, so "et al. (2021)" is never mistaken for two sentences.
 SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
@@ -44,6 +49,7 @@ class CourseMap:
     units: dict[str, str] = field(default_factory=dict)
     topics: list[MapTopic] = field(default_factory=list)
     readings: dict[str, str] = field(default_factory=dict)  # unit -> its Reading paragraph, verbatim
+    speakers: dict[str, dict[str, str]] = field(default_factory=dict)  # unit ("" = the module) -> lang -> Speaker text
     diagnostics: list[Diagnostic] = field(default_factory=list)
 
     def topic_ids(self) -> list[str]:
@@ -152,6 +158,8 @@ def load_course_map(module_dir: Path, required_headings: list[str] | None = None
                                                  file=rel, line=i + 1))
             section, unit = None, None
             continue
+        if (sm := SPEAKER_RE.match(line.strip())) and sm.group(2).strip():
+            cm.speakers.setdefault(unit if section == "unit" else "", {}).setdefault((sm.group(1) or "en").lower(), sm.group(2).strip())
         if section == "outcomes":
             om = LO_ITEM_RE.match(line)
             if om:
@@ -193,6 +201,22 @@ def _unit_reading(lines: list[str], start: int) -> str:
         if m:
             return m.group(1).strip()
     return ""
+
+
+def speaker_for(cm: CourseMap, unit: str, lang: str) -> tuple[str, str] | None:
+    """(name, role) for a topic's name tag, or None if the course map names no speaker.
+
+    The unit's own Speaker line wins over the module's, so a guest in one unit is shown even
+    where only the module's main presenter has a Mandarin line. Within each, the language's
+    own text comes first, then the English.
+    """
+    for key in (unit, ""):
+        texts = cm.speakers.get(key, {})
+        text = texts.get(lang) or texts.get("en")
+        if text:
+            name, role = (re.split(r"[,，]", text, maxsplit=1) + [""])[:2]
+            return name.strip(), role.strip()
+    return None
 
 
 def split_citations(reading: str) -> list[str]:

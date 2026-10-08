@@ -19,12 +19,14 @@ own bumpers from bcn bumpers are used when current, else the files named in [bum
 from __future__ import annotations
 
 import argparse
+import html
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 from .. import cuesheet, fsutil, srt, tools
 from ..config import Config, Theme, load_theme, resolve_theme_name
+from ..coursemap import load_course_map, speaker_for
 from ..envelope import Diagnostic, Envelope, Fail, TopicResult
 from ..markdown import parse
 from ..media import ffmpeg, loudness, probe
@@ -93,9 +95,70 @@ img {{ display: block; width: 100%; height: 100%; object-fit: contain; }}
 """
 
 
+@dataclass
+class NameTag:
+    """Where and when the "who is speaking" tag is overlaid, on the body's own timeline."""
+    input: str    # ffmpeg input label of the transparent tag PNG, e.g. "3:v"
+    x: int
+    y: int
+    start: float
+    hold: float   # from the start of the fade in to the end of the fade out
+    fade: float
+
+
+def name_tag_box(c: dict, es: EncodeSpec, theme: Theme) -> tuple[int, int, int, int, int]:
+    """(x, y, width, height, name font px) of the tag at the encode size.
+
+    The area spans the presenter's share in side_by_side (the half of the frame on the
+    aligned side for inset), with its bottom edge clear of the subtitle safe area. The tag's
+    box sits at its left or right per [name_tag] align, so "right" is against the frame's
+    right edge, inset by the margin. The logo watermark lives inside the safe area at the
+    bottom right, so the two never meet.
+    """
+    W, H = _even(es.width), _even(es.height)
+    k = H / theme.height
+    nt = theme.name_tag or {}
+    font = round(nt.get("font_size_px") * k) if nt.get("font_size_px") else round(H * 0.036)
+    m = _even(H * 0.03)
+    if c["layout"] == "side_by_side":
+        left = W - _even(W * theme.safe_right)
+        x, w = left + m, (W - left) - 2 * m
+    else:
+        w = _even(W * 0.5)
+        x = W - w - m if nt.get("align", "right") == "right" else m
+    h = _even(font * 2.6)
+    y = H - round(theme.safe_bottom * k) - h - m
+    return x, y, _even(w), h, font
+
+
+def name_tag_html(theme: Theme, lang: str, name: str, role: str, width: int, height: int, font: int) -> str:
+    """A transparent page the size of the tag area: a box at its left or right ([name_tag]
+    align) holding the name over the role line, in the theme's fonts, with the accent bar on
+    that same side. A name too long for the area is cut with an ellipsis."""
+    nt = theme.name_tag or {}
+    side = nt.get("align", "right")
+    faces = "".join(
+        f"@font-face {{ font-family: \"{f['family']}\"; src: url(\"{(theme.dir / f['file']).as_uri()}\"); font-weight: {f.get('weight', 400)}; }}\n"
+        for f in theme.font_faces or [])
+    stack = ", ".join(f'"{f}"' if f not in ("sans-serif", "serif") else f for f in theme.fonts[lang])
+    pad = round(font * 0.35)
+    role_html = f"<div class='role'>{html.escape(role)}</div>" if role else ""
+    return f"""<!doctype html><html lang="{'zh-Hans' if lang == 'zh' else 'en'}"><head><meta charset="utf-8"><style>
+{faces}
+html, body {{ margin: 0; width: {width}px; height: {height}px; overflow: hidden; background: transparent; }}
+body {{ display: flex; align-items: flex-end; justify-content: {'flex-end' if side == 'right' else 'flex-start'}; }}
+.tag {{ box-sizing: border-box; max-width: 100%; padding: {pad}px {round(pad * 1.6)}px; background: {nt.get('background')};
+        border-{side}: {max(3, round(font * 0.18))}px solid {nt.get('accent')}; font-family: {stack}; text-align: {side}; }}
+.tag div {{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.name {{ font-size: {font}px; line-height: 1.15; font-weight: {theme.title_weight}; color: {nt.get('color')}; }}
+.role {{ font-size: {round(font * 0.62)}px; line-height: 1.3; font-weight: 400; color: {nt.get('role_color')}; }}
+</style></head><body><div class="tag"><div class="name">{html.escape(name)}</div>{role_html}</div></body></html>
+"""
+
+
 def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None, sub_font: str,
                  watermark_font: str | None, fonts_dir: Path | None = None, safe_right: float = 0.5,
-                 logo_input: str | None = None) -> str:
+                 logo_input: str | None = None, tag: NameTag | None = None) -> str:
     """burn_subs is the SRT filename to burn in, or None to leave the video plain (sidecar mode).
 
     safe_right is the theme's safe_area.right (the fraction of the frame kept clear of slide
@@ -105,6 +168,9 @@ def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None
     logo_input is the ffmpeg input label (e.g. "2:v") of a pre-rendered, transparent logo PNG
     to draw over the bottom-right corner of the whole frame, side_by_side only: a watermark on
     top of the presenter, not the small logo bumpers already put on the outro card.
+
+    tag, if given, is the speaker's name tag: faded in and out by its alpha channel over its
+    time window, drawn last so it sits above everything else.
     """
     W, H, fps = _even(es.width), _even(es.height), es.fps
     parts = []
@@ -116,12 +182,13 @@ def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None
         # the full-size base layer directly, with only the presenter needing any scaling.
         parts.append(f"[1:v]scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,fps={fps},setsar=1[slides]")
         parts.append(f"[0:v]scale={pw}:{H}:force_original_aspect_ratio=increase,crop={pw}:{H},fps={fps},setsar=1[pres]")
+        parts.append(f"[slides][pres]overlay=x={sw}:y=0:eof_action=repeat[base]")
         if logo_input:
             m = _even(H * 0.03)
-            parts.append(f"[slides][pres]overlay=x={sw}:y=0:eof_action=repeat[comp0]")
-            parts.append(f"[comp0][{logo_input}]overlay=x=W-w-{m}:y=H-h-{m}[comp]")
+            parts.append(f"[base][{logo_input}]overlay=x=W-w-{m}:y=H-h-{m}[base1]")
+            base = "base1"
         else:
-            parts.append(f"[slides][pres]overlay=x={sw}:y=0:eof_action=repeat[comp]")
+            base = "base"
     elif c["layout"] == "inset":
         iw = _even(W * c["inset_scale"])
         m = c["inset_margin"]
@@ -130,9 +197,17 @@ def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None
         y = f"H-h-{m}" if "bottom" in pos else str(m)
         parts.append(f"[1:v]scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,fps={fps},setsar=1[slides]")
         parts.append(f"[0:v]scale={iw}:-2,fps={fps},setsar=1[pres]")
-        parts.append(f"[slides][pres]overlay=x={x}:y={y}:eof_action=repeat[comp]")
+        parts.append(f"[slides][pres]overlay=x={x}:y={y}:eof_action=repeat[base]")
+        base = "base"
     else:
         raise Fail("CONFIG_INVALID", f"compose.layout '{c['layout']}' is not one of inset, side_by_side.", file="programme.toml")
+    if tag:
+        out_at = tag.start + tag.hold - tag.fade
+        parts.append(f"[{tag.input}]format=rgba,fade=t=in:st={tag.start:.3f}:d={tag.fade:.3f}:alpha=1,"
+                     f"fade=t=out:st={out_at:.3f}:d={tag.fade:.3f}:alpha=1[tag]")
+        parts.append(f"[{base}][tag]overlay=x={tag.x}:y={tag.y}:eof_action=pass[comp]")
+    else:
+        parts.append(f"[{base}]null[comp]")
     draw = ""
     if es.watermark:
         ff = f"fontfile='{_esc(watermark_font)}':" if watermark_font else ""
@@ -214,15 +289,18 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
     out = t.draft(lang) if draft else t.composed(lang)
     sidecar = None if (draft or burn_in) else t.composed_srt(lang)
     outputs = [out, *([sidecar] if sidecar else [])]
-    inputs = [t.video, t.cues_csv, subs, t.root / "programme.toml", *pngs, *bumpers.values()]
+    theme = load_theme(t.root, resolve_theme_name(cfg, args.theme))
+    course_map = t.module_dir / "course-map.md"
+    speaker = speaker_for(load_course_map(t.module_dir), t.unit, lang)
+    inputs = [t.video, t.cues_csv, subs, t.root / "programme.toml", *([course_map] if course_map.is_file() else []),
+              *theme.files(), *pngs, *bumpers.values()]
     if try_skip(t, r, "compose", lang, outputs, inputs, args.force):
         return
 
-    theme = load_theme(t.root, resolve_theme_name(cfg, args.theme))
     # A watermark of the theme's logo over the presenter, side_by_side only: drawn on top of
     # everything, unlike bumpers' outro card, which sits on its own separate slide.
     want_logo = c["layout"] == "side_by_side" and bool(theme.bumper) and bool(theme.bumper.get("logo"))
-    tl = tools.require(cfg, "ffmpeg", "ffprobe", *(["chrome"] if want_logo else []))
+    tl = tools.require(cfg, "ffmpeg", "ffprobe", *(["chrome"] if (want_logo or speaker) else []))
     times = cuesheet.read(t.cues_csv, n, t.cues_csv.name)
     info = probe(tl, t.video, "edit/master.mp4")
     duration = info.duration
@@ -265,12 +343,36 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
                 logo_args = ["-i", str(work / "logo.png")]
                 logo_input = "2:v"
 
+        # The speaker's name tag over the first seconds of the body. A missing name is only
+        # noted: the tag is wanted, but nothing about the video is wrong without it.
+        tag_args: list[str] = []
+        tag = None
+        if not speaker:
+            r.diagnostics.append(Diagnostic("COMPOSE_NO_SPEAKER", "The course map names no speaker, so the video has no name tag.",
+                                            topic=t.id, lang=lang, file=f"{t.module}/course-map.md",
+                                            hint="Add a line like '**Speaker.** Dr Jane Smith, Associate Professor' above the first "
+                                                 "unit (or inside a unit, for that unit only)."))
+        else:
+            tx, ty, tw, th, tfont = name_tag_box(c, es, theme)
+            (work / "tag.html").write_text(name_tag_html(theme, lang, *speaker, tw, th, tfont), encoding="utf-8")
+            tag_code, _tag_out, tag_err = run_proc(
+                [tl.node or "node", str(tools.NODE_DIR / "card.mjs"), str(work / "tag.html"),
+                 str(work / "tag.png"), str(tw), str(th), "1000", "1000", "transparent"],
+                env={"CHROME_PATH": tl.chrome or ""}, cwd=str(tools.NODE_DIR), timeout=180)
+            if tag_code != 0 or not (work / "tag.png").is_file():
+                r.diagnostics.append(Diagnostic("COMPOSE_NAME_TAG", f"Rendering the name tag failed (exit {tag_code}); composing without it.",
+                                                topic=t.id, lang=lang, data={"stderr": tag_err[-500:]}))
+            else:
+                nt = theme.name_tag
+                tag_args = ["-loop", "1", "-framerate", str(es.fps), "-t", f"{duration:.3f}", "-i", str(work / "tag.png")]
+                tag = NameTag(f"{2 + (1 if logo_args else 0)}:v", tx, ty, nt["start_seconds"], nt["hold_seconds"], nt["fade_seconds"])
+
         share = 0.85 if bumpers else 1.0
         body = work / "body.mp4"
         graph = filter_graph(c, es, duration, "subs.srt" if burn_in else None, sub_font, wm_font, theme.fonts_dir,
-                             theme.safe_right, logo_input)
+                             theme.safe_right, logo_input, tag)
         tp.update(1, "encoding")
-        ffmpeg(tl, ["-i", str(t.video), "-f", "concat", "-safe", "0", "-i", "slides.ffconcat", *logo_args,
+        ffmpeg(tl, ["-i", str(t.video), "-f", "concat", "-safe", "0", "-i", "slides.ffconcat", *logo_args, *tag_args,
                     "-filter_complex", graph, "-map", "[v]", "-map", "0:a?", "-t", f"{duration:.3f}",
                     *_encode_args(es), str(body)],
                duration=duration, on_pct=lambda pct: tp.update(pct * share, "encoding"), cwd=str(work))
@@ -316,7 +418,8 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
         r.artifacts.append(Envelope.artifact_for(t.root, sidecar, "composed_subtitles"))
     r.extra.update({"mode": "draft" if draft else "full", "subtitles": "burned" if burn_in else "sidecar",
                     "layout": c["layout"], "resolution": [_even(es.width), _even(es.height)],
-                    "body_offset": round(body_offset, 3), "bumpers": sorted(bumpers), "duration": round(duration, 3)})
+                    "body_offset": round(body_offset, 3), "bumpers": sorted(bumpers), "duration": round(duration, 3),
+                    "name_tag": speaker[0] if tag else None})
     tp.update(100, "done")
 
 

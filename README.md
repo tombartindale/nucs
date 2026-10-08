@@ -125,6 +125,31 @@ The look is part of the theme, under `[bumper]` in `theme.toml`: logo file, colo
 
 Once a topic has bumpers, `compose` bakes them into the delivered video in place of the programme-wide `[bumpers]` files, and `package` also delivers them as their own files beside it. Neither the master nor the cue sheet is changed. If the title changes, the bumpers go stale: compose skips them, and package refuses to run until `bcn bumpers` is run again.
 
+### Speaker name tag
+
+`compose` lays a "who is speaking" tag over the first seconds of the presenter's footage, in both full and `--draft` composes: the speaker's name over a role line. The name comes from a `**Speaker.**` line in the course map, so it can be edited on the server like the rest of the map:
+
+```markdown
+# KV7016 — Course map
+
+**Speaker.** Dr Jane Smith, Associate Professor, Northumbria University
+
+**Speaker (zh).** 简·史密斯博士，副教授
+
+## Unit 3 — A guest unit
+
+**Speaker.** Prof Alex Guest, Visiting Fellow
+```
+
+- **Name and role:** the first comma (or `，`) separates the name from the role line. A line with no comma is a name alone.
+- **Module and unit:** above the first unit, the line covers the whole module. Inside a unit, it overrides the module's line for that unit's topics.
+- **Mandarin:** `**Speaker (zh).**` is used for Mandarin composes. Without one, the English line is used. A unit's own line, in either language, wins over the module's.
+- **Where it sits:** against the right-hand edge of the presenter's half in `side_by_side` (the bottom right of the frame for `inset`), just above the subtitle safe area. It never covers the subtitles or the logo watermark. `align = "left"` under `[name_tag]` moves it to the left.
+- **When:** timed from the start of the presenter's footage, after the intro, so neither the cue sheet nor `body_offset` changes. By default it fades in at 1 s and is gone by 6 s.
+- **The look:** set under `[name_tag]` in `theme.toml`: timing, colours, accent bar, name size and alignment, in the theme's own fonts.
+- **No speaker:** the video is composed without a tag, with an info diagnostic (`COMPOSE_NO_SPEAKER`) saying so.
+- **Changing it:** editing the course map or the theme makes the composed video stale, so the next compose rebuilds it.
+
 ### Quizzes for the LMS
 
 `bcn qti <unit|module|programme>` exports every unit quiz as a QTI 2.1 package: `<module>/build/qti/<module>-<unit>-quiz.zip`, ready for the LMS's QTI import. A quiz is a unit's `activity.md` with `type: quiz` in its front matter, written the way the content producer writes it:

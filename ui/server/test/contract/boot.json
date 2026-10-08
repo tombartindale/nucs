@@ -32,6 +32,18 @@
     "level": "warn"
    },
    {
+    "area": "COMPOSE",
+    "code": "COMPOSE_NAME_TAG",
+    "description": "The speaker's name tag could not be rendered; the video was composed without it.",
+    "level": "warn"
+   },
+   {
+    "area": "COMPOSE",
+    "code": "COMPOSE_NO_SPEAKER",
+    "description": "The course map names no speaker for the topic, so the video has no name tag.",
+    "level": "info"
+   },
+   {
     "area": "CONFIG",
     "code": "CONFIG_INVALID",
     "description": "programme.toml or module.toml could not be read or has invalid values.",

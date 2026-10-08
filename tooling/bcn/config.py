@@ -217,6 +217,7 @@ class Theme:
     image_scale: float | None = None
     font_faces: list[dict] | None = None
     bumper: dict | None = None
+    name_tag: dict | None = None
     document: dict | None = None
     title_weight: int = 900
     subtitle_fonts: dict[str, str] | None = None
@@ -257,6 +258,20 @@ BUMPER_DEFAULTS: dict[str, Any] = {
     "intro_seconds": 5.0,
     "outro_seconds": 5.0,
     "fade_seconds": 0.75,
+}
+
+# The "who is speaking" lower third compose lays over the start of the body, under
+# [name_tag] in theme.toml. The name itself comes from the course map's **Speaker.** line. Times are seconds into the presenter's footage (after the intro).
+NAME_TAG_DEFAULTS: dict[str, Any] = {
+    "start_seconds": 1.0,
+    "hold_seconds": 5.0,      # from the start of the fade in to the end of the fade out
+    "fade_seconds": 0.5,
+    "background": "rgba(18, 52, 77, 0.88)",
+    "color": "#ffffff",       # the name
+    "role_color": "#d6e4ee",  # the role line
+    "accent": "#2a6f97",      # the bar down the edge nearest the side the tag is aligned to
+    "font_size_px": 0,
+    "align": "right",         # "left" or "right" of the presenter's area, just above the subtitle safe area        # the name, at the slide resolution; 0 means 3.6% of the frame height
 }
 
 # Printed documents on a white page (bcn coursemap), overridable under [document] in theme.toml.
@@ -300,6 +315,7 @@ def load_theme(root: Path, name: str) -> Theme:
             image_scale=float(slide["image_scale"]) if "image_scale" in slide else None,
             font_faces=[dict(f) for f in t.get("font_face", [])],
             bumper={**BUMPER_DEFAULTS, **t.get("bumper", {})},
+            name_tag={**NAME_TAG_DEFAULTS, **t.get("name_tag", {})},
             document={**DOCUMENT_DEFAULTS, **t.get("document", {})},
             title_weight=int(t.get("title_weight", 900)),
             subtitle_fonts={k: str(v) for k, v in t.get("subtitle_font", {}).items()},
@@ -307,6 +323,8 @@ def load_theme(root: Path, name: str) -> Theme:
         for k in ("intro_seconds", "outro_seconds", "fade_seconds", "logo_height"):
             theme.bumper[k] = float(theme.bumper[k])
         theme.document["logo_height"] = float(theme.document["logo_height"])
+        for k in ("start_seconds", "hold_seconds", "fade_seconds", "font_size_px"):
+            theme.name_tag[k] = float(theme.name_tag[k])
     except (KeyError, TypeError, ValueError) as e:
         raise Fail("RENDER_THEME", f"themes/{name}/theme.toml is missing or has a bad value: {e}",
                    file=str(d / "theme.toml")) from e
@@ -336,6 +354,12 @@ def load_theme(root: Path, name: str) -> Theme:
     if b["intro_seconds"] < b["fade_seconds"] or b["outro_seconds"] < 2 * b["fade_seconds"]:
         raise Fail("RENDER_THEME", "The intro must last at least fade_seconds, and the outro at least twice fade_seconds, "
                    "so the fades do not overlap.",
+                   file=str(d / "theme.toml"))
+    nt = theme.name_tag
+    if nt["align"] not in ("left", "right"):
+        raise Fail("RENDER_THEME", f"[name_tag] align must be \"left\" or \"right\", not {nt['align']!r}.", file=str(d / "theme.toml"))
+    if nt["hold_seconds"] < 2 * nt["fade_seconds"] or nt["start_seconds"] < 0:
+        raise Fail("RENDER_THEME", "[name_tag] hold_seconds must be at least twice fade_seconds, and start_seconds not negative.",
                    file=str(d / "theme.toml"))
     for lang in ("en", "zh"):
         if lang not in theme.fonts:

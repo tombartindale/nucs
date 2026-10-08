@@ -1,5 +1,9 @@
 # KV7015 Research Methods
 
+**Speaker.** Dr Jane Example, Associate Professor, Beacon Example University
+
+**Speaker (zh).** 简·示例博士，副教授，Beacon 示例大学
+
 ## Learning outcomes
 
 - **LO1** Formulate a focused, answerable research question from a broad topic.

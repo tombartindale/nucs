@@ -90,3 +90,17 @@ fade_seconds = 0.75      # the intro fades out to black; the outro fades in and 
 # above, which only reads against the dark outro/video background.
 logo = "assets/NU_Logo_Black.svg"
 logo_height = 28   # points, in the printed header
+
+[name_tag]
+# The "who is speaking" lower third bcn compose lays over the start of the presenter's
+# footage. The name and role come from the course map's **Speaker.** line.
+# Times are seconds into the footage, after the intro.
+start_seconds = 1.0
+hold_seconds = 5.0       # fade in, hold, fade out
+fade_seconds = 0.5
+background = "rgba(0, 0, 0, 0.88)"
+color = "#ffffff"        # the name
+role_color = "#d6e4ee"   # the role line
+accent = "#ffffffff"       # the bar down the edge it is aligned to
+align = "right"         # "left" or "right" of the presenter, just above the subtitle safe area
+font_size_px = 0         # the name at 1080p; 0 means 3.6% of the frame height
