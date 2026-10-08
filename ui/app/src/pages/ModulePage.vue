@@ -379,6 +379,10 @@ async function sendReminder() {
                           <q-item-section avatar><q-icon name="visibility" /></q-item-section>
                           <q-item-section>View</q-item-section>
                         </q-item>
+                        <q-item clickable v-close-popup :href="fileUrl(row.activity.path, null, `download=${module}-${row.unit}-activity.md`)">
+                          <q-item-section avatar><q-icon name="download" color="primary" /></q-item-section>
+                          <q-item-section>Download</q-item-section>
+                        </q-item>
                         <q-item v-if="row.activity.quiz?.exists" clickable v-close-popup :href="fileUrl(row.activity.quiz.package, null, 'download=1')">
                           <q-item-section avatar><q-icon name="download" :color="row.activity.quiz.stale ? 'warning' : 'primary'" /></q-item-section>
                           <q-item-section>{{ row.activity.quiz.stale ? 'Download QTI (out of date)' : `Download QTI · ${plural(row.activity.quiz.questions, 'question')}` }}</q-item-section>
