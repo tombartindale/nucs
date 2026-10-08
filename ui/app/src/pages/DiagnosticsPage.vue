@@ -4,8 +4,8 @@
 // tab: a proofreading task, with both readings side by side.
 import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import type { Diagnostic, DiagnosticsResponse } from '@beacon/shared';
-import { api } from '@/api';
+import type { Diagnostic, DiagnosticsResponse, TopicResponse } from '@beacon/shared';
+import { api, fileUrl } from '@/api';
 import AckControls from '@/components/AckControls.vue';
 import DiagnosticItem from '@/components/DiagnosticItem.vue';
 import PageHeader from '@/components/PageHeader.vue';
@@ -13,13 +13,28 @@ import StateChip from '@/components/StateChip.vue';
 import { fmtTime, LEVEL_ORDER, topicPath } from '@/format';
 import { useBeacon } from '@/stores/beacon';
 
-const props = defineProps<{ tab: string; topic?: string }>();
+const props = defineProps<{ tab: string; topic?: string; module?: string }>();
 const beacon = useBeacon();
 const router = useRouter();
-const f = reactive({ level: 'warn', module: '', lang: '', code: '' });
+const f = reactive({ level: 'warn', lang: '', code: '' });
 const env = shallowRef<DiagnosticsResponse | null>(null);
 const error = ref<string | null>(null);
 const corrections = reactive<Record<string, string>>({});  // mis-transcription id -> corrected text being typed
+
+// Topic and module are the same idea (narrow to part of the programme) at two granularities,
+// so they share one query-driven scope: at most one is set, it lives in the URL (shareable,
+// survives reload), and it renders as one chip, not two different filter UIs.
+const scope = computed(() => (props.topic ? { kind: 'Topic', value: props.topic } : props.module ? { kind: 'Module', value: props.module } : null));
+function inScope(d: Diagnostic) {
+  return props.topic ? d.topic === props.topic : !props.module || (d.topic || d.file || '').startsWith(props.module);
+}
+function go(overrides: { tab?: string; topic?: string; module?: string }) {
+  const nextTab = overrides.tab ?? props.tab;
+  const topic = 'topic' in overrides ? overrides.topic : props.topic;
+  const module = 'module' in overrides ? overrides.module : props.module;
+  const query: Record<string, string> = topic ? { topic } : module ? { module } : {};
+  void router.push({ path: nextTab === 'mistranscriptions' ? '/diagnostics/mistranscriptions' : '/diagnostics', query });
+}
 
 async function load() {
   try { env.value = await api<DiagnosticsResponse>('/api/diagnostics?path=.'); error.value = null; } catch (e) { error.value = (e as Error).message; }
@@ -35,13 +50,13 @@ const codeOptions = computed(() => [{ label: 'all codes', value: '' }, ...[...ne
 const mtOpen = computed(() => outstanding.value.filter((d) => d.code === 'CUE_MISTRANSCRIPTION' && !d.data?.review).length);
 const tab = computed({
   get: () => props.tab,
-  set: (v: string) => { void router.push(v === 'codes' ? '/diagnostics' : '/diagnostics/mistranscriptions'); },
+  set: (v: string) => go({ tab: v }),
 });
 
 const groups = computed(() => {
   const list = outstanding.value.filter((d) =>
     LEVEL_ORDER[d.level] <= LEVEL_ORDER[f.level] &&
-    (props.topic ? d.topic === props.topic : !f.module || (d.topic || d.file || '').startsWith(f.module)) &&
+    inScope(d) &&
     (!f.lang || d.lang === f.lang) &&
     (!f.code || d.code === f.code) &&
     (d.code !== 'CUE_MISTRANSCRIPTION' || d.level !== 'info'));
@@ -67,8 +82,7 @@ function rerun(g: (typeof groups.value)[number]) {
 }
 
 const mt = computed(() => {
-  const items = outstanding.value.filter((d) => d.code === 'CUE_MISTRANSCRIPTION' &&
-    (props.topic ? d.topic === props.topic : !f.module || (d.topic || '').startsWith(f.module)));
+  const items = outstanding.value.filter((d) => d.code === 'CUE_MISTRANSCRIPTION' && inScope(d));
   return [
     { title: 'To review', rows: items.filter((d) => !d.data?.review), empty: 'All reviewed.' },
     { title: 'Reviewed', rows: items.filter((d) => d.data?.review), empty: '' },
@@ -83,34 +97,86 @@ async function review(d: Diagnostic, args: Record<string, string | boolean>) {
   } catch { /* beacon.runJob already toasted the submit failure */ }
 }
 function correct(d: Diagnostic) {
-  const text = (corrections[d.data!.id!] ?? d.data!.script ?? '').trim();
+  const text = (corrections[d.data!.id!] ?? d.data!.srt ?? '').trim();
   if (text) void review(d, { correct: text });
 }
+function useScript(d: Diagnostic) {
+  const text = (d.data!.script ?? '').trim();
+  if (text) void review(d, { correct: text });
+}
+
+// Play a mis-transcription in place, instead of sending the reviewer to the full TopicPage
+// (which loads the whole editor just to seek a video): a hidden <audio> element reused across
+// rows, fed the topic's master video file (an <audio> element plays just its audio track fine),
+// seeked to the cue and stopped again after a few seconds.
+const PLAY_SECONDS = 6;
+const audio = ref<HTMLAudioElement | null>(null);
+const nowPlaying = ref<string | null>(null);
+const mediaCache = reactive<Record<string, string | null>>({});
+let loadedSrc: string | null = null;
+let stopTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function mediaSrc(topic: string): Promise<string | null> {
+  if (!(topic in mediaCache)) {
+    try {
+      const t = await api<TopicResponse>(`/api/topic/${topic}`);
+      const master = t.show.results?.[0]?.media.master;
+      mediaCache[topic] = master ? fileUrl(master) : null;
+    } catch { mediaCache[topic] = null; }
+  }
+  return mediaCache[topic];
+}
+function stopSegment() {
+  clearTimeout(stopTimer);
+  audio.value?.pause();
+  nowPlaying.value = null;
+}
+async function playSegment(d: Diagnostic) {
+  const time = d.data?.time;
+  const id = d.data?.id;
+  if (time === null || time === undefined || !id || !d.topic) return;
+  if (nowPlaying.value === id) { stopSegment(); return; }
+  const src = await mediaSrc(d.topic);
+  const el = audio.value;
+  if (!src || !el) { beacon.toast('No video found for this topic yet.', true); return; }
+  clearTimeout(stopTimer);
+  nowPlaying.value = id;
+  const begin = () => {
+    el.currentTime = time;
+    void el.play();
+    stopTimer = setTimeout(stopSegment, PLAY_SECONDS * 1000);
+  };
+  if (loadedSrc === src) begin();
+  else { loadedSrc = src; el.src = src; el.addEventListener('loadedmetadata', begin, { once: true }); }
+}
+onBeforeUnmount(stopSegment);
 </script>
 
 <template>
   <q-page padding class="page-max">
+    <audio ref="audio" style="display: none" @ended="stopSegment" />
     <PageHeader title="Verification"
       :sub="env ? `${env.counts.error} errors · ${env.counts.warn} warnings · ${env.counts.info} info, from current step results` : 'Loading…'" />
     <q-banner v-if="error" class="bg-negative text-white q-mb-md" rounded>{{ error }}</q-banner>
-    <q-tabs v-model="tab" dense no-caps align="left" class="q-mb-md" active-color="primary" indicator-color="primary">
-      <q-tab name="codes" label="By code" />
-      <q-tab name="mistranscriptions" :label="`Mis-transcriptions${mtOpen ? ` (${mtOpen})` : ''}`" />
-    </q-tabs>
-    <q-banner v-if="props.topic" class="bg-blue-1 q-mb-md" rounded>
-      Showing only <strong>{{ props.topic }}</strong>.
-      <template #action><q-btn flat dense no-caps label="Clear" :to="tab === 'mistranscriptions' ? '/diagnostics/mistranscriptions' : '/diagnostics'" /></template>
-    </q-banner>
+    <div class="row items-center q-mb-md">
+      <q-tabs v-model="tab" dense no-caps align="left" active-color="primary" indicator-color="primary">
+        <q-tab name="codes" label="By code" />
+        <q-tab name="mistranscriptions" :label="`Mis-transcriptions${mtOpen ? ` (${mtOpen})` : ''}`" />
+      </q-tabs>
+      <q-space />
+      <q-btn flat dense no-caps icon="refresh" label="Refresh" @click="load" />
+    </div>
     <q-card flat bordered class="q-mb-md">
       <q-card-section class="row items-center gap-sm">
+        <q-chip v-if="scope" dense outline color="primary" text-color="primary" icon="filter_alt" removable
+          :label="`${scope.kind}: ${scope.value}`" @remove="go({ topic: '', module: '' })" />
         <q-select v-if="tab === 'codes'" v-model="f.level" dense outlined emit-value map-options style="min-width: 190px" aria-label="Level"
           :options="[{ label: 'errors', value: 'error' }, { label: 'errors and warnings', value: 'warn' }, { label: 'everything', value: 'info' }]" />
-        <q-select v-if="!props.topic" v-model="f.module" dense outlined emit-value map-options :options="moduleOptions" style="min-width: 150px" aria-label="Module" />
+        <q-select v-if="!scope" :model-value="props.module || ''" dense outlined emit-value map-options :options="moduleOptions" style="min-width: 150px" aria-label="Module"
+          @update:model-value="(v) => go({ module: String(v || '') })" />
         <q-select v-if="tab === 'codes'" v-model="f.lang" dense outlined emit-value map-options style="min-width: 150px" aria-label="Language"
           :options="[{ label: 'both languages', value: '' }, { label: 'English', value: 'en' }, { label: 'Mandarin', value: 'zh' }]" />
         <q-select v-if="tab === 'codes'" v-model="f.code" dense outlined emit-value map-options :options="codeOptions" style="min-width: 220px" aria-label="Code" />
-        <q-space />
-        <q-btn flat dense no-caps icon="refresh" label="Refresh" @click="load" />
       </q-card-section>
     </q-card>
 
@@ -148,37 +214,46 @@ function correct(d: Diagnostic) {
     </template>
 
     <template v-else>
-      <p class="text-grey-7">The partner translates from this SRT, so a mishearing here reaches Mandarin.
-        Accept leaves the SRT as it is; Correct changes the delivered subtitle text (timings never change). Run subtitles and package afterwards.
-        A decision takes a moment to save — the item moves to Reviewed below once it has.</p>
+      <p class="text-grey-7">The partner translates from this SRT, so a mishearing here reaches Mandarin. Listen, then click whichever
+        reading is actually correct — <strong>Script</strong> or <strong>SRT</strong> — to deliver that text; or type the exact words on the
+        right if neither is right. Timings never change — only the delivered text. Run subtitles and package afterwards. A decision takes a
+        moment to save — the item moves to Reviewed below once it has.</p>
       <q-card v-if="mt[0].rows.length" flat bordered class="q-mb-md">
         <q-card-section class="text-subtitle1 text-weight-medium q-pb-sm">{{ mt[0].title }} ({{ mt[0].rows.length }})</q-card-section>
         <q-list separator>
+          <q-item class="text-caption text-grey-6">
+            <q-item-section style="max-width: 190px" />
+            <q-item-section class="mt-col">Script (approved)</q-item-section>
+            <q-item-section class="mt-col">SRT (captioned)</q-item-section>
+            <q-item-section side style="width: 300px" />
+            <q-item-section side style="width: 104px" />
+          </q-item>
           <q-item v-for="d in mt[0].rows" :key="d.data!.id">
             <q-item-section style="max-width: 190px">
               <router-link :to="`/topic/${d.topic}`">{{ d.topic }}</router-link>
               <q-item-label caption>slide {{ d.data!.slide }} · cue {{ d.data!.cue ?? '—' }}</q-item-label>
-              <router-link v-if="d.data!.time !== null && d.data!.time !== undefined" class="text-caption" :to="`/topic/${d.topic}?t=${d.data!.time}`">▶ play {{ fmtTime(d.data!.time) }}</router-link>
             </q-item-section>
-            <q-item-section>
-              <q-item-label caption>Script (approved)</q-item-label>
+            <q-item-section class="mt-col pick" @click="useScript(d)">
               <q-item-label>{{ d.data!.script }}</q-item-label>
+              <q-tooltip>Click to deliver this as the subtitle</q-tooltip>
             </q-item-section>
-            <q-item-section>
-              <q-item-label caption>SRT (captioned)</q-item-label>
+            <q-item-section class="mt-col pick" @click="review(d, { accept: true })">
               <q-item-label class="text-warning">{{ d.data!.srt }}</q-item-label>
+              <q-tooltip>Click to deliver this as the subtitle</q-tooltip>
             </q-item-section>
-            <q-item-section side style="min-width: 340px">
+            <q-item-section side style="width: 300px">
               <div class="row items-center gap-sm no-wrap">
-                <q-btn outline dense size="sm" no-caps label="Accept" @click="review(d, { accept: true })">
-                  <q-tooltip>The SRT reading is fine as it is</q-tooltip>
-                </q-btn>
-                <q-input :model-value="corrections[d.data!.id!] ?? d.data!.script" dense outlined class="col" aria-label="Corrected subtitle text"
+                <q-input :model-value="corrections[d.data!.id!] ?? d.data!.srt" dense outlined class="col" aria-label="Corrected subtitle text"
                   @update:model-value="(v) => (corrections[d.data!.id!] = String(v ?? ''))" />
-                <q-btn unelevated dense size="sm" color="primary" no-caps label="Correct" @click="correct(d)">
-                  <q-tooltip>The delivered subtitle should read this</q-tooltip>
+                <q-btn unelevated dense color="primary" no-caps label="Correct" class="correct-btn" @click="correct(d)">
+                  <q-tooltip>Deliver the subtitle as this typed text</q-tooltip>
                 </q-btn>
               </div>
+            </q-item-section>
+            <q-item-section side style="width: 104px">
+              <q-btn v-if="d.data!.time !== null && d.data!.time !== undefined" flat dense no-caps color="primary"
+                :icon="nowPlaying === d.data!.id ? 'stop' : 'play_arrow'" :label="nowPlaying === d.data!.id ? 'Stop' : fmtTime(d.data!.time)"
+                @click="playSegment(d)" />
             </q-item-section>
           </q-item>
         </q-list>
@@ -188,25 +263,35 @@ function correct(d: Diagnostic) {
       <q-card v-if="mt[1].rows.length" flat bordered>
         <q-expansion-item :label="`Reviewed (${mt[1].rows.length})`" header-class="text-subtitle1 text-weight-medium">
           <q-list separator>
+            <q-item class="text-caption text-grey-6">
+              <q-item-section style="max-width: 190px" />
+              <q-item-section class="mt-col">Script (approved)</q-item-section>
+              <q-item-section class="mt-col">SRT (captioned)</q-item-section>
+              <q-item-section side style="width: 340px" />
+              <q-item-section side style="width: 104px" />
+            </q-item>
             <q-item v-for="d in mt[1].rows" :key="d.data!.id" class="text-grey-6">
               <q-item-section style="max-width: 190px">
                 <router-link :to="`/topic/${d.topic}`">{{ d.topic }}</router-link>
                 <q-item-label caption>slide {{ d.data!.slide }} · cue {{ d.data!.cue ?? '—' }}</q-item-label>
               </q-item-section>
-              <q-item-section>
-                <q-item-label caption>Script (approved)</q-item-label>
+              <q-item-section class="mt-col">
                 <q-item-label>{{ d.data!.script }}</q-item-label>
               </q-item-section>
-              <q-item-section>
-                <q-item-label caption>SRT (captioned)</q-item-label>
+              <q-item-section class="mt-col">
                 <q-item-label>{{ d.data!.srt }}</q-item-label>
               </q-item-section>
-              <q-item-section side style="min-width: 340px">
+              <q-item-section side style="width: 340px">
                 <div class="row items-center gap-sm">
-                  <StateChip kind="ok" :label="d.data!.review!.decision === 'accept' ? 'accepted' : `corrected to “${d.data!.review!.text}”`" />
+                  <StateChip kind="ok" :label="d.data!.review!.decision === 'accept' ? 'kept SRT' : `corrected to “${d.data!.review!.text}”`" />
                   <span class="text-caption">{{ d.data!.review!.by || '' }}</span>
                   <q-btn flat dense size="sm" no-caps label="Undo" @click="review(d, { clear: true })" />
                 </div>
+              </q-item-section>
+              <q-item-section side style="width: 104px">
+                <q-btn v-if="d.data!.time !== null && d.data!.time !== undefined" flat dense no-caps color="primary"
+                  :icon="nowPlaying === d.data!.id ? 'stop' : 'play_arrow'" :label="nowPlaying === d.data!.id ? 'Stop' : fmtTime(d.data!.time)"
+                  @click="playSegment(d)" />
               </q-item-section>
             </q-item>
           </q-list>
@@ -215,3 +300,26 @@ function correct(d: Diagnostic) {
     </template>
   </q-page>
 </template>
+
+<style scoped>
+/* Quasar's item-sections default to flex-grow with min-width: auto, so two equal-flex
+   columns still drift apart by a few px depending on each row's text (the browser lets
+   content's min-content size win over the equal split). Forcing min-width: 0 makes the
+   two text columns always split the space exactly in half, so the columns after them
+   (input/button, play) land in the same spot on every row. */
+.mt-col {
+  flex: 1 1 0%;
+  min-width: 0;
+}
+.pick {
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.15s;
+}
+.pick:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+.correct-btn {
+  height: 40px;
+}
+</style>
