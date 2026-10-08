@@ -2,7 +2,8 @@
 // The editor's video and subtitles, uploaded from the browser for this topic. A file that is
 // already there is replaced only after confirming: a re-cut moves the cues, so they must be
 // regenerated (cues) once the new video is in.
-import { computed, inject, reactive } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, reactive } from 'vue';
+import { onBeforeRouteLeave } from 'vue-router';
 import type { JobSummary } from '@beacon/shared';
 import { confirm } from '@/composables/confirm';
 import { useBeacon } from '@/stores/beacon';
@@ -21,11 +22,16 @@ const busy = reactive<Partial<Record<Kind, boolean>>>({});
 // Bytes sent so far, as a fraction; absent once the upload has finished and the server is
 // placing the file and running cues/validate, which fetch() progress events cannot see.
 const sent = reactive<Partial<Record<Kind, number>>>({});
+// Tracked so a confirmed navigate-away (see onBeforeRouteLeave below) can abort the
+// transfer outright, rather than leaving it running against a component that's gone.
+const inFlight: Partial<Record<Kind, XMLHttpRequest>> = {};
+const anyBusy = computed(() => Object.values(busy).some(Boolean));
 
 // fetch() cannot report upload progress, so the file is sent with XMLHttpRequest, which can.
-function sendFile<T>(url: string, file: File, onProgress: (fraction: number) => void): Promise<T> {
+function sendFile<T>(url: string, file: File, kind: Kind, onProgress: (fraction: number) => void): Promise<T> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    inFlight[kind] = xhr;
     xhr.open('POST', url);
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
@@ -40,9 +46,34 @@ function sendFile<T>(url: string, file: File, onProgress: (fraction: number) => 
       reject(new Error(message));
     };
     xhr.onerror = () => reject(new Error('The upload failed: the connection was lost.'));
+    xhr.onabort = () => reject(new Error('Upload cancelled.'));
     xhr.send(file);
   });
 }
+
+// Full browser navigation (close tab, refresh, type a new URL) can't be cancelled from
+// here; the browser kills the transfer outright, so the best this can do is ask first,
+// via the native prompt.
+function onUnload(e: BeforeUnloadEvent) { if (anyBusy.value) { e.preventDefault(); e.returnValue = ''; } }
+onMounted(() => window.addEventListener('beforeunload', onUnload));
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', onUnload);
+  for (const xhr of Object.values(inFlight)) xhr.abort();
+});
+
+// In-app navigation (another topic, the module page) doesn't unload the document, so it
+// would otherwise leave the transfer running against a component that's about to be torn
+// down — ask first, and only abort (in onBeforeUnmount above) once the user confirms.
+onBeforeRouteLeave(async () => {
+  if (!anyBusy.value) return true;
+  const leave = await confirm({
+    title: 'An upload is still in progress',
+    lines: ['Leaving now cancels it — the file will need to be uploaded again.'],
+    ok: 'Leave and cancel upload',
+    danger: true,
+  });
+  return leave === true;
+});
 
 const present = computed<Record<Kind, boolean>>(() => {
   const m = t.show.value?.media;
@@ -67,7 +98,7 @@ async function upload(kind: Kind, file: File | null) {
   sent[kind] = 0;
   try {
     const query = `kind=${kind}${replacing ? '&replace=1' : ''}`;
-    const job = await sendFile<JobSummary>(`/api/topic/${t.id}/media?${query}`, file, (fraction) => { sent[kind] = fraction; });
+    const job = await sendFile<JobSummary>(`/api/topic/${t.id}/media?${query}`, file, kind, (fraction) => { sent[kind] = fraction; });
     delete sent[kind];
     beacon.trackJob(job);
     const result = await beacon.awaitJob(job.id);
@@ -79,6 +110,7 @@ async function upload(kind: Kind, file: File | null) {
   } finally {
     busy[kind] = false;
     delete sent[kind];
+    delete inFlight[kind];
   }
 }
 </script>
