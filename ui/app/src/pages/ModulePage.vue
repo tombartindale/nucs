@@ -211,6 +211,10 @@ async function sendReminder() {
                 <q-item-section avatar><q-icon name="visibility" /></q-item-section>
                 <q-item-section>View</q-item-section>
               </q-item>
+              <q-item clickable v-close-popup :href="fileUrl(moduleMap.path, null, `download=${module}-course-map.md`)">
+                <q-item-section avatar><q-icon name="download" color="primary" /></q-item-section>
+                <q-item-section>Download</q-item-section>
+              </q-item>
               <q-item v-if="moduleMap.pdf?.exists" clickable v-close-popup :href="fileUrl(moduleMap.pdf.path, null, `download=${module}-map.pdf`)">
                 <q-item-section avatar><q-icon name="download" :color="moduleMap.pdf.stale ? 'warning' : 'primary'" /></q-item-section>
                 <q-item-section>{{ moduleMap.pdf.stale ? 'Download PDF (out of date)' : 'Download PDF' }}</q-item-section>
