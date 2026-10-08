@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Topic: everything about one topic on one page. Script, slides and video panes, then
 // artefacts and diagnostics, with actions to run any step.
-import { computed, onBeforeUnmount, provide, ref, shallowRef, watch } from 'vue';
+import { computed, onBeforeUnmount, provide, reactive, ref, shallowRef, watch } from 'vue';
 import type { Diagnostic, DiagnosticsResponse, TopicResponse, TopicVerifyResponse } from '@beacon/shared';
 import { api } from '@/api';
 import ArtefactsTable from '@/components/topic/ArtefactsTable.vue';
@@ -25,6 +25,19 @@ const verifying = ref(false);
 const error = ref<string | null>(null);
 const layout = ref<'side' | 'stacked'>(beacon.boot?.prefs.topic_layout || 'side');
 const bottomTab = ref<'diagnostics' | 'artefacts'>('diagnostics');
+
+// Which panes to show: a per-browser preference, not a server one, since it's a quick
+// focus choice ("I'm just proofreading scripts today") rather than a durable setting.
+const PANES_KEY = 'beacon-topic-panes';
+const PANES_DEFAULTS = { script: true, slides: true, video: true };
+function loadPanes() {
+  try { return { ...PANES_DEFAULTS, ...JSON.parse(localStorage.getItem(PANES_KEY) || '{}') }; } catch { return { ...PANES_DEFAULTS }; }
+}
+const panes = reactive<typeof PANES_DEFAULTS>(loadPanes());
+watch(panes, () => {
+  try { localStorage.setItem(PANES_KEY, JSON.stringify(panes)); } catch { /* private window: fine */ }
+}, { deep: true });
+const visiblePanes = computed(() => [panes.script, panes.slides, panes.video].filter(Boolean).length);
 
 const show = computed(() => data.value?.show.results?.[0] ?? null);
 const status = computed(() => data.value?.status ?? null);
@@ -71,12 +84,13 @@ const allDiags = computed(() => [...((verify.value?.diagnostics || []) as Diagno
     <q-banner v-if="error" class="bg-negative text-white q-mb-md" rounded>{{ error }}</q-banner>
     <div v-if="!data && !error" class="text-grey-7 q-pa-lg"><q-spinner /> Loading {{ id }}…</div>
     <template v-if="data">
-      <TopicHead v-model:layout="layout" />
+      <TopicHead v-model:layout="layout" v-model:show-script="panes.script" v-model:show-slides="panes.slides" v-model:show-video="panes.video" />
       <TopicActions @verify="runVerify" />
-      <div :class="['panes', layout, 'q-mb-md']">
-        <ScriptPane />
-        <SlidesPane />
-        <VideoPane :start-at="startAt" />
+      <div v-if="!visiblePanes" class="text-grey-7 q-mb-md">No panes selected — pick at least one above.</div>
+      <div v-else :class="['panes', layout, `count-${visiblePanes}`, 'q-mb-md']">
+        <ScriptPane v-if="panes.script" />
+        <SlidesPane v-if="panes.slides" />
+        <VideoPane v-if="panes.video" :start-at="startAt" />
       </div>
       <q-card flat bordered>
         <q-tabs v-model="bottomTab" dense no-caps align="left" active-color="primary" indicator-color="primary">

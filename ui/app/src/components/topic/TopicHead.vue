@@ -8,6 +8,9 @@ import { NEXT_LABEL, STAGE_LABEL } from '@/format';
 import { TOPIC } from './context';
 
 const layout = defineModel<'side' | 'stacked'>('layout', { required: true });
+const showScript = defineModel<boolean>('showScript', { required: true });
+const showSlides = defineModel<boolean>('showSlides', { required: true });
+const showVideo = defineModel<boolean>('showVideo', { required: true });
 const t = inject(TOPIC)!;
 const st = computed(() => t.status.value);
 const title = computed(() => st.value?.title || (t.show.value?.en?.front?.title as string | undefined) || '');
@@ -42,6 +45,11 @@ const blockers = computed(() => (st.value ? [...st.value.en.blockers.map((b) => 
         </q-item>
       </q-list>
     </template>
+    <span class="text-caption text-grey-7">Show</span>
+    <q-checkbox v-model="showScript" dense label="Script" />
+    <q-checkbox v-model="showSlides" dense label="Slides" />
+    <q-checkbox v-model="showVideo" dense label="Video" />
+    <q-separator vertical inset class="q-mx-sm" />
     <span class="text-caption text-grey-7">Layout</span>
     <q-btn-toggle v-model="layout" dense no-caps unelevated toggle-color="primary"
       :options="[{ label: 'Side by side', value: 'side' }, { label: 'Stacked', value: 'stacked' }]" />
