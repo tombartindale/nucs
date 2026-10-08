@@ -803,7 +803,15 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const size = statSync(p).size;
     reply.header('Accept-Ranges', 'bytes');
     reply.header('Content-Type', mimeType(p));
-    if (q.download) reply.header('Content-Disposition', `attachment; filename="${basename(p)}"`);
+    if (q.download) {
+      // The browser's own `download` attribute on an <a> is only a fallback name: once the
+      // response carries a Content-Disposition filename, that wins. So a caller wanting a
+      // nicer name than the file's own (e.g. the module code instead of "course-map.pdf")
+      // passes it here (?download=KV7016-map.pdf) rather than relying on the anchor alone.
+      // `download=1` keeps the old behaviour of just using the file's real name.
+      const name = q.download === '1' ? basename(p) : String(q.download).replace(/[\r\n"]/g, '');
+      reply.header('Content-Disposition', `attachment; filename="${name}"`);
+    }
     const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));
     if (m && (m[1] || m[2])) {
       let start: number, end: number;
