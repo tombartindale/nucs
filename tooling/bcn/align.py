@@ -66,6 +66,7 @@ class Alignment:
     divergences: list[Divergence]
     script_tokens: int
     srt_tokens: int
+    diff_script: int
     divergence_ratio: float
     matched_ratio: float
     narration: list[str] = field(default_factory=list)
@@ -248,5 +249,5 @@ def align(narration: list[str], cues: list[Cue], *, window: int = 8, mis_max_tok
         last = b.timecode if last is None else max(last, b.timecode)
 
     total = len(s_tok) or 1
-    return Alignment(bounds, divs, len(s_tok), len(r_tok), round(diff_script / total, 4),
+    return Alignment(bounds, divs, len(s_tok), len(r_tok), diff_script, round(diff_script / total, 4),
                      round(len(match) / total, 4), narration)

@@ -209,7 +209,7 @@ Confidence per boundary drops for:
 
 Divergences are classified as cut, mis-transcription (short and phonetically close), paraphrase, or insertion. Nearby fragments are merged, so a reworded sentence counts as one paraphrase.
 
-The defaults are strict: `min_confidence = 0.8`, `max_divergence = 0.10`. A low-confidence boundary still gets a best-guess `cues.csv`, so the draft can be composed and watched, but the step fails until a person resolves it.
+The defaults are strict: `min_confidence = 0.8`, `max_divergence = 0.10`. A low-confidence boundary still gets a best-guess `cues.csv`, so the draft can be composed and watched, but the step fails until a person resolves it. Exceeding `max_divergence` is only a warning, not a failure, since recordings and translations rarely match a script word for word; reviewing a mis-transcription (accept or correct) removes it from the divergence count, since someone has then adjudicated it.
 
 ## Starting it for real
 

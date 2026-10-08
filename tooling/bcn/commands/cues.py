@@ -170,12 +170,20 @@ def cues_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: a
         else:
             r.diagnostics.append(Diagnostic("CUE_INSERTION", f"Slide {dv.slide}: SRT has \"{dv.srt[:80]}\", which is not in the script.",
                                             topic=t.id, file="edit/master.srt", slide=dv.slide, line=line, data=dv.to_json()))
-    if al.divergence_ratio > c["max_divergence"]:
+    # A reviewed mistranscription is a human-adjudicated cue, not an unresolved divergence - whether
+    # the decision was to keep the SRT or correct it, someone has confirmed what it should read. So it
+    # no longer counts toward CUE_HEAVY_DIVERGENCE, which exists to catch systemic problems (wrong SRT,
+    # wrong topic, a recording that needs redoing), not the backlog of one-at-a-time transcription fixes.
+    reviewed_tokens = sum(dv.script_tokens for dv in al.divergences if dv.kind == "mistranscription" and dv.id in decisions)
+    total_tokens = al.script_tokens or 1
+    reviewed_ratio = round(max(0, al.diff_script - reviewed_tokens) / total_tokens, 4)
+    if reviewed_ratio > c["max_divergence"]:
         r.diagnostics.append(Diagnostic(
             "CUE_HEAVY_DIVERGENCE",
-            f"{al.divergence_ratio:.0%} of the script is absent from or differs from the SRT; the limit is {c['max_divergence']:.0%}.",
+            f"{reviewed_ratio:.0%} of the script is absent from or differs from the SRT; the limit is {c['max_divergence']:.0%}.",
             topic=t.id, file="edit/master.srt",
-            hint="This almost always means the wrong SRT, the wrong topic, or a recording that needs redoing."))
+            hint="This usually means the wrong SRT, the wrong topic, or a recording that needs redoing. "
+                 "If it's mostly mishearings, review them in Diagnostics first - a reviewed item no longer counts here."))
 
     report = {
         "topic": t.id,
@@ -186,6 +194,7 @@ def cues_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: a
         "script_tokens": al.script_tokens,
         "srt_tokens": al.srt_tokens,
         "divergence_ratio": al.divergence_ratio,
+        "divergence_ratio_after_review": reviewed_ratio,
         "matched_ratio": al.matched_ratio,
         "boundaries": [b.to_json() for b in al.boundaries],
         "divergences": [{**d.to_json(), "review": decisions.get(d.id)} for d in al.divergences],
@@ -205,7 +214,7 @@ def cues_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: a
     r.extra.update({
         "slides": len(al.boundaries),
         "min_confidence": min(b.confidence for b in al.boundaries),
-        "divergence_ratio": al.divergence_ratio,
+        "divergence_ratio": reviewed_ratio,
         "mistranscriptions": sum(1 for d in al.divergences if d.kind == "mistranscription"),
         "unreviewed": sum(1 for d in al.divergences if d.kind == "mistranscription" and d.id not in decisions),
         "manual": sorted(ov),
