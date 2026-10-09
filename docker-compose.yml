@@ -91,7 +91,11 @@ services:
     restart: unless-stopped
 
   backup:
-    # Built from the repo root: it runs bcn against the programme volume for the full export.
+    # Built from the repo root. Nightly: pg_dump to S3, plus an `aws s3 sync` mirror of the
+    # programme volume (content, assets, master video, theme, state) and a small version
+    # manifest — see deploy/backup/backup.sh. Point-in-time recovery needs
+    # deploy/backup/setup-bucket.sh run once against the bucket first (bucket versioning +
+    # lifecycle), with broader credentials than this container's own.
     build:
       context: .
       dockerfile: deploy/backup/Dockerfile
