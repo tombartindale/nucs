@@ -27,6 +27,7 @@ function topicIdOf(path: string | null | undefined): string | null {
 const beacon = useBeacon();
 const scope = ref('');
 const media = ref(false);
+const slides = ref(false);
 const nested = ref(false);
 const replace = ref(false);
 const lists = shallowRef<TransferListResponse>({ exports: [] });
@@ -47,7 +48,7 @@ async function doExport() {
   if (!scope.value) return;
   busy.value = true;
   try {
-    const job = await beacon.runJob('transfer', [scope.value], { export: true, media: media.value, nested: nested.value });
+    const job = await beacon.runJob('transfer', [scope.value], { export: true, media: media.value, slides: slides.value, nested: nested.value });
     const done = await beacon.awaitJob(job.id);
     const env = done.envelopes?.[0];
     if (env && !env.ok) beacon.toast(env.diagnostics.filter((d) => d.level === 'error').map((d) => d.message).join(' ') || 'Export failed.', true);
@@ -144,10 +145,14 @@ const fullZips = computed(() => lists.value.exports.filter((x) => x.kind === 'zi
             <q-toggle v-model="media" dense label="Include images, video and audio">
               <q-tooltip max-width="320px">Without this, only text files are exported — a topic's assets/ images are not included, so an image it references won't be there to re-import later.</q-tooltip>
             </q-toggle>
+            <q-toggle v-model="slides" dense label="Include slides-only markdown">
+              <q-tooltip max-width="320px">For each topic, also export its narration-stripped slide markdown (generated fresh from topic.md — the version without the script, as a slides.md/.slides.md file alongside the real topic.md).</q-tooltip>
+            </q-toggle>
             <q-toggle v-model="nested" dense label="Nested folder layout" />
           </q-card-section>
           <q-card-section class="text-caption text-grey-7 q-pt-none">
             {{ media ? 'Everything in scope, including topic images, the edited video and subtitles.' : 'Text files only: scripts, quizzes, the module map and the like — small and quick, but leaves out images.' }}
+            {{ slides ? ' Each topic\'s narration-stripped slide markdown is included too.' : '' }}
             {{ nested ? ' Files keep the pipeline\'s own U01/T01/topic.md layout.' : ' Files use the flat KV7016-U01-T01.md names.' }}
           </q-card-section>
         </q-card>

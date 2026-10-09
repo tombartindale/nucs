@@ -3,9 +3,12 @@
 --export  Zip every recognised content file in scope — course-map.md, assets.md,
           reading-list.md, assignment-N.md, activity.md, topic.md/topic.zh.md by
           default; add --media for topic assets/ and the edited video/subtitles
-          too — under transfer/exports/, using the names bcn sync already knows
-          (flat "KV7016-U01-T01.md" by default, or --nested for the pipeline's
-          own layout).
+          too, and/or --slides for each topic's narration-stripped slide
+          markdown (generated fresh from topic.md, the same text package would
+          deliver, whether or not the topic has actually been packaged yet) —
+          under transfer/exports/, using the names bcn sync already knows (flat
+          "KV7016-U01-T01.md" by default, or --nested for the pipeline's own
+          layout).
 --import  Take a zip or folder of files named either way, place each one at the
           path bcn sync's naming rules say it belongs at, and validate every
           topic touched. A file whose name matches no known pattern is reported,
@@ -28,6 +31,7 @@ import argparse
 import datetime as _dt
 import difflib
 import filecmp
+import hashlib
 import json
 import re
 import shutil
@@ -37,6 +41,7 @@ from pathlib import Path
 
 from .. import fsutil
 from ..envelope import Cancelled, Diagnostic, Envelope, Fail, TopicResult, sha256_file, utcnow
+from ..markdown import parse
 from ..progress import CANCEL, Progress
 from ..runner import run_topics
 from ..sync import local_to_remote, remote_to_local
@@ -64,6 +69,8 @@ def add_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--export", action="store_true", help="export the files beneath the path")
     g.add_argument("--import", dest="source", metavar="DIR_OR_ZIP_OR_MEDIA", help="import files from a folder, a .zip, or a single .mp4/.srt")
     p.add_argument("--media", action="store_true", help="export: also include assets/ and the edited video/subtitles")
+    p.add_argument("--slides", action="store_true",
+                   help="export: also include each topic's narration-stripped slide markdown (generated from topic.md)")
     p.add_argument("--nested", action="store_true", help="export: use the pipeline's own U01/T01/topic.md layout, not the flat OneDrive names")
     p.add_argument("--full", action="store_true",
                    help="root scope only: a disaster-recovery backup, not just content -- implies --media, and also "
@@ -124,7 +131,7 @@ def _module_files(root: Path, module: str, unit: str | None) -> list[str]:
     return out
 
 
-def _export(env: Envelope, target: Target, media: bool, nested: bool, full: bool) -> None:
+def _export(env: Envelope, target: Target, media: bool, nested: bool, full: bool, slides: bool = False) -> None:
     if full and target.level != "root":
         raise Fail("USAGE", "--full only makes sense for the whole programme.", hint="Run it against the programme root, not a module/unit/topic path.")
     media = media or full
@@ -157,31 +164,44 @@ def _export(env: Envelope, target: Target, media: bool, nested: bool, full: bool
                 if f.is_file():
                     included.append((t.module, f"{t.unit}/{t.code}/edit/{f.name}"))
 
-    # (source path, name inside the zip, manifest module-or-None) for every file, content
-    # and extras together, so one progress-reported loop below writes and hashes them all.
-    entries: list[tuple[Path, str, str | None]] = []
+    # (source path, generated text, name inside the zip, manifest module-or-None) for every
+    # file, content and extras together, so one progress-reported loop below writes and
+    # hashes them all. Exactly one of src/generated is set per entry: a real file is read
+    # and hashed from disk; generated text (the narration-stripped slides, below) has
+    # neither a source path nor a reason to touch disk before being written into the zip.
+    entries: list[tuple[Path | None, str | None, str, str | None]] = []
     for module, local_rel in included:
         src = target.root / module / local_rel
         name = local_rel if nested else (local_to_remote(module, local_rel) or local_rel.replace("/", "-"))
         # Nested keeps a real module subfolder; flat names already carry the module as a
         # filename prefix via local_to_remote(), so no extra nesting is needed there.
-        entries.append((src, f"{module}/{name}" if nested else name, module))
+        entries.append((src, None, f"{module}/{name}" if nested else name, module))
+    if slides:
+        for t in target.topics:
+            src = t.src("en")
+            if not src.is_file():
+                continue
+            stripped = parse(src, "topic.md", t.id).stripped_file()
+            # Its own name, distinct from topic.md (which still carries the narration) —
+            # both can be in the same zip at once.
+            name = f"{t.unit}/{t.code}/slides.md" if nested else f"{t.module}-{t.unit}-{t.code}.slides.md"
+            entries.append((None, stripped, f"{t.module}/{name}" if nested else name, t.module))
     if full:
         toml = target.root / FULL_PROGRAMME_TOML
         if toml.is_file():
-            entries.append((toml, FULL_PROGRAMME_TOML, None))
+            entries.append((toml, None, FULL_PROGRAMME_TOML, None))
         sync_state = target.root / FULL_STATE_ROOT
         if sync_state.is_file():
-            entries.append((sync_state, FULL_STATE_PREFIX + FULL_STATE_ROOT, None))
+            entries.append((sync_state, None, FULL_STATE_PREFIX + FULL_STATE_ROOT, None))
         for t in target.topics:
             for f in [t.review_file, t.translation_file, *sorted(t.build.glob("*.json")), *sorted(t.build.glob("*.csv")), *sorted(t.out.glob("*.json"))]:
                 if f.is_file():
-                    entries.append((f, FULL_STATE_PREFIX + f.relative_to(target.root).as_posix(), t.module))
+                    entries.append((f, None, FULL_STATE_PREFIX + f.relative_to(target.root).as_posix(), t.module))
         theme_dir = target.root / "themes" / "custom"
         if theme_dir.is_dir():
             for f in sorted(theme_dir.rglob("*")):
                 if f.is_file() and not is_noise(f.name):
-                    entries.append((f, f"{FULL_THEME_PREFIX}{f.relative_to(theme_dir)}", None))
+                    entries.append((f, None, f"{FULL_THEME_PREFIX}{f.relative_to(theme_dir)}", None))
 
     if not entries:
         env.diagnostics.append(Diagnostic("XFER_NOTHING_TO_EXPORT", "Nothing in scope matched a file bcn transfer recognises.",
@@ -194,17 +214,23 @@ def _export(env: Envelope, target: Target, media: bool, nested: bool, full: bool
     try:
         with fsutil.atomic_path(zpath) as tmp:
             with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z, Progress("transfer", len(entries)) as prog:
-                for src, name, module in entries:
+                for src, generated, name, module in entries:
                     if CANCEL.is_set():
                         prog.done(cancelled=True)
                         raise Cancelled()
                     with prog.topic(name) as tp:
                         tp.update(0, f"zipping {name}")
-                        z.write(src, name)
-                        manifest_files.append({"module": module, "name": name, "sha256": sha256_file(src)})
+                        if src is not None:
+                            z.write(src, name)
+                            digest = sha256_file(src)
+                        else:
+                            data = generated.encode("utf-8")
+                            z.writestr(name, data)
+                            digest = hashlib.sha256(data).hexdigest()
+                        manifest_files.append({"module": module, "name": name, "sha256": digest})
                         tp.update(100, "zipped")
                 prog.done()
-                manifest = {"batch": batch, "created": utcnow(), "nested": nested, "media": media, "full": full, "files": manifest_files}
+                manifest = {"batch": batch, "created": utcnow(), "nested": nested, "media": media, "slides": slides, "full": full, "files": manifest_files}
                 z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
     except Cancelled:
         env.cancelled = True
@@ -430,7 +456,7 @@ def _import(env: Envelope, target: Target, source: str, dry_run: bool, full: boo
 
 def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
     if args.export:
-        _export(env, target, args.media, args.nested, args.full)
+        _export(env, target, args.media, args.nested, args.full, args.slides)
     else:
         if args.full and target.level != "root":
             raise Fail("USAGE", "--full only makes sense for the whole programme.", hint="Run it against the programme root, not a module/unit/topic path.")

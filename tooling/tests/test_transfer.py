@@ -36,6 +36,37 @@ def test_export_nested_layout(tree, capsys):
     assert names == {"KV7015/U01/T01/topic.md", "KV7015/U01/activity.md", "KV7015/course-map.md", "manifest.json"}
 
 
+def test_export_slides_includes_narration_stripped_markdown_flat(tree, capsys):
+    code, env = bcn(capsys, "transfer", str(tree / "KV7015"), "--export", "--slides")
+    assert code == 0, env["diagnostics"]
+    zpath = tree / env["zip"]
+    names = _names(zpath)
+    # Both topic.md (with narration) and the stripped slides version are present, under
+    # distinct names, so neither one overwrites the other in the zip.
+    assert "KV7015-U01-T01.md" in names
+    assert "KV7015-U01-T01.slides.md" in names
+    with zipfile.ZipFile(zpath) as z:
+        stripped = z.read("KV7015-U01-T01.slides.md").decode("utf-8")
+    assert "Say:" not in stripped
+    assert "Slide 1 heading" in stripped
+    assert "Point one" in stripped
+
+
+def test_export_slides_nested_layout(tree, capsys):
+    code, env = bcn(capsys, "transfer", str(tree / "KV7015"), "--export", "--slides", "--nested")
+    assert code == 0, env["diagnostics"]
+    names = _names(tree / env["zip"])
+    assert "KV7015/U01/T01/topic.md" in names
+    assert "KV7015/U01/T01/slides.md" in names
+
+
+def test_export_without_slides_flag_omits_it(tree, capsys):
+    code, env = bcn(capsys, "transfer", str(tree / "KV7015"), "--export")
+    assert code == 0, env["diagnostics"]
+    names = _names(tree / env["zip"])
+    assert not any(n.endswith("slides.md") for n in names)
+
+
 def test_export_unit_scope_excludes_other_units_and_course_map(tree, capsys):
     (tree / "KV7015" / "U02").mkdir(parents=True)
     (tree / "KV7015" / "U02" / "activity.md").write_text("# U02 Activity\n")
