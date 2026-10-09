@@ -122,6 +122,7 @@ CODES: dict[str, tuple[str, str]] = {
     "INTAKE_EXISTS_DIFFERS": ("error", "The topic file already exists with different content."),
     "INTAKE_UNCHANGED": ("info", "The topic file already exists with identical content."),
     "INTAKE_WRITTEN": ("info", "The topic file was written."),
+    "INTAKE_ASSET_WRITTEN": ("info", "An asset file from the source was written alongside the topic."),
     # --- translation -----------------------------------------------------
     "XL_NOT_READY": ("error", "A topic is not ready to export for translation."),
     "XL_EXPORTED": ("info", "A topic was exported for translation."),
