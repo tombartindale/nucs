@@ -40,7 +40,7 @@ from ..envelope import Cancelled, Diagnostic, Envelope, Fail, TopicResult, sha25
 from ..progress import CANCEL, Progress
 from ..runner import run_topics
 from ..sync import local_to_remote, remote_to_local
-from ..tree import Target, is_noise
+from ..tree import MODULE_RE, Target, is_noise
 from ..tree import resolve as resolve_target
 from . import validate as validate_cmd
 
@@ -222,12 +222,15 @@ def _export(env: Envelope, target: Target, media: bool, nested: bool, full: bool
 
 def _module_of(rel: str) -> tuple[str | None, str]:
     """Splits a zip entry into (module, path relative to the module), trying a real
-    module subfolder first (nested exports), then a flat name's own KV7016- prefix."""
+    module subfolder first (nested exports), then a flat name's own KV7016- prefix.
+    The first branch checks the folder name is actually a module code (KV7015, not just
+    any 6-character name — a plain top-level "assets" folder is also 6 characters and
+    would otherwise be misread as one)."""
     parts = rel.split("/", 1)
-    if len(parts) == 2 and len(parts[0]) == 6:
+    if len(parts) == 2 and MODULE_RE.fullmatch(parts[0]):
         return parts[0], parts[1]
     stem = Path(rel).name
-    if len(stem) > 7 and stem[6] == "-":
+    if len(stem) > 7 and stem[6] == "-" and MODULE_RE.fullmatch(stem[:6]):
         return stem[:6], rel
     return None, rel
 

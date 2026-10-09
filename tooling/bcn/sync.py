@@ -49,6 +49,11 @@ FLAT_RULES: list[tuple[str, str]] = [
     (r"{m}-(?P<u>U\d\d)-(?P<t>T\d\d)\.srt", "{u}/{t}/edit/master.srt"),
     (r"{m}-(?P<u>U\d\d)-(?P<t>T\d\d)\.zh\.srt", "{u}/{t}/edit/master.zh.srt"),
     (r"{m}-(?P<u>U\d\d)-(?P<t>T\d\d)-assets/(?P<f>[^/]+)", "{u}/{t}/assets/{f}"),
+    # A single shared assets/ folder at the top of the batch, with the topic prefix baked
+    # into each filename instead of into a per-topic folder name (assets/KV7016-U01-T01-
+    # fig-01.png) — a convention bcn doesn't produce itself, but a real one content
+    # creators ship, so import needs to recognise it even though export never writes it.
+    (r"assets/{m}-(?P<u>U\d\d)-(?P<t>T\d\d)-(?P<f>[^/]+)", "{u}/{t}/assets/{f}"),
 ]
 
 # The pipeline's own nested layout, if someone has used it in the shared folder.

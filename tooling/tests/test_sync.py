@@ -22,6 +22,10 @@ def test_name_mapping():
     assert remote_to_local("KV7016", "KV7016-course-map.md") == "course-map.md"
     assert remote_to_local("KV7016", "asset-requests.md") == "assets.md"
     assert remote_to_local("KV7016", "KV7016-U01-T01-assets/fig.png") == "U01/T01/assets/fig.png"
+    # A shared assets/ folder at the top of the batch, prefix baked into the filename
+    # rather than into a per-topic folder name — a convention bcn doesn't produce itself
+    # but a real one content creators ship.
+    assert remote_to_local("KV7016", "assets/KV7016-U01-T01-fig-01.png") == "U01/T01/assets/fig-01.png"
     assert remote_to_local("KV7016", "U01/T01/topic.md") == "U01/T01/topic.md"
     assert remote_to_local("KV7016", "Module_Specification_-_KV7016.docx") is None
     assert remote_to_local("KV7016", "KV7099-U01-T01.md") is None  # another module's file

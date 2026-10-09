@@ -152,6 +152,22 @@ def test_media_export_round_trips_through_import(tree, capsys):
     assert (other / "KV7015" / "U01" / "T01" / "edit" / "master.mp4").read_bytes() == b"not a real video"
 
 
+def test_shared_assets_folder_with_prefixed_filenames_is_recognized(tree, tmp_path, capsys):
+    # A real-world convention: one assets/ folder at the top of the batch, each file
+    # prefixed with its own topic id, rather than bcn's own per-topic assets/ folder
+    # naming. "assets" is coincidentally 6 characters, the same length as a module code
+    # (KV7015), which used to make _module_of() misdetect it as one and refuse the file
+    # as unrecognized.
+    zpath = tmp_path / "batch.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("assets/KV7015-U01-T01-fig-01.png", b"figure bytes")
+    code, env = bcn(capsys, "transfer", str(tree / "KV7015"), "--import", str(zpath))
+    assert code == 0, env["diagnostics"]
+    result = next(r for r in env["results"] if r["topic"] == "assets/KV7015-U01-T01-fig-01.png")
+    assert result["action"] == "written"
+    assert (tree / "KV7015" / "U01" / "T01" / "assets" / "fig-01.png").read_bytes() == b"figure bytes"
+
+
 def test_full_export_requires_root_scope(tree, capsys):
     code, env = bcn(capsys, "transfer", str(tree / "KV7015"), "--export", "--full")
     assert code == 2
