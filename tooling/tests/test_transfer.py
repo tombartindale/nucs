@@ -364,15 +364,27 @@ def test_replace_overwrites_a_differing_video(tree, tmp_path, capsys):
     assert (_topic_dir(tree) / "edit" / "master.mp4").read_bytes() == b"re-cut"
 
 
-def test_replace_never_overwrites_topic_content(tree, tmp_path, capsys):
+def test_without_replace_differing_topic_content_is_refused(tree, tmp_path, capsys):
     zpath = tmp_path / "batch.zip"
     with zipfile.ZipFile(zpath, "w") as z:
         z.writestr("KV7015-U01-T01.md", topic_md(say=False))
     before = (_topic_dir(tree) / "topic.md").read_text()
-    code, env = bcn(capsys, "transfer", str(tree / "KV7015"), "--import", str(zpath), "--replace")
+    code, env = bcn(capsys, "transfer", str(tree / "KV7015"), "--import", str(zpath))
     assert code == 1
     assert next(r for r in env["results"] if r["topic"] == "KV7015-U01-T01.md")["action"] == "exists_differs"
     assert (_topic_dir(tree) / "topic.md").read_text() == before
+
+
+def test_replace_overwrites_differing_topic_content_too(tree, tmp_path, capsys):
+    # --replace is not just for edit/ media: a general re-import of corrected content
+    # (the actual, more common case) must be able to overwrite topic.md as well.
+    zpath = tmp_path / "batch.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("KV7015-U01-T01.md", topic_md(say=False))
+    code, env = bcn(capsys, "transfer", str(tree / "KV7015"), "--import", str(zpath), "--replace")
+    assert code == 0, env["diagnostics"]
+    assert next(r for r in env["results"] if r["topic"] == "KV7015-U01-T01.md")["action"] == "written"
+    assert (_topic_dir(tree) / "topic.md").read_text() == topic_md(say=False)
 
 
 def test_single_file_with_unknown_name_is_not_placed(tree, tmp_path, capsys):

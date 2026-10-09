@@ -596,6 +596,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     if (data.dry_run) args.dry_run = true;
     if (data.full) args.full = true;
     if (data.init) args.init = true;
+    if (data.replace) args.replace = true;
     const job = await app.jobs.submit('transfer', [target], args, `transfer import · ${basename(src)}`, await app.operator());
     return reply.code(202).send(job);
   });

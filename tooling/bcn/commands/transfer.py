@@ -9,9 +9,9 @@
 --import  Take a zip or folder of files named either way, place each one at the
           path bcn sync's naming rules say it belongs at, and validate every
           topic touched. A file whose name matches no known pattern is reported,
-          not guessed at. A file that already exists with different content is
-          never overwritten: the diff comes back instead, exactly as bcn intake
-          already does for topic.md.
+          not guessed at. By default a file that already exists with different
+          content is never overwritten: the diff comes back instead. --replace
+          overwrites it anyway, for re-importing corrected content.
 --full    Root-scope only. Everything --media already covers, plus programme.toml
           and themes/custom/ (if present) at the zip's top level, so the result is
           enough to rebuild the whole programme on a fresh server: a disaster-
@@ -70,7 +70,7 @@ def add_args(p: argparse.ArgumentParser) -> None:
                         "carries programme.toml and themes/custom/")
     p.add_argument("--dry-run", action="store_true", help="import: report what would happen, write nothing")
     p.add_argument("--replace", action="store_true",
-                   help="import: overwrite a differing edit/ video or subtitle (a re-cut). Every other file is still never overwritten.")
+                   help="import: overwrite a file that already exists and differs, instead of refusing")
     p.add_argument("--init", action="store_true",
                    help="import --full: create the root (with a placeholder programme.toml) if it does not exist yet, "
                         "so a disaster-recovery restore has a root to resolve before --full's own programme.toml overwrites it")
@@ -402,8 +402,7 @@ def _import(env: Envelope, target: Target, source: str, dry_run: bool, full: boo
                         env.results.append(r)
                         tp.update(100, "refused")
                         continue
-                    replaceable = replace and "/edit/" in f"/{local_rel}"
-                    action, touched = _place(env, rel, f, str(target.root / module / local_rel), dry_run, overwrite=replaceable)
+                    action, touched = _place(env, rel, f, str(target.root / module / local_rel), dry_run, overwrite=replace)
                     if touched:
                         touched_modules.add(module)
                     tp.update(100, action)

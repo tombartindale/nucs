@@ -8,6 +8,7 @@ import type { BcnTransferEnvelope, JobSummary, TransferListResponse, Translation
 import { api, fileUrl } from '@/api';
 import PageHeader from '@/components/PageHeader.vue';
 import StateChip from '@/components/StateChip.vue';
+import { confirm } from '@/composables/confirm';
 import { fmtAgo, fmtBytes, plural } from '@/format';
 import { useBeacon } from '@/stores/beacon';
 
@@ -27,6 +28,7 @@ const beacon = useBeacon();
 const scope = ref('');
 const media = ref(false);
 const nested = ref(false);
+const replace = ref(false);
 const lists = shallowRef<TransferListResponse>({ exports: [] });
 const lastImport = shallowRef<{ item: TranslationItem; env: BcnTransferEnvelope | undefined } | null>(null);
 const busy = ref(false);
@@ -55,10 +57,23 @@ async function doExport() {
   }
 }
 
+/** Overwriting content that already differs is a real content-loss risk if clicked
+ *  without thinking, so confirm before any import done with Replace ticked. */
+async function confirmReplaceIfNeeded(): Promise<boolean> {
+  if (!replace.value) return true;
+  return (await confirm({
+    title: 'Replace files that already exist and differ?',
+    lines: ['Anything already on disk with different content will be overwritten. This cannot be undone.'],
+    ok: 'Replace',
+    danger: true,
+  })) === true;
+}
+
 async function upload(file: File | undefined) {
   if (!file) return;
+  if (!(await confirmReplaceIfNeeded())) return;
   try {
-    const { path } = await api<{ path: string }>(`/api/transfer/upload?name=${encodeURIComponent(file.name)}`, { raw: await file.arrayBuffer() });
+    const { path } = await api<{ path: string }>(`/api/transfer/upload?name=${encodeURIComponent(file.name)}`, { raw: file });
     await doImport({ name: file.name, path, kind: 'zip', bytes: file.size, mtime: new Date().toISOString() });
   } catch (e) { beacon.toast((e as Error).message, true); }
 }
@@ -67,7 +82,7 @@ function onDrop(e: DragEvent) { over.value = false; void upload(e.dataTransfer?.
 async function doImport(item: TranslationItem) {
   busy.value = true;
   try {
-    const job = await api<JobSummary>('/api/transfer/import', { body: { source: item.path } });
+    const job = await api<JobSummary>('/api/transfer/import', { body: { source: item.path, replace: replace.value } });
     beacon.trackJob(job);
     const done = await beacon.awaitJob(job.id);
     lastImport.value = { item, env: done.envelopes?.[0] as unknown as BcnTransferEnvelope | undefined };
@@ -116,7 +131,7 @@ const fullZips = computed(() => lists.value.exports.filter((x) => x.kind === 'zi
 
 <template>
   <q-page padding class="page-max">
-    <PageHeader title="Transfer" sub="Export a module or unit as a single zip — every file bcn recognises, not just scripts — to hand to a content creator or partner. Import one back: each file is placed by its name, nothing that already differs is ever overwritten." />
+    <PageHeader title="Transfer" sub="Export a module or unit as a single zip — every file bcn recognises, not just scripts — to hand to a content creator or partner. Import one back: each file is placed by its name. By default nothing that already differs is overwritten; tick Replace to change that." />
     <div class="row q-col-gutter-md">
       <div class="col-12 col-md-6 q-gutter-y-md">
         <q-card flat bordered>
@@ -126,11 +141,13 @@ const fullZips = computed(() => lists.value.exports.filter((x) => x.kind === 'zi
             <q-btn unelevated color="primary" no-caps label="Export batch" :disable="!scope || busy" :loading="busy" @click="doExport" />
           </q-card-section>
           <q-card-section class="row items-center gap-md q-pt-none">
-            <q-toggle v-model="media" dense label="Include video/audio" />
+            <q-toggle v-model="media" dense label="Include images, video and audio">
+              <q-tooltip max-width="320px">Without this, only text files are exported — a topic's assets/ images are not included, so an image it references won't be there to re-import later.</q-tooltip>
+            </q-toggle>
             <q-toggle v-model="nested" dense label="Nested folder layout" />
           </q-card-section>
           <q-card-section class="text-caption text-grey-7 q-pt-none">
-            {{ media ? 'Everything in scope, including the edited video and subtitles.' : 'Text files only: scripts, quizzes, the module map and the like — small and quick.' }}
+            {{ media ? 'Everything in scope, including topic images, the edited video and subtitles.' : 'Text files only: scripts, quizzes, the module map and the like — small and quick, but leaves out images.' }}
             {{ nested ? ' Files keep the pipeline\'s own U01/T01/topic.md layout.' : ' Files use the flat KV7016-U01-T01.md names.' }}
           </q-card-section>
         </q-card>
@@ -157,7 +174,15 @@ const fullZips = computed(() => lists.value.exports.filter((x) => x.kind === 'zi
               <input ref="fileInput" type="file" accept=".zip" class="hidden" @change="upload(($event.target as HTMLInputElement).files?.[0])">
             </div>
           </q-card-section>
-          <q-card-section class="text-caption text-grey-7">Any file bcn recognises by name — topic.md, activity.md, course-map.md, assignment-N.md, and so on — in flat or nested naming.</q-card-section>
+          <q-card-section class="row items-center q-pt-none">
+            <q-checkbox v-model="replace" dense label="Replace files that already exist and differ">
+              <q-tooltip max-width="320px">Normally a file already on disk with different content is left alone and the diff is shown instead. Tick this to overwrite it anyway, e.g. re-importing corrected content.</q-tooltip>
+            </q-checkbox>
+          </q-card-section>
+          <q-card-section class="text-caption text-grey-7 q-pt-none">
+            Any file bcn recognises by name — topic.md, activity.md, course-map.md, assignment-N.md, a topic's assets/ images, and so on — in
+            flat or nested naming. A name it doesn't recognise is reported, not guessed at.
+          </q-card-section>
         </q-card>
         <q-card v-if="lastImport?.env" flat bordered>
           <q-card-section class="row items-center gap-sm">
