@@ -452,6 +452,15 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     return job ?? reply.code(404).send({ error: 'No such job, or it has already finished.' });
   });
 
+  // A path this process itself staged under dataDir/intake/ a moment ago (a paste, an
+  // uploaded batch zip, or an uploaded assets zip) — never one the browser can point
+  // anywhere else, since `assets`/`from` are passed straight to bcn as a filesystem path.
+  function stagedIntakePath(p: string): string {
+    const base = join(app.dataDir, 'intake') + sep;
+    if (!p.startsWith(base)) throw new Forbidden();
+    return p;
+  }
+
   f.post('/api/intake', async (req, reply) => {
     const data = await readJson(req);
     const text = String(data.text ?? '');
@@ -462,6 +471,8 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     writeFileSync(file, text, 'utf8');
     const target = app.targetRel(String(data.path || '.'));
     const args: JobArgs = { from: file, dry_run: Boolean(data.dry_run) };
+    if (data.replace) args.replace = true;
+    if (data.assets) args.assets = stagedIntakePath(String(data.assets));
     const job = await app.jobs.submit('intake', [target], args, `intake${args.dry_run ? ' (check only)' : ''} · paste`, await app.operator());
     return reply.code(202).send(job);
   });
@@ -481,8 +492,26 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     await pipeline(req.body as IncomingMessage, createWriteStream(file));
     const target = app.targetRel(String(req.query.path || '.'));
     const args: JobArgs = { from: file, dry_run: req.query.dry_run === '1' };
+    if (req.query.replace === '1') args.replace = true;
+    if (req.query.assets) args.assets = stagedIntakePath(String(req.query.assets));
     const job = await app.jobs.submit('intake', [target], args, `intake${args.dry_run ? ' (check only)' : ''} · ${name}`, await app.operator());
     return reply.code(202).send(job);
+  });
+
+  // A second, separate .zip of images, for a batch that ships its assets apart from the
+  // (often flat-named) .md files rather than nested beside them. Staged the same way as
+  // the main batch zip; its path is passed back to the browser, which includes it as
+  // `assets` on the /api/intake or /api/intake/upload call that follows.
+  f.post('/api/intake/assets-upload', async (req: Req, reply) => {
+    const name = (req.query.name ?? 'assets.zip').replace(/[^A-Za-z0-9._-]/g, '_');
+    if (!name.toLowerCase().endsWith('.zip')) throw new BadRequest('Upload a .zip file.');
+    const n = Number(req.headers['content-length'] || 0);
+    if (!(n > 0) || n > UPLOAD_MAX) throw new BadRequest('Upload is empty or too large.');
+    const d = join(app.dataDir, 'intake');
+    mkdirSync(d, { recursive: true });
+    const file = join(d, `${stamp()}-${name}`);
+    await pipeline(req.body as IncomingMessage, createWriteStream(file));
+    return reply.code(201).send({ path: file });
   });
 
   // -- translation ----------------------------------------------------------------------------

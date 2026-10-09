@@ -1,17 +1,24 @@
 """bcn intake: place pasted topic markdown into the tree, then validate it.
 
-Identify, check, place, validate. No editing. A paste may hold a whole unit;
-it is split on topic front matter. A topic not in the course map is refused, and
-an existing file that differs is never overwritten: the diff is returned instead.
+Identify, check, place, validate. A paste may hold a whole unit; it is split on
+topic front matter. A topic not in the course map is refused, and by default an
+existing topic.md that differs is never overwritten: the diff is returned instead.
+--replace overwrites it anyway, for a re-send of corrected content.
 
 --from also accepts a folder or a .zip of real topic.md files (e.g. a batch handed
 over by a content creator), not just one pasted text file: every .md file found is
 read and concatenated, each already carrying its own topic_id front matter, then
 split and placed exactly as a single paste would be.
 
-A topic's own assets/ folder, sitting beside its .md file in the source, comes in
-with it: otherwise an image the script references would validate as missing even
-though it was right there in the same upload.
+A topic's images come in with it, matched by filename against whatever each topic's
+own slides reference (not by blindly copying everything in the source, nor by
+assuming one fixed layout): first an assets/ folder sitting right beside that
+topic's own .md file (the pipeline's own nested layout), then falling back to any
+other file of that name found anywhere in the source, including under --assets, a
+second folder or .zip supplied separately for a batch that ships its images apart
+from the (often flat-named) .md files rather than nested beside them. Without this,
+an image the script references would validate as missing even though it was right
+there in the same upload.
 """
 
 from __future__ import annotations
@@ -38,46 +45,75 @@ FENCE = re.compile(r"^\s*(```|~~~)[\w-]*\s*$")
 
 def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--from", dest="source", required=True, help="file, folder or .zip holding the topic markdown")
+    p.add_argument("--assets", dest="assets_source", help="optional extra folder or .zip of images, matched to each topic by filename")
+    p.add_argument("--replace", action="store_true", help="overwrite a topic.md that already exists and differs, instead of refusing")
     p.add_argument("--dry-run", action="store_true", help="check and report, write nothing")
 
 
-def _read_source(source: str, root: Path) -> tuple[str, dict[str, list[tuple[str, bytes]]]]:
-    """One file is read as-is (today's paste path; no assets, since there is no sibling
-    folder to find them in). A folder or .zip has every .md file inside read and
+def _extract(source: str, root: Path) -> tuple[Path, Path | None]:
+    """A folder is used directly (nothing to clean up); a .zip is extracted, preserving
+    its own directory structure, into a fresh temp dir under root, which the caller must
+    remove when done. Flattening every member to its bare filename (the previous
+    behaviour) let two files that happened to share a name silently overwrite one another
+    during extraction, before either was even read."""
+    src = Path(source)
+    if not src.exists():
+        raise Fail("FS_MISSING", f"{source} does not exist.")
+    if src.is_dir():
+        return src, None
+    if src.suffix.lower() != ".zip":
+        raise Fail("USAGE", f"{source} must be a folder or a .zip.")
+    tmp = Path(tempfile.mkdtemp(prefix=".intake-", dir=root))
+    with zipfile.ZipFile(src) as z:
+        for member in z.namelist():
+            if member.endswith("/") or is_noise(Path(member).name) or "__MACOSX" in member:
+                continue
+            dest = tmp / member
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(z.read(member))
+    return tmp, tmp
+
+
+def _flat_assets(base: Path) -> dict[str, list[tuple[Path, bytes]]]:
+    """Every non-.md file anywhere under base, read into memory now (base may be a temp
+    dir about to be removed) and keyed by filename -- the fallback pool for a flat batch
+    that ships a shared assets folder instead of nesting one beside each topic."""
+    pool: dict[str, list[tuple[Path, bytes]]] = {}
+    for f in base.rglob("*"):
+        if f.is_file() and f.suffix.lower() != ".md" and not is_noise(f.name) and "__MACOSX" not in f.parts:
+            pool.setdefault(f.name, []).append((f.relative_to(base), f.read_bytes()))
+    return pool
+
+
+def _read_source(source: str, root: Path) -> tuple[str, dict[str, dict[str, bytes]], dict[str, list[tuple[Path, bytes]]]]:
+    """One file is read as-is (today's paste path; no assets pool, since there is no
+    sibling folder to find them in). A folder or .zip has every .md file inside read and
     concatenated, so a batch of real topic.md files intakes the same way a single
-    multi-topic paste does. An assets/ folder sitting beside one of those .md files is
-    read too, bytes and all (the source may be a temp dir about to be removed), keyed by
-    that file's own topic_id so run() can place each topic's images alongside it."""
+    multi-topic paste does.
+
+    Returns (text, sibling_assets, flat_assets): sibling_assets maps a topic_id to the
+    contents of an assets/ folder that sat right beside that topic's own .md file (read
+    eagerly, since the source may be a temp dir about to be removed); flat_assets is every
+    other non-.md file found anywhere in the source, keyed by filename, for a batch that
+    does not nest its images per topic."""
     src = Path(source)
     if not src.exists():
         raise Fail("FS_MISSING", f"{source} does not exist.")
     if src.is_file() and src.suffix.lower() != ".zip":
-        return src.read_text(encoding="utf-8-sig"), {}
-    tmp = None
+        return src.read_text(encoding="utf-8-sig"), {}, {}
+    base, tmp = _extract(source, root)
     try:
-        if src.is_file():
-            tmp = Path(tempfile.mkdtemp(prefix=".intake-", dir=root))
-            with zipfile.ZipFile(src) as z:
-                for member in z.namelist():
-                    if member.endswith("/") or is_noise(Path(member).name) or "__MACOSX" in member:
-                        continue
-                    dest = tmp / member
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_bytes(z.read(member))
-            base = tmp
-        else:
-            base = src
         files = sorted(f for f in base.rglob("*.md") if f.is_file() and not is_noise(f.name))
         if not files:
             raise Fail("INTAKE_NO_TOPICS", f"{source} has no .md files in it.")
-        assets: dict[str, list[tuple[str, bytes]]] = {}
+        sibling: dict[str, dict[str, bytes]] = {}
         for f in files:
             tid = parse(f, "pasted", text=f.read_text(encoding="utf-8-sig")).front.get("topic_id", "")
             adir = f.parent / "assets"
             if tid and adir.is_dir():
-                assets[tid] = [(p.name, p.read_bytes()) for p in sorted(adir.iterdir()) if p.is_file() and not is_noise(p.name)]
+                sibling[tid] = {p.name: p.read_bytes() for p in sorted(adir.iterdir()) if p.is_file() and not is_noise(p.name)}
         text = "\n\n".join(f.read_text(encoding="utf-8-sig") for f in files)
-        return text, assets
+        return text, sibling, _flat_assets(base)
     finally:
         if tmp is not None:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -106,7 +142,15 @@ def split_topics(text: str) -> list[tuple[int, str]]:
 
 
 def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
-    text, assets = _read_source(args.source, target.root)
+    text, sibling_assets, flat_assets = _read_source(args.source, target.root)
+    if args.assets_source:
+        extra_base, extra_tmp = _extract(args.assets_source, target.root)
+        try:
+            for name, items in _flat_assets(extra_base).items():
+                flat_assets.setdefault(name, []).extend(items)
+        finally:
+            if extra_tmp is not None:
+                shutil.rmtree(extra_tmp, ignore_errors=True)
     blocks = split_topics(text)
     if not blocks:
         raise Fail("INTAKE_NO_TOPICS", "No topic front matter (--- then topic_id: ...) was found in the pasted text.",
@@ -145,24 +189,46 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
             else:
                 diff = "".join(difflib.unified_diff(current.splitlines(True), block.splitlines(True),
                                                     fromfile=f"{t.rel}/topic.md (on disk)", tofile="pasted"))
-                r.extra["action"] = "exists_differs"
                 r.extra["diff"] = diff
-                r.diagnostics.append(Diagnostic("INTAKE_EXISTS_DIFFERS", f"{t.rel}/topic.md exists and differs from the paste; nothing was written.",
-                                                topic=tid, file="topic.md", data={"diff": diff},
-                                                hint="Review the diff. If the paste is right, edit or remove the file on disk yourself."))
-                r.ok = False
-                continue
+                if not args.replace:
+                    r.extra["action"] = "exists_differs"
+                    r.diagnostics.append(Diagnostic("INTAKE_EXISTS_DIFFERS", f"{t.rel}/topic.md exists and differs from the paste; nothing was written.",
+                                                    topic=tid, file="topic.md", data={"diff": diff},
+                                                    hint="Review the diff, or pass --replace (the UI: tick Replace) to overwrite it."))
+                    r.ok = False
+                    continue
+                if args.dry_run:
+                    r.extra["action"] = "would_replace"
+                else:
+                    fsutil.write_text(dest, block)
+                    r.extra["action"] = "replaced"
+                    r.diagnostics.append(Diagnostic("INTAKE_REPLACED", f"{t.rel}/topic.md existed and differed; replaced because --replace was set.",
+                                                    topic=tid, file="topic.md", data={"diff": diff}))
         elif args.dry_run:
             r.extra["action"] = "would_write"
         else:
             fsutil.write_text(dest, block)
             r.extra["action"] = "written"
             r.diagnostics.append(Diagnostic("INTAKE_WRITTEN", f"Wrote {t.rel}/topic.md.", topic=tid, file="topic.md"))
-        # The topic's own images, if the source had an assets/ folder beside its .md file:
-        # placed before validate runs below, so a reference to one of them doesn't report
-        # as missing just because this intake also happened to bring the image in.
-        if not args.dry_run and r.extra.get("action") in ("written", "unchanged"):
-            for name, data in assets.get(tid, []):
+        # The topic's own images: matched by filename against what its own slides
+        # reference, not copied wholesale, so a shared assets pool with other topics'
+        # images in it doesn't pull in anything this topic doesn't actually use. Placed
+        # before validate runs below, so a reference to one of them doesn't report as
+        # missing just because this intake also happened to bring the image in.
+        if not args.dry_run and r.extra.get("action") in ("written", "unchanged", "replaced"):
+            referenced = sorted({Path(im.path).name for s in p.slides for im in s.images})
+            for name in referenced:
+                data = sibling_assets.get(tid, {}).get(name)
+                if data is None:
+                    candidates = flat_assets.get(name)
+                    if not candidates:
+                        continue
+                    if len({bytes(d) for _, d in candidates}) > 1:
+                        where = ", ".join(str(cp) for cp, _ in candidates)
+                        r.diagnostics.append(Diagnostic("INTAKE_ASSET_AMBIGUOUS",
+                                                        f"'{name}' matched more than one differing file in the source ({where}); used the first.",
+                                                        topic=tid, file=f"assets/{name}"))
+                    data = candidates[0][1]
                 fsutil.write_bytes(t.assets / name, data)
                 r.diagnostics.append(Diagnostic("INTAKE_ASSET_WRITTEN", f"Wrote {t.rel}/assets/{name}.", topic=tid, file=f"assets/{name}"))
         # Validate in place, exactly as bcn validate would, and record it as that step's result.

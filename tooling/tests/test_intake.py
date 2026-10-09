@@ -87,3 +87,70 @@ def test_zip_preserves_directory_structure_so_same_named_files_do_not_collide(tr
     assert {r["topic"] for r in env["results"]} == {"KV7015-U01-T02", "KV7015-U01-T03"}
     assert (tree / "KV7015/U01/T02/assets/a.png").read_bytes() == b"first"
     assert (tree / "KV7015/U01/T03/assets/a.png").read_bytes() == b"second"
+
+
+def test_flat_zip_with_a_shared_top_level_assets_folder_matches_by_filename(tree, tmp_path, capsys):
+    # The real-world case this was missing: .md files flat-named at the top level (bcn
+    # sync's OneDrive naming), with images in a shared assets/ folder in the same zip --
+    # not nested beside any one .md file. Matched by the filename each topic references.
+    zpath = tmp_path / "batch.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("KV7015-U01-T02.md", with_image("KV7015-U01-T02"))
+        z.writestr("assets/diagram.png", b"shared image bytes")
+    code, env = bcn(capsys, "intake", str(tree / "KV7015"), "--from", str(zpath))
+    r = env["results"][0]
+    assert r["action"] == "written", env["diagnostics"]
+    assert (tree / "KV7015/U01/T02/assets/diagram.png").read_bytes() == b"shared image bytes"
+    assert r["validate_ok"] is True
+    assert code == 0
+
+
+def test_assets_supplied_as_a_separate_zip_are_matched_too(tree, tmp_path, capsys):
+    # "A separate assets folder/zip": images never in the same upload as the .md at all.
+    md_zip = tmp_path / "batch.zip"
+    with zipfile.ZipFile(md_zip, "w") as z:
+        z.writestr("KV7015-U01-T02.md", with_image("KV7015-U01-T02"))
+    assets_zip = tmp_path / "assets.zip"
+    with zipfile.ZipFile(assets_zip, "w") as z:
+        z.writestr("diagram.png", b"from the separate zip")
+    code, env = bcn(capsys, "intake", str(tree / "KV7015"), "--from", str(md_zip), "--assets", str(assets_zip))
+    r = env["results"][0]
+    assert r["action"] == "written", env["diagnostics"]
+    assert (tree / "KV7015/U01/T02/assets/diagram.png").read_bytes() == b"from the separate zip"
+    assert r["validate_ok"] is True
+    assert code == 0
+
+
+def test_ambiguous_asset_name_across_the_source_is_reported(tree, tmp_path, capsys):
+    add_t03(tree)
+    zpath = tmp_path / "batch.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("KV7015-U01-T02.md", with_image("KV7015-U01-T02", "a.png"))
+        z.writestr("other/a.png", b"candidate one")
+        z.writestr("another/a.png", b"candidate two")
+    code, env = bcn(capsys, "intake", str(tree / "KV7015"), "--from", str(zpath))
+    assert any(d["code"] == "INTAKE_ASSET_AMBIGUOUS" for d in env["diagnostics"])
+    assert (tree / "KV7015/U01/T02/assets/a.png").is_file()  # still placed, just noted as ambiguous
+
+
+def test_replace_overwrites_a_differing_topic_file(tree, tmp_path, capsys):
+    # T01 already has fixture content on disk; pasting different text without --replace
+    # is refused (covered by test_cli.py's test_intake_refuses_to_overwrite), but with it
+    # the new text wins.
+    paste = tmp_path / "paste.md"
+    paste.write_text(topic_md().replace("Point one", "Point uno"))
+    code, env = bcn(capsys, "intake", str(tree / "KV7015"), "--from", str(paste), "--replace")
+    r = env["results"][0]
+    assert code == 0, env["diagnostics"]
+    assert r["action"] == "replaced"
+    assert any(d["code"] == "INTAKE_REPLACED" for d in env["diagnostics"])
+    assert "Point uno" in (tree / "KV7015/U01/T01/topic.md").read_text()
+
+
+def test_replace_with_dry_run_writes_nothing(tree, tmp_path, capsys):
+    paste = tmp_path / "paste.md"
+    paste.write_text(topic_md().replace("Point one", "Point uno"))
+    before = (tree / "KV7015/U01/T01/topic.md").read_text()
+    code, env = bcn(capsys, "intake", str(tree / "KV7015"), "--from", str(paste), "--replace", "--dry-run")
+    assert env["results"][0]["action"] == "would_replace"
+    assert (tree / "KV7015/U01/T01/topic.md").read_text() == before

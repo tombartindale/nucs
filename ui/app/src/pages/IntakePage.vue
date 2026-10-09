@@ -7,22 +7,58 @@ import { api } from '@/api';
 import DiagnosticItem from '@/components/DiagnosticItem.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import StateChip from '@/components/StateChip.vue';
+import { confirm } from '@/composables/confirm';
 import { useBeacon } from '@/stores/beacon';
 
 const LABEL: Record<string, string> = { written: 'written', unchanged: 'already identical', exists_differs: 'exists and differs: not written',
-  refused: 'refused: not in module map', would_write: 'would be written' };
+  replaced: 'replaced', would_replace: 'would replace', refused: 'refused: not in module map', would_write: 'would be written' };
 const DRAFT = 'intake-draft';
 const beacon = useBeacon();
 
 const read = () => { try { return sessionStorage.getItem(DRAFT) || ''; } catch { return ''; } };
 const text = ref(read());
 const path = ref('.');
+const replace = ref(false);
 const busy = ref(false);
 const over = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 const result = shallowRef<{ env: BcnIntakeEnvelope | undefined; dryRun: boolean } | null>(null);
 const error = ref<string | null>(null);
 watch(text, (t) => { try { sessionStorage.setItem(DRAFT, t); } catch { /* private window: fine */ } });
+
+// A second, optional .zip of images, for a batch that ships its assets apart from the
+// (often flat-named) .md files rather than nested beside them. Uploaded on its own first;
+// its staged path is then included on the intake call that follows.
+const assetsFileInput = ref<HTMLInputElement | null>(null);
+const assetsZip = ref<{ name: string; path: string } | null>(null);
+const assetsBusy = ref(false);
+async function pickAssetsZip(file: File | undefined) {
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith('.zip')) { error.value = 'Choose a .zip file.'; return; }
+  assetsBusy.value = true; error.value = null;
+  try {
+    const { path: staged } = await api<{ path: string }>(`/api/intake/assets-upload?name=${encodeURIComponent(file.name)}`, { raw: file });
+    assetsZip.value = { name: file.name, path: staged };
+  } catch (e) { error.value = (e as Error).message; }
+  assetsBusy.value = false;
+}
+function onAssetsPicked(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  void pickAssetsZip(file);
+  (e.target as HTMLInputElement).value = '';
+}
+
+/** Overwriting approved content is a real content-loss risk if clicked without thinking,
+ *  so confirm before any actual write (never needed for a dry run, which writes nothing). */
+async function confirmReplaceIfNeeded(dryRun: boolean): Promise<boolean> {
+  if (!replace.value || dryRun) return true;
+  return (await confirm({
+    title: 'Replace files that already exist and differ?',
+    lines: ['Any topic.md already on disk with different content will be overwritten. This cannot be undone.'],
+    ok: 'Replace',
+    danger: true,
+  })) === true;
+}
 
 const moduleOptions = computed(() => [{ label: 'any module', value: '.' }, ...Object.keys(beacon.status?.summary.modules || {}).sort().map((m) => ({ label: m, value: m }))]);
 const env = computed(() => result.value?.env);
@@ -33,15 +69,18 @@ async function runJob(job: JobSummary, dryRun: boolean): Promise<void> {
   const e = done.envelopes?.[0] as unknown as BcnIntakeEnvelope | undefined;
   result.value = { env: e, dryRun };
   if (!e) error.value = 'bcn intake produced no result; see the job log.';
-  else if (!dryRun && e.results.every((r) => ['written', 'unchanged'].includes(r.action as string))) {
+  else if (!dryRun && e.results.every((r) => ['written', 'unchanged', 'replaced'].includes(r.action as string))) {
     try { sessionStorage.removeItem(DRAFT); } catch { /* fine */ }
   }
 }
 
 async function submit(dryRun: boolean) {
+  if (!(await confirmReplaceIfNeeded(dryRun))) return;
   busy.value = true; error.value = null; result.value = null;
   try {
-    const job = await api<JobSummary>('/api/intake', { body: { text: text.value, dry_run: dryRun, path: path.value } });
+    const job = await api<JobSummary>('/api/intake', {
+      body: { text: text.value, dry_run: dryRun, path: path.value, replace: replace.value, assets: assetsZip.value?.path },
+    });
     await runJob(job, dryRun);
   } catch (e) { error.value = (e as Error).message; }
   busy.value = false;
@@ -51,10 +90,12 @@ async function submit(dryRun: boolean) {
 async function submitFile(file: File | undefined, dryRun: boolean) {
   if (!file) return;
   if (!file.name.toLowerCase().endsWith('.zip')) { error.value = 'Choose a .zip file.'; return; }
+  if (!(await confirmReplaceIfNeeded(dryRun))) return;
   busy.value = true; error.value = null; result.value = null;
   try {
-    const q = `name=${encodeURIComponent(file.name)}&path=${encodeURIComponent(path.value)}&dry_run=${dryRun ? '1' : '0'}`;
-    const job = await api<JobSummary>(`/api/intake/upload?${q}`, { raw: await file.arrayBuffer() });
+    const q = `name=${encodeURIComponent(file.name)}&path=${encodeURIComponent(path.value)}&dry_run=${dryRun ? '1' : '0'}`
+      + `&replace=${replace.value ? '1' : '0'}${assetsZip.value ? `&assets=${encodeURIComponent(assetsZip.value.path)}` : ''}`;
+    const job = await api<JobSummary>(`/api/intake/upload?${q}`, { raw: file });
     await runJob(job, dryRun);
   } catch (e) { error.value = (e as Error).message; }
   busy.value = false;
@@ -68,12 +109,12 @@ function onDrop(e: DragEvent) { over.value = false; void submitFile(e.dataTransf
 
 const errsFor = (topic: string) => ((env.value?.diagnostics || []) as Diagnostic[]).filter((d) => d.topic === topic && !d.code.startsWith('INTAKE_'));
 const diffClass = (l: string) => (l.startsWith('+') && !l.startsWith('+++') ? 'add' : l.startsWith('-') && !l.startsWith('---') ? 'del' : l.startsWith('@@') ? 'hunk' : '');
-const good = (action: unknown) => ['written', 'unchanged', 'would_write'].includes(action as string);
+const good = (action: unknown) => ['written', 'unchanged', 'replaced', 'would_write', 'would_replace'].includes(action as string);
 </script>
 
 <template>
   <q-page padding class="page-max">
-    <PageHeader title="Intake" sub="Paste, and bcn identifies each topic by its front matter, checks it against the module map, places it, and validates it. It never overwrites a file that differs; it shows the diff instead." />
+    <PageHeader title="Intake" sub="Paste, and bcn identifies each topic by its front matter, checks it against the module map, places it, and validates it. By default it never overwrites a file that differs; it shows the diff instead." />
     <div class="row q-col-gutter-md">
       <div class="col-12 col-md-6">
         <q-card flat bordered>
@@ -84,10 +125,23 @@ const good = (action: unknown) => ['written', 'unchanged', 'would_write'].includ
           <q-card-actions class="q-px-md q-pb-md">
             <span class="text-caption text-grey-7 q-mr-sm">Restrict to</span>
             <q-select v-model="path" dense outlined emit-value map-options :options="moduleOptions" style="min-width: 150px" />
+            <q-checkbox v-model="replace" dense label="Replace files that already exist and differ">
+              <q-tooltip max-width="320px">Normally a topic.md already on disk with different content is left alone and the diff is shown instead. Tick this to overwrite it anyway, e.g. re-sending corrected content.</q-tooltip>
+            </q-checkbox>
             <q-space />
             <q-btn outline no-caps label="Check only" :disable="busy || !text.trim()" @click="submit(true)" />
             <q-btn unelevated color="primary" no-caps :loading="busy" label="Place and validate" :disable="busy || !text.trim()" @click="submit(false)" />
           </q-card-actions>
+        </q-card>
+        <q-card flat bordered class="q-mt-md">
+          <q-card-section class="row items-center gap-sm q-pb-none">
+            <span class="text-caption text-grey-7">Images, if they ship separately from the topic.md files</span>
+            <q-space />
+            <q-chip v-if="assetsZip" dense removable @remove="assetsZip = null" icon="image" :label="assetsZip.name" />
+            <q-btn v-else outline dense no-caps size="sm" icon="add_photo_alternate" label="Attach images .zip" :loading="assetsBusy"
+              @click="assetsFileInput?.click()" />
+            <input ref="assetsFileInput" type="file" accept=".zip" class="hidden" @change="onAssetsPicked">
+          </q-card-section>
         </q-card>
         <q-card flat bordered class="q-mt-md">
           <q-card-section>
@@ -95,7 +149,11 @@ const good = (action: unknown) => ['written', 'unchanged', 'would_write'].includ
               style="border: 2px dashed var(--line)" @click="fileInput?.click()" @dragover.prevent="over = true" @dragleave="over = false" @drop.prevent="onDrop">
               <q-icon name="upload_file" size="sm" class="q-mb-xs" /><br>
               Or drop a <strong>.zip</strong> of topic.md files here, e.g. a batch from a content creator — or click to choose.
-              <div class="text-caption text-grey-7 q-mt-xs">Each file keeps its own topic_id front matter; multiple topics in one zip are fine.</div>
+              <div class="text-caption text-grey-7 q-mt-xs">
+                Each file keeps its own topic_id front matter; multiple topics in one zip are fine. An image a topic
+                references is matched by filename, whether it's nested beside that topic.md, in a shared assets
+                folder in this same zip, or attached separately above.
+              </div>
               <input ref="fileInput" type="file" accept=".zip" class="hidden" @change="onFilePicked">
             </div>
           </q-card-section>
