@@ -54,7 +54,7 @@ h2 { font-size: 14px; margin: 0 0 6px; }
 .rw .lab { position: absolute; left: 0; top: 0; bottom: 0; padding: 3px 10px; background: #fff; z-index: 3; border-right: 1px solid var(--line); overflow: hidden; }
 .rw .lab .t { font-weight: 600; }
 .rw .lab .s { font-size: 11px; color: var(--ink2); white-space: nowrap; }
-.rw .lang { position: absolute; font-size: 10px; font-weight: 700; color: var(--ink3); letter-spacing: .04em; z-index: 3; }
+.rw .lang { position: absolute; background: rgba(255,255,255,.85); padding: 0 2px; font-size: 10px; font-weight: 700; color: var(--ink3); letter-spacing: .04em; z-index: 3; }
 .wk { position: absolute; top: 0; bottom: 0; background: var(--weekend); z-index: 0; }
 .gridline { position: absolute; top: 0; bottom: 0; border-left: 1px solid #ececea; z-index: 0; }
 .axis { position: relative; height: 36px; border-bottom: 1px solid var(--line2); background: #fff; }
@@ -85,7 +85,7 @@ h2 { font-size: 14px; margin: 0 0 6px; }
 .dia.ms { background: #fff; border: 1.5px solid var(--ink2); width: 9px; height: 9px; }
 .bracket { position: absolute; height: 0; border-top: 1.5px solid var(--ink2); z-index: 3; }
 .bracket.over { border-top: 2px solid var(--red); }
-.bracket span { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 700; white-space: nowrap; background: rgba(255,255,255,.85); padding: 0 2px; }
+.bracket span { position: absolute; top: 2px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 700; white-space: nowrap; background: rgba(255,255,255,.85); padding: 0 2px; }
 .flag { position: absolute; font-size: 10px; padding: 0 4px; border-radius: 2px; z-index: 5; white-space: nowrap; line-height: 14px; }
 .flag.blocked { background: var(--red); color: #fff; }
 .flag.stale { background: var(--amber); color: #fff; }
@@ -102,7 +102,7 @@ h2 { font-size: 14px; margin: 0 0 6px; }
 .chip.blocked { background: var(--red); border-color: var(--red); color: #fff; }
 .chip.stale { background: var(--amber); border-color: var(--amber); color: #fff; }
 .chip.over { color: var(--red); border-color: var(--red); }
-.lanegroup { font-size: 11px; font-weight: 700; color: var(--ink2); text-transform: uppercase; letter-spacing: .05em; padding: 10px 10px 4px; background: var(--bg); border-bottom: 1px solid var(--line2); }
+.lanegroup { position: relative; z-index: 7; font-size: 11px; font-weight: 700; color: var(--ink2); text-transform: uppercase; letter-spacing: .05em; padding: 10px 10px 4px; background: var(--bg); border-bottom: 1px solid var(--line2); }
 .slice { margin-top: 12px; display: grid; grid-template-columns: 220px 1fr; }
 .slice .h { padding: 10px; border-right: 1px solid var(--line); }
 .slice ul { margin: 0; padding: 8px 14px; list-style: none; columns: 2; column-gap: 28px; }
@@ -111,7 +111,7 @@ h2 { font-size: 14px; margin: 0 0 6px; }
 .legend i { display: inline-block; vertical-align: middle; margin-right: 4px; position: static; }
 .note { font-size: 12px; color: var(--ink2); background: #fff; border-left: 3px solid var(--ink3); padding: 6px 10px; margin: 10px 0; }
 .note.gap { border-left-style: dashed; }
-.sidebox { display: grid; grid-template-columns: 1fr 300px; gap: 12px; align-items: start; }
+.sidebox { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 12px; align-items: start; }
 .session dl { display: grid; grid-template-columns: 110px 1fr; margin: 0; gap: 4px 8px; font-size: 12px; }
 .session dt { color: var(--ink2); }
 .session dd { margin: 0; }
@@ -252,8 +252,8 @@ function axis(t) {
   let h = `<div class="axis" style="width:${t.w}px"><div class="lab" style="width:${t.labW}px"><span class="s">${PROP ? 'with proposed ZH tail' : 'from planning.ts, as today'}</span></div>`;
   for (let n = t.start; n < t.end; n++) {
     const d = dt(n);
-    if (d.getUTCDate() === 1 || n === t.start) h += `<span class="m" style="left:${t.x(n) + 3}px">${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}</span>`;
-    if (d.getUTCDay() === 1 || t.ppd >= 28) h += `<span class="d" style="left:${t.x(n) + t.ppd / 2}px">${t.ppd >= 28 ? DOW[d.getUTCDay()].slice(0, 2) + ' ' : ''}${d.getUTCDate()}</span>`;
+    if (d.getUTCDate() === 1 || (n === t.start && d.getUTCDate() < 26)) h += `<span class="m" style="left:${t.x(n) + 3}px">${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}</span>`;
+    if (d.getUTCDay() === 1 || t.ppd >= 20) h += `<span class="d" style="left:${t.x(n) + t.ppd / 2}px;${d.getUTCDay() === 1 && t.ppd >= 20 ? 'font-weight:700;color:#5c5c58' : ''}">${t.ppd >= 20 && d.getUTCDay() === 1 ? 'Mo ' : ''}${d.getUTCDate()}</span>`;
   }
   return h + '</div>';
 }
@@ -269,13 +269,13 @@ function bg(t, top) {
   return h;
 }
 // a bar from day s (inclusive) to e (exclusive), clipped to the window
-function bar(t, s, e, cls, text, top, title = '') {
+function bar(t, s, e, cls, text, top, title = '', align = 'right') {
   const s2 = Math.max(s, t.start), e2 = Math.min(e, t.end);
   if (e2 <= t.start || s2 >= t.end) return '';
   const left = t.x(s2), w = Math.max((e2 - s2) * t.ppd, 3);
   const fits = text && text.length * 5.6 + 6 < w;
   return `<div class="bar ${cls}" title="${esc(title || text)}" style="left:${left}px;width:${w}px;top:${top}px">${fits ? text : ''}</div>`
-    + (!fits && text ? `<span class="tickl" style="left:${left + w + 3}px;top:${top + 1}px">${text}</span>` : '');
+    + (!fits && text ? (align === 'left' ? `<span class="tickl" style="left:${left - 3}px;transform:translateX(-100%);top:${top + 1}px">${text}</span>` : `<span class="tickl" style="left:${left + w + 3}px;top:${top + 1}px">${text}</span>`) : '');
 }
 const flag = (t, n, cls, text, top, dx = 0, title = '') => (n < t.start || n > t.end ? '' :
   `<span class="flag ${cls}" title="${esc(title || text)}" style="left:${t.x(n) + dx}px;top:${top}px">${text}</span>`);
@@ -287,6 +287,11 @@ function bracket(t, a, b, top, label, over) {
   const l = t.x(Math.max(Math.min(a, b), t.start)), r = t.x(Math.min(Math.max(a, b), t.end));
   if (r <= l) return '';
   return `<div class="bracket ${over ? 'over' : ''}" style="left:${l}px;width:${r - l}px;top:${top}px"><span class="${over ? 'red' : ''}">${label}</span></div>`;
+}
+function markers(t, list) {
+  let h = `<div class="row" style="height:40px"><div class="lab" style="width:${t.labW}px"><div class="t">Milestones</div><div class="s">from planning.ts milestones</div></div>`;
+  list.forEach(([n, label, strong, left], i) => { if (n >= t.start && n <= t.end) h += `<span class="flag ${strong ? 'plain' : 'gap'}" style="left:${t.x(n) + (left ? 1 : -1)}px;top:${3 + (i % 2) * 18}px;${left ? 'transform:translateX(-100%);' : ''}${strong ? 'font-weight:700' : ''}">${label}</span>`; });
+  return h + '</div>';
 }
 const taskBox = (task) => (task.kind === 'recording' ? [task.due, task.due + 1] : [task.due + 1 - Math.max(task.cost, 0.3), task.due + 1]);
 const taskCls = (task) => {
@@ -309,7 +314,7 @@ function zhProjection(m, p) {
     if (z.kind === 'pk' || z.kind === 'par') { end = TODAY + (z.kind === 'par' ? ZH.pkg : 0); note = 'parity checked'; }
     else if (z.kind === 'ret') { end = TODAY + ZH.fix + ZH.pkg; note = 'returned'; }
     else if (z.kind === 'out') { exp = z.since; ret = Math.max(z.since + ZH.turnaround, TODAY + 1); end = ret + ZH.fix + ZH.pkg; }
-    else if (rec) { exp = rec.due + 1 + ZH.edit; ret = exp + ZH.turnaround; end = ret + ZH.fix + ZH.pkg; }
+    else if (rec) { exp = rec.due + (p.daysBehind || 0) + 1 + ZH.edit; ret = exp + ZH.turnaround; end = ret + ZH.fix + ZH.pkg; }
     else { exp = TODAY + (enCued(u) ? 0 : ZH.edit); ret = exp + ZH.turnaround; end = ret + ZH.fix + ZH.pkg; }
     out.push({ unit: u.code, exp, ret, end, recDue: rec ? rec.due : null, kind: z.kind, since: z.since, note });
   }
@@ -319,7 +324,7 @@ const groupRange = (codes) => (codes.length > 1 ? `${codes[0]}–${codes[codes.l
 
 // ---------- screen 1: programme runway ----------
 function screen1() {
-  const t = TL(d2n('2026-09-28'), d2n('2026-12-21'), 13, 230);
+  const t = TL(d2n('2026-09-30'), d2n('2026-12-20'), 15, 230);
   const shift = PROP ? ZH_TAIL : 0;
   const dated = MODULES.filter((m) => m.delivery).map((m) => {
     const p = planFor(m, shift), zh = zhProjection(m, p);
@@ -354,7 +359,7 @@ function screen1() {
   const AX = 36, LOADH = 46;
   let rows = '';
   // load row
-  rows += `<div class="row load" style="height:${LOADH}px"><div class="lab" style="width:${t.labW}px"><div class="t">Your days</div><div class="s">script hours vs 3h/day · ● recording sessions</div></div>`;
+  rows += `<div class="row load" style="height:${LOADH}px"><div class="lab" style="width:${t.labW}px"><div class="t">Your days</div><div class="s">script hrs vs 3h/day · ● sessions</div></div>`;
   for (let n = t.start; n < t.end; n++) {
     const v = load[n] || 0;
     if (v) rows += `<div class="cell ${v > HOURS * 60 ? 'over' : ''}" title="${fmtD(n)}: ${fmtMin(v)} of scripts due" style="left:${t.x(n) + 1}px;width:${t.ppd - 2}px;height:${Math.min(v / 60 / 6, 1) * 30}px"></div>`;
@@ -364,7 +369,7 @@ function screen1() {
 
   rows += `<div class="lanegroup" style="width:${t.w}px">Dated modules · least float first</div>`;
   for (const { m, p, zh, zhEnd } of dated) {
-    const EN = 34, ZHH = 26;
+    const EN = 44, ZHH = PROP ? 42 : 28;
     const blocked = m.units.reduce((a, u) => a + (u.blocked || 0) + (u.zhBlocked || 0), 0);
     const stale = m.units.reduce((a, u) => a + (u.stale || 0), 0);
     let status;
@@ -375,7 +380,7 @@ function screen1() {
     rows += `<div class="row lanehead" style="height:${EN + ZHH}px">
       <div class="lab"${link}><div class="t">${m.id} <span style="font-weight:400">${m.title}</span></div>
       <div class="s">Delivery ${fmtD(p.delivery)} · ${status}</div>
-      <div class="s">${blocked ? `<span class="red">▲ ${blocked} blocked</span> ` : ''}${stale ? `<span class="amber">◆ ${stale} stale</span>` : ''}</div></div>
+      <div class="s">${blocked ? `<span class="red">▲ ${blocked} blocked</span> ` : ''}${stale ? `<span class="amber">◆ ${stale} stale</span> ` : ''}${PROP ? '' : '<span class="flag gap" style="position:static">ZH undated</span>'}</div></div>
       <span class="lang" style="left:${t.labW + 3}px;top:3px">EN</span><span class="lang" style="left:${t.labW + 3}px;top:${EN + 4}px">ZH</span>`;
     // EN: actuals (recording dates from edit/master.mp4 mtime)
     for (const u of m.units) if (u.recOn) {
@@ -395,7 +400,7 @@ function screen1() {
       rows += flag(t, TODAY, 'plain', `EN recorded · ${left.map((u) => u.code).join(', ')} still to cue/package (undated)`, 10, 4);
     }
     const last = p.tasks.filter((k) => k.kind === 'recording').map((k) => k.due).pop();
-    if (!PROP && last !== undefined && last >= p.delivery - 1) rows += flag(t, p.delivery, 'gap', '0d post-prod', 10, 8, 'Last recording is scheduled the day before delivery: no time for edit, cues, package or ZH');
+    if (!PROP && last !== undefined && last >= p.delivery - 1) rows += flag(t, Math.max(p.delivery, p.delivery - (p.float || 0)), 'gap', '0d post-prod', 9, 12, 'Last recording is scheduled the day before delivery: no time for edit, cues, package or ZH');
     // delivery, projected finish, float bracket
     if (p.delivery > t.end) rows += `<span class="edge" style="left:${t.w - 90}px;top:10px">delivery ${fmt(p.delivery)} →</span>`;
     rows += dia(t, p.delivery, 'deliv', 12, `Delivery ${fmtD(p.delivery)}`);
@@ -420,10 +425,9 @@ function screen1() {
     if (ret.length) { const txt = retBlocked ? `▲${retBlocked} parity fails ${groupRange(ret.map((u) => u.code))}` : `${groupRange(ret.map((u) => u.code))} returned: import`; rows += flag(t, TODAY, retBlocked ? 'blocked' : 'plain', txt, EN + 5, dx + (Object.keys(outs).length && !PROP ? 4 * t.ppd : 0)); dx += txt.length * 5.6 + 12; }
     const ready = m.units.filter((u) => zhState(u).kind === 'ns' && enCued(u));
     if (ready.length && !PROP) rows += flag(t, TODAY, 'plain', `ready to send: ${groupRange(ready.map((u) => u.code))}`, EN + 5, dx + (Object.keys(outs).length ? 4 * t.ppd : 0));
-    if (!PROP) rows += flag(t, Math.min(p.delivery, t.end - 6), 'gap', 'ZH undated', EN + 5, 8, 'planning.ts gives ZH no dates: translated/packaged milestones have dueDate null');
-    else {
+    if (PROP) {
       const firstExp = Math.min(...zh.filter((z) => z.exp !== null && z.kind !== 'out').map((z) => z.exp));
-      if (isFinite(firstExp)) rows += bar(t, firstExp, zhEnd, `prop ${zhEnd > p.delivery ? 'over' : ''}`, `proposed ZH: exports from ${fmt(firstExp)}, last packaged ${fmt(zhEnd)}`, EN + 5);
+      if (isFinite(firstExp)) rows += bar(t, firstExp, zhEnd, `prop ${zhEnd > p.delivery ? 'over' : ''}`, `ZH proposed → packaged ${fmt(zhEnd)}`, EN + 5);
       rows += dia(t, zhEnd, `proj ${zhEnd > p.delivery ? 'over' : ''}`, EN + 6, `Projected ZH packaged ${fmtD(zhEnd)}`);
       if (zhEnd > p.delivery) rows += bracket(t, p.delivery, zhEnd, EN + 22, `ZH ${zhEnd - p.delivery}d late`, true);
     }
@@ -433,9 +437,8 @@ function screen1() {
   rows += `<div class="lanegroup" style="width:${t.w}px">No delivery date · drawn as "if started today" (forward from today, same estimates)</div>`;
   for (const { m, p } of undated) {
     rows += `<div class="row lanehead" style="height:38px"><div class="lab" style="width:${t.labW}px"><div class="t">${m.id} <span style="font-weight:400">${m.title}</span></div>
-      <div class="s">No delivery date · <a href="#" onclick="return false">set one</a> or drag a ◆ onto the runway</div></div>`;
-    rows += bar(t, TODAY, p.asapEnd + 1, 'prop', `~${Math.ceil(p.workDays)} working days of scripts + recording if started today → earliest ${fmtD(p.asapEnd + 1)}`, 6);
-    rows += flag(t, p.asapEnd + 1, 'gap', 'not in "Your days" load', 6, 8);
+      <div class="s">No delivery date · <a href="#" onclick="return false">set one</a></div></div>`;
+    rows += bar(t, TODAY, p.asapEnd + 1, 'prop', `~${Math.ceil(p.workDays)} days of scripts + recording if started today → earliest ${fmtD(p.asapEnd + 1)} · not in "Your days"`, 12);
     rows += '</div>';
   }
 
@@ -443,14 +446,15 @@ function screen1() {
 
   // today slice
   const items = [];
-  for (const { m, p, zh } of dated) {
+  for (const { m, p } of dated) {
+    const past = p.tasks.filter((k) => k.due < TODAY);
+    if (past.length) items.push(`<span class="red">● ${m.id}</span>: <b class="red">${pl(past.length, 'task')} past their window</b> (earliest ${fmtD(past[0].due)}) · ${p.daysBehind}d behind. Rescope, move delivery, or start ${past[0].unit} now`);
     for (const k of p.tasks) {
       const [s, e] = taskBox(k);
       const what = k.kind === 'recording' ? `record ${k.unit} (${pl(k.count, 'topic')}, ~${fmtMin(k.min)})` : `write ${pl(k.count, 'script')} for ${k.unit}`;
-      if (k.due < TODAY) items.push(`<span class="red">● ${m.id}</span> ${what}: <b class="red">window closed ${fmtD(k.due)}</b>`);
-      else if (s <= TODAY + 1 && e > TODAY) items.push(`● ${m.id} ${what}: due ${fmtD(k.due)}, under the line now`);
+      if (k.due >= TODAY && s <= TODAY + 1 && e > TODAY) items.push(`● ${m.id} ${what}: due ${fmtD(k.due)}, under the line now`);
       const u = unitOf(m, k.unit);
-      if (k.kind === 'recording' && u.blocked && k.due - TODAY <= 14) items.push(`<span class="red">▲ ${m.id} ${k.unit}</span>: ${pl(u.blocked, 'blocked topic')} in a session due ${fmtD(k.due)}`);
+      if (k.kind === 'recording' && u.blocked && k.due - TODAY <= 14) items.push(`<span class="red">▲ ${m.id} ${k.unit}</span>: ${pl(u.blocked, 'blocked topic')} inside a session due ${fmtD(k.due)}`);
     }
     for (const u of m.units) {
       const z = zhState(u);
@@ -471,7 +475,7 @@ function screen1() {
 // ---------- screen 2: module runway ----------
 function screen2() {
   const m = MODULES.find((x) => x.id === 'KV7015');
-  const t = TL(d2n('2026-09-20'), d2n('2026-11-11'), 22, 270);
+  const t = TL(d2n('2026-09-30'), d2n('2026-11-07'), 29, 270);
   const p = planFor(m, PROP ? ZH_TAIL : 0), zh = zhProjection(m, p);
   const zhEnd = Math.max(...zh.map((z) => z.end));
   const sc = p.tasks.filter((k) => k.kind === 'scripts'), rc = p.tasks.filter((k) => k.kind === 'recording');
@@ -489,15 +493,15 @@ function screen2() {
       <div><div class="v">${m.units.filter((u) => u.en !== 'pk10').length * 10 - 0}</div><div class="l">to package (EN+ZH) · <span class="muted">no due date</span></div></div></div>`;
 
   const AX = 36, EN = 30, ZHH = 24;
-  let rows = '';
+  let rows = markers(t, [[briefsDue + 1, `briefs_done ${fmt(briefsDue)}`, false, true], [recDue + 1, `recorded ${fmt(recDue)}`, false, true], [p.delivery, `◆ delivery ${fmt(p.delivery)}`, true]]);
   // chain summary row
-  rows += `<div class="row" style="height:44px"><div class="lab" style="width:${t.labW}px"><div class="t">Whole module</div><div class="s">the back-scheduled chain, one producer</div></div>`;
+  rows += `<div class="row" style="height:48px"><div class="lab" style="width:${t.labW}px"><div class="t">Whole module</div><div class="s">the back-scheduled chain, one producer</div></div>`;
   for (const k of p.tasks) { const [s, e] = taskBox(k); rows += bar(t, s, e, taskCls(k), '', 8); }
   rows += dia(t, p.delivery, 'deliv', 9, 'Delivery');
   const proj = p.anchor - p.float;
   rows += dia(t, proj, `proj ${p.float < 0 ? 'over' : ''}`, 9, 'Projected EN finish');
-  rows += bracket(t, proj, p.anchor, 30, p.float < 0 ? `${-p.float}d late` : `float ${p.float}d: the whole chain can slip this much`, p.float < 0);
-  if (PROP) rows += flag(t, p.anchor, 'gap', `ZH tail ${ZH_TAIL}d`, 24, 4, 'edit + translator turnaround + fix + package');
+  rows += bracket(t, proj, p.anchor, 30, p.float < 0 ? `${-p.float}d late` : `float ${p.float}d: every task can slip this much`, p.float < 0);
+  if (PROP) rows += bar(t, p.anchor, p.delivery, 'prop', `proposed tail ${ZH_TAIL}d: edit → ZH translator → fix → package`, 8);
   rows += '</div>';
 
   for (const u of m.units) {
@@ -518,8 +522,8 @@ function screen2() {
     }
     for (const k of tasks) {
       const [s, e] = taskBox(k);
-      rows += bar(t, s, e, taskCls(k), k.kind === 'recording' ? `● record ${k.count} · ~${fmtMin(k.min)}` : `✎ ${k.count} scripts · ${fmtMin(k.min)}`, 8, `due ${fmtD(k.due)}`);
-      if (k.kind === 'recording') rows += `<span class="tickl" style="left:${t.x(k.due)}px;top:-1px">${fmtD(k.due)}</span>`;
+      rows += bar(t, s, e, taskCls(k), k.kind === 'recording' ? `● record ${k.count} · ~${fmtMin(k.min)}` : `✎ ${k.count} scripts · ${fmtMin(k.min)}`, 8, `due ${fmtD(k.due)}`, k.kind === 'recording' ? 'right' : 'left');
+      if (k.kind === 'recording') rows += `<span class="tickl" style="left:${t.x(k.due + 1) + 3}px;top:20px">due ${fmtD(k.due)}</span>`;
     }
     // ZH
     if (z.kind === 'out') {
@@ -536,8 +540,8 @@ function screen2() {
     } else if (!PROP && !u.recOn) rows += flag(t, Math.max(...tasks.map((k) => k.due)) + 1, 'gap', 'ZH: no date', EN + 3, 4);
     rows += '</div>';
   }
-  const vl = (n, cls, label) => (n >= t.start && n <= t.end ? `<div class="vline ${cls}" style="left:${t.x(n)}px;top:${AX}px"><span>${label}</span></div>` : '');
-  const lines = vl(briefsDue + 1, '', `briefs_done ${fmt(briefsDue)}`) + vl(recDue + 1, '', `recorded ${fmt(recDue)}`) + vl(p.delivery, 'deliv', `delivery ${fmt(p.delivery)}`);
+  const vl = (n, cls, label, dy = 0) => (n >= t.start && n <= t.end ? `<div class="vline ${cls}" style="left:${t.x(n)}px;top:${AX}px">${label ? `<span style="top:${2 + dy}px">${label}</span>` : ''}</div>` : '');
+  const lines = vl(briefsDue + 1, '', '') + vl(recDue + 1, '', '') + vl(p.delivery, 'deliv', '');
   h += `<div class="card rw-scroll"><div class="rw" style="width:${t.w}px">${axis(t)}${bg(t, AX)}${lines}${rows}</div></div>`;
   h += `<div class="note">Read it like this: bars left of the black line that are still drawn are late; the bracket on the top row is the module's float. The chain is strictly serial (one producer, one unit at a time), so <b>every outstanding task is on the critical path</b> and they all share the same float. A slip anywhere moves everything to its right.</div>`;
   h += `<div class="note gap"><b>Things the geometry exposes in today's plan:</b> U05's scripts and its recording are both due ${fmtD(rc.find((k) => k.unit === 'U05').due)} (the 4 scripts cost under a day, so the backward walk never steps back). U06's session lands on ${fmtD(rc.find((k) => k.unit === 'U06').due)}: the plan has no working calendar. U08 records the day before delivery, which leaves 0 days for edit, cues, package and all of ZH.</div>`;
@@ -547,10 +551,11 @@ function screen2() {
 // ---------- screen 3: unit runway ----------
 function screen3() {
   const m = MODULES.find((x) => x.id === 'KV7015'), u = unitOf(m, 'U05');
-  const p = planFor(m, PROP ? ZH_TAIL : 0);
+  const p = planFor(m, 0), pz = planFor(m, ZH_TAIL);
+  const recZ = pz.tasks.find((k) => k.unit === 'U05' && k.kind === 'recording');
   const rec = p.tasks.find((k) => k.unit === 'U05' && k.kind === 'recording');
   const scr = p.tasks.find((k) => k.unit === 'U05' && k.kind === 'scripts');
-  const t = TL(d2n('2026-10-04'), d2n('2026-11-11'), 26, 400);
+  const t = TL(d2n('2026-10-09'), d2n('2026-11-09'), 25, 360);
   const S = rec.due;
   // topic needs before the session: written → validated (fresh, passing) → recording script (fresh)
   const TOP = [
@@ -569,12 +574,20 @@ function screen3() {
   const ready = TOP.filter((x) => x[3].every((s) => s === 'ok')).length;
   const content = TOP.reduce((a, x) => a + x[2], 0);
   let h = `<div class="crumbs"><a href="#" onclick="go('s1');return false">Runway</a> › <a href="#" onclick="go('s2');return false">KV7015</a> › U05</div>
-    <div class="pagehead"><div><h1>U05 · Measurement</h1><div class="sub">Recording session <b>${fmtD(S)}</b> (${S - TODAY} days) · scripts due <b>${fmtD(scr.due)}</b> · shares KV7015's <b class="${p.float < 0 ? 'red' : ''}">${p.float < 0 ? -p.float + 'd delay' : p.float + 'd float'}</b></div></div></div>`;
+    <div class="pagehead"><div><h1>U05 · Measurement</h1><div class="sub">Recording session <b>${fmtD(S)}</b> (${S - TODAY} days) · scripts due <b>${fmtD(scr.due)}</b> · shares KV7015's <b>${p.float}d float</b>${PROP ? ` · <b class="red">with the proposed ZH tail this session was due ${fmtD(recZ.due)}: the ZH bars below land after delivery</b>` : ''}</div></div></div>`;
   h += '<div class="sidebox"><div>';
-  const AX = 36, RH = 34;
-  let rows = '';
-  rows += `<div class="row" style="height:30px"><div class="lab" style="width:${t.labW}px"><div class="t">Session readiness</div><div class="s">${ready} of 10 topics ready to record</div></div>`;
+  const AX = 36, RH = 46;
+  let rows = markers(t, [[S, `● session ${fmtD(S)}`, true], [p.delivery, `◆ module delivery ${fmt(p.delivery)}`, true]]);
+  rows += `<div class="row" style="height:58px"><div class="lab" style="width:${t.labW}px"><div class="t">Unit U05</div><div class="s">prep → one session → post-production</div><div class="s">${ready} of 10 topics ready to record</div></div>`;
   rows += bar(t, TODAY, scr.due + 1, scr.due < TODAY ? 'over' : 'float', `prep window: ${scr.due - TODAY + 1} days to make 10 topics ready`, 9);
+  rows += bar(t, S, S + 1, `rec ${S < TODAY ? 'over' : ''}`, '●', 7);
+  if (PROP) {
+    const ex = S + 1 + ZH.edit, rt = ex + ZH.turnaround, en = rt + ZH.fix + ZH.pkg;
+    rows += bar(t, S + 1, ex, 'prop', 'EN edit', 6) + bar(t, ex, ex + 1, 'prop', 'cues·pkg', 6)
+      + bar(t, ex, rt, `prop ${en > p.delivery ? 'over' : ''}`, `ZH with translator ${ZH.turnaround}d`, 26) + bar(t, rt, en, `prop ${en > p.delivery ? 'over' : ''}`, 'fix·pkg', 26);
+  } else {
+    rows += bar(t, S + 1, S + 8, 'tail', 'EN: edit → cues → package · undated', 6) + bar(t, S + 1, S + 8, 'open', 'ZH: export → translator → parity · undated', 26);
+  }
   rows += '</div>';
   for (const [code, title, min, st] of TOP) {
     const isBlocked = st.includes('blocked'), isStale = st.includes('stale');
@@ -585,25 +598,17 @@ function screen3() {
     else {
       // remaining prep, docked against the scripts deadline (the slot planning.ts gives it)
       const work = st[0] === 'need' ? BRIEF_MIN : 0;
-      const e = scr.due + 1, s = e - Math.max(work / 60 / HOURS, 0.25);
+      const e = Math.min(scr.due + 1, S), s = e - Math.max(work / 60 / HOURS, 0.25);
       rows += bar(t, TODAY, s, 'float', '', 12, 'float: could be done any day in here');
-      rows += bar(t, s, e, isBlocked ? 'blk' : (scr.due < TODAY ? 'over' : 'scripts'), work ? `${work}m` : '', 9, work ? 'write: 20 min estimate' : 'validate / script: minutes');
+      rows += bar(t, s, e, isBlocked ? 'blk' : (scr.due < TODAY ? 'over' : 'scripts'), work ? `${work}m` : '', 9, work ? 'write: 20 min estimate' : 'validate / script: minutes', 'left');
       if (isBlocked) rows += flag(t, TODAY, 'blocked', '▲ needs you: word count over · not estimated', 9, 4);
       if (isStale) rows += flag(t, TODAY, 'stale', '◆ re-run Recording script', 9, 4);
     }
     rows += bar(t, S, S + 1, `rec ${S < TODAY ? 'over' : ''}`, '●', 9);
-    // after the session: EN and ZH tails
-    if (PROP) {
-      rows += bar(t, S + 1, S + 1 + ZH.edit, 'prop', 'edit', 4) + bar(t, S + 1 + ZH.edit, S + 1 + ZH.edit + ZH.turnaround, `prop ${S + 1 + ZH.edit + ZH.turnaround + 2 > p.delivery ? 'over' : ''}`, 'ZH out', 4)
-        + bar(t, S + 1 + ZH.edit + ZH.turnaround, S + 3 + ZH.edit + ZH.turnaround, `prop ${S + 3 + ZH.edit + ZH.turnaround > p.delivery ? 'over' : ''}`, 'fix·pkg', 4);
-      rows += bar(t, S + 1 + ZH.edit, S + 2 + ZH.edit, 'prop', 'cues·pkg', 19);
-    } else {
-      rows += bar(t, S + 1, S + 6, 'tail', 'EN: edit → cues → package (undated)', 3) + bar(t, S + 1, S + 6, 'open', 'ZH: export → translator → parity (undated)', 18);
-    }
     rows += '</div>';
   }
-  const vl = (n, cls, label) => `<div class="vline ${cls}" style="left:${t.x(n)}px;top:${AX}px"><span>${label}</span></div>`;
-  h += `<div class="card rw-scroll"><div class="rw" style="width:${t.w}px">${axis(t)}${bg(t, AX)}${vl(S, '', `● session ${fmt(S)}`)}${vl(p.delivery, 'deliv', `module delivery ${fmt(p.delivery)}`)}${rows}</div></div>`;
+  const vl = (n, cls) => `<div class="vline ${cls}" style="left:${t.x(n)}px;top:${AX}px"></div>`;
+  h += `<div class="card rw-scroll"><div class="rw" style="width:${t.w}px">${axis(t)}${bg(t, AX)}${vl(S, '', '')}${vl(p.delivery, 'deliv', '')}${rows}</div></div>`;
   h += `<div class="note">Each topic's remaining prep is docked against the slot planning.ts gives the unit's scripts (${fmtD(scr.due)}); the dotted band to its left is the slack it can use. Steps are what <code>bcn status</code> already reports (stage, stale, blocked). Nothing here is computed by the UI except placing them on the calendar.</div></div>`;
   // session sheet
   h += `<div class="card session" style="padding:12px"><h2>Session sheet</h2><dl>
