@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Next-Action Queue</title>
+<style>
+:root {
+  --bg: #f6f6f4; --card: #ffffff; --ink: #1f2328; --muted: #6b7077; --faint: #9aa0a6;
+  --line: #e3e3df; --chip: #efefec; --accent: #2f3a45;
+  --red: #c62828; --red-bg: #fdecea; --amber: #b26a00; --amber-bg: #fff4e0; --grey-bg: #f0f0ee;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; color: var(--ink); background: var(--bg); }
+a { color: inherit; }
+header.app { background: var(--accent); color: #fff; display: flex; align-items: center; gap: 22px; padding: 0 20px; height: 48px; }
+header.app b { font-size: 15px; letter-spacing: .2px; }
+header.app nav { display: flex; gap: 2px; height: 100%; }
+header.app nav a { display: flex; align-items: center; padding: 0 12px; text-decoration: none; opacity: .75; border-bottom: 3px solid transparent; cursor: pointer; }
+header.app nav a.on { opacity: 1; border-bottom-color: #fff; }
+header.app .sp { flex: 1; }
+header.app .live { font-size: 12px; opacity: .8; }
+main { max-width: 1180px; margin: 0 auto; padding: 18px 20px 60px; }
+.screen { display: none; } .screen.on { display: block; }
+.note { font-size: 12px; color: var(--muted); background: #fff; border: 1px dashed #c9c9c4; padding: 8px 12px; border-radius: 6px; margin-bottom: 14px; }
+
+/* module strip */
+.strip { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin-bottom: 14px; }
+.mod { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; cursor: pointer; font-size: 12px; line-height: 1.3; position: relative; }
+.mod:hover { border-color: #b9b9b3; }
+.mod.sel { outline: 2px solid var(--accent); }
+.mod.behind { border-left: 4px solid var(--red); }
+.mod .c { font-weight: 600; font-size: 13px; }
+.mod .d { color: var(--muted); }
+.mod .s { font-weight: 600; }
+.mod.behind .s { color: var(--red); }
+.mod .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+.mod.none { border-style: dashed; color: var(--muted); }
+
+/* toolbar */
+.bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.bar h1 { font-size: 20px; margin: 0 12px 0 0; }
+.chipf { border: 1px solid var(--line); background: var(--card); border-radius: 14px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
+.chipf.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.bar .sp { flex: 1; }
+.btn { border: 1px solid #bfc3c7; background: #fff; border-radius: 5px; padding: 4px 10px; font-size: 13px; cursor: pointer; white-space: nowrap; color: var(--ink); }
+.btn.pri { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.sm { padding: 2px 8px; font-size: 12px; }
+
+/* moved-on note */
+.moved { background: var(--card); border: 1px solid var(--line); border-left: 4px solid #7a8794; border-radius: 6px; padding: 7px 12px; margin-bottom: 12px; font-size: 13px; display: flex; gap: 10px; align-items: center; }
+.moved .x { margin-left: auto; color: var(--faint); cursor: pointer; }
+
+/* queue */
+section.bucket { margin-bottom: 18px; }
+section.bucket > h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 6px; display: flex; gap: 10px; align-items: baseline; }
+section.bucket > h2 .cnt { font-weight: 400; text-transform: none; letter-spacing: 0; }
+section.bucket > h2 .sp { flex: 1; }
+.list { background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.row { display: grid; grid-template-columns: 26px 44px 1fr 170px 190px; gap: 10px; align-items: center; padding: 9px 12px; border-top: 1px solid var(--line); }
+.row:first-child { border-top: 0; }
+.row .pos { color: var(--faint); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.lang { font-size: 11px; font-weight: 600; border: 1px solid #c9ccd0; border-radius: 3px; padding: 0 4px; text-align: center; color: #3d4248; }
+.lang.zh { background: #f3f3f1; }
+.what .v { font-weight: 600; }
+.what .scope { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: #3d4248; }
+.what .why { color: var(--muted); font-size: 12.5px; margin-top: 1px; }
+.what .why b { color: var(--ink); font-weight: 500; }
+.what .whyt { color: var(--muted); text-decoration: underline dotted; cursor: pointer; font-size: 12px; margin-left: 6px; }
+.due { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.due .sl { display: block; color: var(--muted); font-size: 11.5px; }
+.act { text-align: right; display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.row.over { background: linear-gradient(90deg, var(--red-bg), #fff 40%); }
+.row.over .due { color: var(--red); font-weight: 600; }
+.row.over .due .sl { color: var(--red); font-weight: 400; }
+.tag { display: inline-block; font-size: 11px; border-radius: 3px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
+.tag.red { background: var(--red-bg); color: var(--red); }
+.tag.amber { background: var(--amber-bg); color: var(--amber); }
+.tag.grey { background: var(--grey-bg); color: var(--muted); }
+.row.dep { color: var(--muted); }
+.row.dep .v { color: var(--muted); }
+.after { font-size: 11.5px; color: var(--muted); }
+.row.run .prog { height: 6px; background: #e8e8e5; border-radius: 3px; overflow: hidden; margin-top: 5px; max-width: 360px; }
+.row.run .prog i { display: block; height: 100%; width: 58%; background: #59636d; }
+.sub { font-size: 12px; color: var(--muted); padding: 6px 12px 6px 92px; background: #fafaf8; border-top: 1px solid var(--line); }
+.grouphead { padding: 6px 12px; font-size: 12px; color: var(--muted); background: #fafaf8; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+.grouphead:first-child { border-top: 0; }
+.grouphead .sp { flex: 1; }
+.whybox { grid-column: 3 / 6; background: #fafaf8; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; font-size: 12.5px; margin-top: 4px; display: none; }
+.row.open .whybox { display: block; }
+.whybox table { border-collapse: collapse; width: 100%; }
+.whybox td { padding: 2px 8px 2px 0; vertical-align: top; }
+.whybox td:first-child { color: var(--muted); width: 120px; }
+.chain { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.chain span { border: 1px solid var(--line); background: #fff; border-radius: 3px; padding: 0 6px; font-size: 12px; }
+.chain span.me { border-color: var(--accent); font-weight: 600; }
+.more { padding: 8px 12px; font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--line); cursor: pointer; }
+
+/* module screen */
+.crumbs { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+.crumbs a { cursor: pointer; text-decoration: underline; }
+.mhead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+.mhead h1 { margin: 0; font-size: 22px; }
+.mhead .meta { color: var(--muted); }
+.mhead .ok { font-weight: 600; }
+.miles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 14px; }
+.miles > div { padding: 10px 14px; border-left: 1px solid var(--line); }
+.miles > div:first-child { border-left: 0; }
+.miles .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.miles .v { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.miles .dd { font-size: 12.5px; color: var(--muted); }
+.miles .done .v { color: var(--muted); font-weight: 500; }
+.units { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 18px; font-size: 13px; }
+.units th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 7px 10px; border-bottom: 1px solid var(--line); background: #fafaf8; }
+.units td { padding: 7px 10px; border-top: 1px solid var(--line); vertical-align: middle; }
+.units tr.zhr td { border-top: 1px dashed #ececea; }
+.pips { display: inline-flex; gap: 2px; vertical-align: middle; }
+.pips i { width: 16px; height: 9px; border-radius: 2px; background: #e6e6e3; display: inline-block; position: relative; }
+.pips i.f { background: #59636d; }
+.pips i.p { background: linear-gradient(90deg, #59636d 50%, #e6e6e3 50%); }
+.pips i.st { background: #e0a43a; }
+.pips i.bl { background: var(--red); }
+.cnt2 { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; margin-left: 6px; }
+.uname { font-weight: 600; }
+.legend { font-size: 12px; color: var(--muted); margin: -10px 0 16px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.legend .pips i { width: 12px; }
+.tabs2 { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
+.tabs2 span { padding: 6px 12px; font-size: 13px; color: var(--muted); cursor: default; }
+.tabs2 span.on { color: var(--ink); border-bottom: 2px solid var(--accent); font-weight: 600; }
+
+@media (max-width: 860px) {
+  .strip { grid-template-columns: repeat(4, 1fr); }
+  .row { grid-template-columns: 22px 38px 1fr; }
+  .row .due, .row .act { grid-column: 3; text-align: left; justify-content: flex-start; }
+  .whybox { grid-column: 1 / -1; }
+  .miles { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+<header class="app">
+  <b>NU Content Studio</b>
+  <nav>
+    <a class="on" data-go="queue">Queue</a>
+    <a data-go="module">Modules</a>
+    <a>Translation</a>
+    <a>History</a>
+    <a>Transfer</a>
+  </nav>
+  <span class="sp"></span>
+  <span class="live">● live · Mon 12 Oct 2026</span>
+</header>
+
+<main>
+<!-- ============================ LANDING: QUEUE ============================ -->
+<div class="screen on" id="queue">
+  <div class="note">Mock-up · Concept A. The landing screen is the queue. The strip above it is the only programme-level status. Click a module cell (e.g. KV7015) or the Modules tab to open the module drill-down. Click "why?" on any row to see why it sits at that position.</div>
+
+  <div class="strip">
+    <div class="mod behind"><div class="c">KV7011</div><div class="d">Public Health · 30 Oct</div><div class="s">6 d behind</div><div class="n">EN 41/78 · ZH 12/78</div></div>
+    <div class="mod behind"><div class="c">KV7012</div><div class="d">Epidemiology · 13 Nov</div><div class="s">2 d behind</div><div class="n">EN 22/84 · ZH 0/84</div></div>
+    <div class="mod"><div class="c">KV7013</div><div class="d">Biostatistics · 27 Nov</div><div class="s">on track</div><div class="n">EN 8/80 · ZH 0/80</div></div>
+    <div class="mod"><div class="c">KV7014</div><div class="d">Health Policy · 11 Dec</div><div class="s">on track</div><div class="n">EN 0/76 · ZH 0/76</div></div>
+    <div class="mod" data-go="module"><div class="c">KV7015</div><div class="d">Research Methods · 6 Nov</div><div class="s">on track · 1 d slack</div><div class="n">EN 3/12 · ZH 0/12</div></div>
+    <div class="mod"><div class="c">KV7016</div><div class="d">Qualitative · 18 Dec</div><div class="s">on track</div><div class="n">EN 0/82 · ZH 0/82</div></div>
+    <div class="mod"><div class="c">KV7017</div><div class="d">Global Health · 15 Jan</div><div class="s">on track</div><div class="n">EN 0/88 · ZH 0/88</div></div>
+    <div class="mod none"><div class="c">KV7018</div><div class="d">Health Economics</div><div class="s">no date set</div><div class="n">EN 0/80 · ZH 0/80</div></div>
+  </div>
+
+  <div class="bar">
+    <h1>What to do next</h1>
+    <span class="chipf on">EN + ZH</span><span class="chipf">EN</span><span class="chipf">ZH</span>
+    <span class="chipf">All modules</span>
+    <span class="sp"></span>
+    <span style="font-size:12px;color:var(--muted)">Sorted by deadline slack, then by how much each row unlocks</span>
+  </div>
+
+  <div class="moved">✓ <span><b>Cues + subtitles 6/6 · KV7012 U02</b> finished 4 min ago. Moved on: 6 topics are now in <u>Compose + package · KV7012</u> (Today, row 7).</span><span class="x">dismiss</span></div>
+
+  <!-- TODAY -->
+  <section class="bucket">
+    <h2>Today <span class="cnt">9 rows · 2 overdue</span><span class="sp"></span></h2>
+    <div class="list">
+
+      <div class="row over">
+        <div class="pos">1</div><div class="lang">EN</div>
+        <div class="what">
+          <div><span class="v">Write 4 scripts</span> · <span class="scope">KV7011 U05 T03–T06</span><span class="tag red">overdue</span></div>
+          <div class="why">Unit U05 can't be recorded until these exist · ~80 min of writing <span class="whyt" data-why>why?</span></div>
+        </div>
+        <div class="due">was due 9 Oct<span class="sl">3 days late · −3 d slack</span></div>
+        <div class="act"><button class="btn pri">Open intake</button></div>
+        <div class="whybox"><table>
+          <tr><td>Due date</td><td>9 Oct: the deadline <code>planning.ts</code> back-schedules for KV7011 U05's scripts (delivery 30 Oct, 6 units still to record)</td></tr>
+          <tr><td>Effort</td><td>4 × 20 min = 80 min (planning estimate) → slack = −3 d</td></tr>
+          <tr><td>Unlocks</td><td><div class="chain"><span class="me">write ×4</span>→<span>validate ×4</span>→<span>render ×4</span>→<span>Record U05 (6 topics)</span>→ … → <span>module packaged</span></div></td></tr>
+          <tr><td>Module</td><td>This row is the main reason KV7011 shows <b>6 d behind</b>.</td></tr>
+        </table></div>
+      </div>
+
+      <div class="row over dep">
+        <div class="pos">2</div><div class="lang">EN</div>
+        <div class="what">
+          <div><span class="v">Record session</span> · <span class="scope">KV7011 U05 · 6 topics</span><span class="tag red">overdue</span></div>
+          <div class="why">One studio day, ~2 h 10 m of footage · <span class="after">after ↑ row 1 (4 scripts missing)</span></div>
+        </div>
+        <div class="due">was due 10 Oct<span class="sl">2 days late</span></div>
+        <div class="act"><button class="btn" disabled>Teleprompter</button></div>
+      </div>
+
+      <div class="row open">
+        <div class="pos">3</div><div class="lang">EN</div>
+        <div class="what">
+          <div><span class="v">Place 1 cue boundary</span> · <span class="scope">KV7015 U01 T02 · slides 4→5</span><span class="tag red">blocked</span></div>
+          <div class="why">An edit cut across the slide break (CUE_CUT) · <b>blocks EN subtitles → compose → package</b> <span class="whyt" data-why>why?</span></div>
+        </div>
+        <div class="due">≈ 23 Oct<span class="sl">U01 packaged · 1 d slack</span></div>
+        <div class="act"><button class="btn pri">Open in cue editor</button></div>
+        <div class="whybox"><table>
+          <tr><td>Why so high</td><td>Only 1 day of slack, and it unlocks 3 machine runs. Estimated effort is about 10 min (nominal).</td></tr>
+          <tr><td>Due date</td><td>≈ 23 Oct = delivery 6 Nov − 14 d package buffer. <span class="tag grey">derived · data gap</span> <code>planning.ts</code> gives "packaged" no date yet.</td></tr>
+          <tr><td>Unlocks</td><td><div class="chain"><span class="me">place cue</span>→<span>cues</span>→<span>subtitles</span>→<span>compose</span>→<span>package EN</span></div></td></tr>
+          <tr><td>Source</td><td><code>bcn status</code> → <code>en.blockers[0] = CUE_CUT</code>, <code>en.next = cues</code></td></tr>
+        </table></div>
+      </div>
+
+      <div class="row">
+        <div class="pos">4</div><div class="lang">EN</div>
+        <div class="what">
+          <div><span class="v">Proofread 2 mis-transcriptions</span> · <span class="scope">KV7015 U01 T01</span></div>
+          <div class="why">"Peek oh" → PICO, "like it" → Likert · the translator works from this SRT · <b>blocks ZH export</b> <span class="whyt" data-why>why?</span></div>
+        </div>
+        <div class="due">≈ 16 Oct<span class="sl">send to translator · 2 d slack</span></div>
+        <div class="act"><button class="btn pri">Review</button></div>
+        <div class="whybox"><table>
+          <tr><td>Due date</td><td>≈ 16 Oct = delivery 6 Nov − 21 d translator turnaround. <span class="tag grey">derived · data gap</span></td></tr>
+          <tr><td>Unlocks</td><td><div class="chain"><span class="me">proofread ×2</span>→<span>subtitles</span>→<span>ZH export (U01, 2 topics)</span></div></td></tr>
+        </table></div>
+      </div>
+
+      <div class="grouphead">Ready to run · 5 jobs · no human input needed · they cost nothing to start, so they always sit in Today<span class="sp"></span><button class="btn sm pri">Run all 5</button></div>
+
+      <div class="row run">
+        <div class="pos">5</div><div class="lang">EN</div>
+        <div class="what">
+          <div><span class="v">Rendering 7 / 12 topics</span> · <span class="scope">KV7013 U01</span></div>
+          <div class="why">scripts validated yesterday · currently T08 slide 6 · ETA 3 min</div>
+          <div class="prog"><i></i></div>
+        </div>
+        <div class="due">27 Oct<span class="sl">U01 recording</span></div>
+        <div class="act"><button class="btn sm">Cancel</button><button class="btn sm">Log</button></div>
+      </div>
+
+      <div class="row">
+        <div class="pos">6</div><div class="lang zh">ZH</div>
+        <div class="what">
+          <div><span class="v">Validate + subtitles 3 topics</span> · <span class="scope">KV7011 U02 T01–T03</span></div>
+          <div class="why">Translation returned 10 Oct · parity check not yet run <span class="whyt" data-why>why?</span></div>
+        </div>
+        <div class="due">≈ 9 Oct<span class="sl">translated · overdue</span></div>
+        <div class="act"><button class="btn">Run</button></div>
+        <div class="whybox"><table><tr><td>Due date</td><td>KV7011 "translated" ≈ 9 Oct (30 Oct − 21 d). <span class="tag grey">derived · data gap</span></td></tr></table></div>
+      </div>
+
+      <div class="row">
+        <div class="pos">7</div><div class="lang">EN</div>
+        <div class="what">
+          <div><span class="v">Compose + package 6 topics</span> · <span class="scope">KV7012 U02</span></div>
+          <div class="why">Cues + subtitles just finished (see note above)</div>
+        </div>
+        <div class="due">≈ 30 Oct<span class="sl">packaged</span></div>
+        <div class="act"><button class="btn">Run</button></div>
+      </div>
+
+      <div class="row">
+        <div class="pos">8</div><div class="lang">EN</div>
+        <div class="what">
+          <div><span class="v">Re-render 3 topics</span> · <span class="scope">KV7014 U02 T01, T04, T05</span><span class="tag amber">stale</span></div>
+          <div class="why">Script edited after the last render · slides on disk are out of date</div>
+        </div>
+        <div class="due">18 Oct<span class="sl">U02 recording</span></div>
+        <div class="act"><button class="btn">Run</button></div>
+      </div>
+
+      <div class="row">
+        <div class="pos">9</div><div class="lang zh">ZH</div>
+        <div class="what">
+          <div><span class="v">Send 18 topics to translation</span> · <span class="scope">KV7011 U03–U04</span></div>
+          <div class="why">EN recorded and validated · the translator needs about 3 weeks (setting)</div>
+        </div>
+        <div class="due">≈ 9 Oct<span class="sl">overdue by 3 d</span></div>
+        <div class="act"><button class="btn pri">Export batch</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- THIS WEEK -->
+  <section class="bucket">
+    <h2>This week <span class="cnt">6 rows</span></h2>
+    <div class="list">
+      <div class="row">
+        <div class="pos">10</div><div class="lang zh">ZH</div>
+        <div class="what"><div><span class="v">Fix slide overflow</span> · <span class="scope">KV7015 U01 T01 · slide 5</span><span class="tag red">blocked</span></div>
+          <div class="why">RENDER_SAFE_AREA: the Mandarin text runs outside the safe area · shorten it or return it to the translator</div></div>
+        <div class="due">≈ 16 Oct<span class="sl">4 d slack</span></div>
+        <div class="act"><button class="btn">Open slide</button><button class="btn sm">Add to return list</button></div>
+      </div>
+      <div class="row">
+        <div class="pos">11</div><div class="lang">EN</div>
+        <div class="what"><div><span class="v">Write 6 scripts</span> · <span class="scope">KV7012 U04</span></div><div class="why">Needed before the U04 recording on 16 Oct · ~2 h</div></div>
+        <div class="due">14 Oct<span class="sl">2 d slack</span></div>
+        <div class="act"><button class="btn">Open intake</button></div>
+      </div>
+      <div class="row">
+        <div class="pos">12</div><div class="lang">EN</div>
+        <div class="what"><div><span class="v">Record session</span> · <span class="scope">KV7012 U03 · 6 topics</span></div><div class="why">Scripts rendered ✓ · ~2 h 10 m session</div></div>
+        <div class="due">15 Oct<span class="sl">3 d slack</span></div>
+        <div class="act"><button class="btn">Teleprompter</button><button class="btn sm">Scripts PDF</button></div>
+      </div>
+      <div class="row">
+        <div class="pos">13</div><div class="lang">EN</div>
+        <div class="what"><div><span class="v">Resolve sync conflict copy</span> · <span class="scope">KV7016 U01 T04</span><span class="tag red">blocked</span></div><div class="why">"topic (Tom's MacBook).md" sits next to topic.md. Keep one and delete the other in Finder.</div></div>
+        <div class="due">16 Oct<span class="sl">U01 scripts</span></div>
+        <div class="act"><button class="btn">Compare</button></div>
+      </div>
+      <div class="more">+ 2 more this week (Write 5 scripts · KV7013 U02 · Proofread 4 · KV7012 U02)</div>
+    </div>
+  </section>
+
+  <!-- LATER -->
+  <section class="bucket">
+    <h2>Later <span class="cnt">31 rows · next due 21 Oct</span></h2>
+    <div class="list">
+      <div class="row"><div class="pos">16</div><div class="lang">EN</div>
+        <div class="what"><div><span class="v">Write 8 scripts</span> · <span class="scope">KV7013 U02</span></div><div class="why">Before the U02 recording on 23 Oct</div></div>
+        <div class="due">21 Oct<span class="sl">9 d slack</span></div><div class="act"><button class="btn">Open intake</button></div></div>
+      <div class="row"><div class="pos">17</div><div class="lang zh">ZH</div>
+        <div class="what"><div><span class="v">Send 12 topics to translation</span> · <span class="scope">KV7015 U01–U03</span></div><div class="why">Not ready yet: waiting on recording (U02, U03)</div></div>
+        <div class="due">≈ 16 Oct<span class="sl">after recording</span></div><div class="act"><button class="btn" disabled>Export batch</button></div></div>
+      <div class="more">Show 29 more ▾</div>
+    </div>
+  </section>
+
+  <!-- WAITING -->
+  <section class="bucket">
+    <h2>Waiting on others <span class="cnt">3 rows · not your action unless overdue</span></h2>
+    <div class="list">
+      <div class="row"><div class="pos">–</div><div class="lang zh">ZH</div>
+        <div class="what"><div><span class="v">24 topics with translator</span> · <span class="scope">KV7012 U01–U03</span><span class="tag grey">waiting</span></div><div class="why">Sent 28 Sep · out 14 days · expected back about 19 Oct</div></div>
+        <div class="due">≈ 23 Oct<span class="sl">translated</span></div><div class="act"><button class="btn">Import return</button></div></div>
+      <div class="row over"><div class="pos">–</div><div class="lang">EN</div>
+        <div class="what"><div><span class="v">Chase asset</span> · <span class="scope">evidence-pyramid.png · KV7015 U02 T01</span><span class="tag red">overdue</span></div><div class="why">Outstanding in assets.md · blocks validate · the U02 recording is on 14 Oct</div></div>
+        <div class="due">11 Oct<span class="sl">1 d late</span></div><div class="act"><button class="btn">Open assets.md</button></div></div>
+    </div>
+  </section>
+
+  <!-- UNSCHEDULED -->
+  <section class="bucket">
+    <h2>Unscheduled</h2>
+    <div class="list">
+      <div class="row"><div class="pos">–</div><div class="lang">EN ZH</div>
+        <div class="what"><div><span class="v">Set a delivery date</span> · <span class="scope">KV7018 · 80 topics</span></div><div class="why">With no date, none of this module's work can be placed in the queue</div></div>
+        <div class="due">—</div><div class="act"><button class="btn">Set date</button></div></div>
+    </div>
+  </section>
+</div>
+
+<!-- ============================ DRILL-DOWN: MODULE ============================ -->
+<div class="screen" id="module">
+  <div class="crumbs"><a data-go="queue">Queue</a> › KV7015</div>
+  <div class="mhead">
+    <h1>KV7015 Research Methods</h1>
+    <span class="meta">Delivery <b>Fri 6 Nov</b> · owner Tom B. · 3 units · 12 topics</span>
+    <span class="ok">on track · 1 day of slack</span>
+    <span class="sp" style="flex:1"></span>
+    <button class="btn">Plan & dates</button><button class="btn">Topic grid</button>
+  </div>
+
+  <div class="miles">
+    <div class="done"><div class="k">Scripts (briefs)</div><div class="v">12 / 12 ✓</div><div class="dd">done</div></div>
+    <div><div class="k">Recorded</div><div class="v">4 / 12</div><div class="dd">by 20 Oct · U02 on 14 Oct</div></div>
+    <div><div class="k">Translated (ZH)</div><div class="v">0 / 12</div><div class="dd">≈ 16 Oct send · ≈ 30 Oct back <span class="tag grey">derived</span></div></div>
+    <div><div class="k">Packaged EN · ZH</div><div class="v">3 · 0 / 12</div><div class="dd">6 Nov delivery</div></div>
+  </div>
+
+  <table class="units">
+    <tr><th style="width:150px">Unit</th><th style="width:40px"></th><th style="width:260px">Stage (planned → packaged)</th><th>Next action for this unit</th><th style="width:110px">Anchor date</th></tr>
+    <tr><td class="uname" rowspan="2">U01 Asking questions<br><span class="cnt2" style="margin:0">2 topics</span></td><td><span class="lang">EN</span></td>
+      <td><span class="pips"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="p"></i><i class="bl"></i></span><span class="cnt2">1 cued, 1 blocked</span></td>
+      <td>Place 1 cue boundary (T02) · Proofread 2 (T01)</td><td>recorded ✓</td></tr>
+    <tr class="zhr"><td><span class="lang zh">ZH</span></td>
+      <td><span class="pips"><i class="f"></i><i class="f"></i><i class="bl"></i><i></i><i></i></span><span class="cnt2">T01 returned (sample), slide 5 overflow</span></td>
+      <td>Fix slide overflow (T01) · Send T02 when the SRT is proofread</td><td>≈ 16 Oct send</td></tr>
+    <tr><td class="uname" rowspan="2">U02 Reading evidence<br><span class="cnt2" style="margin:0">5 topics</span></td><td><span class="lang">EN</span></td>
+      <td><span class="pips"><i class="f"></i><i class="f"></i><i class="p"></i><i></i><i></i><i></i></span><span class="cnt2">4 rendered, 1 blocked on asset</span></td>
+      <td>Chase evidence-pyramid.png → then <b>Record session</b></td><td><b>14 Oct</b> recording</td></tr>
+    <tr class="zhr"><td><span class="lang zh">ZH</span></td>
+      <td><span class="pips"><i></i><i></i><i></i><i></i><i></i></span><span class="cnt2">not sent</span></td>
+      <td style="color:var(--muted)">Waits for the EN recording</td><td>≈ 16 Oct send</td></tr>
+    <tr><td class="uname" rowspan="2">U03 Designing studies<br><span class="cnt2" style="margin:0">5 topics</span></td><td><span class="lang">EN</span></td>
+      <td><span class="pips"><i class="f"></i><i class="f"></i><i class="st"></i><i></i><i></i><i></i></span><span class="cnt2">2 stale renders</span></td>
+      <td>Re-render 2 · then Record session</td><td>20 Oct recording</td></tr>
+    <tr class="zhr"><td><span class="lang zh">ZH</span></td>
+      <td><span class="pips"><i></i><i></i><i></i><i></i><i></i></span><span class="cnt2">not sent</span></td>
+      <td style="color:var(--muted)">Waits for the EN recording</td><td>≈ 16 Oct send</td></tr>
+  </table>
+  <div class="legend">
+    <span><span class="pips"><i class="f"></i></span> stage reached by all topics</span>
+    <span><span class="pips"><i class="p"></i></span> part way</span>
+    <span><span class="pips"><i class="st"></i></span> stale</span>
+    <span><span class="pips"><i class="bl"></i></span> blocked</span>
+    <span>EN pips: drafted · validated · rendered · recorded · cued · packaged. ZH pips: out · returned · parity · rendered · packaged.</span>
+  </div>
+
+  <div class="tabs2"><span class="on">Queue for KV7015 (6)</span><span>Topic grid</span><span>Diagnostics (5)</span><span>Plan</span></div>
+  <div class="list">
+    <div class="row"><div class="pos">3</div><div class="lang">EN</div>
+      <div class="what"><div><span class="v">Place 1 cue boundary</span> · <span class="scope">U01 T02 · slides 4→5</span><span class="tag red">blocked</span></div><div class="why">blocks EN subtitles → compose → package</div></div>
+      <div class="due">≈ 23 Oct<span class="sl">1 d slack</span></div><div class="act"><button class="btn pri">Open in cue editor</button></div></div>
+    <div class="row"><div class="pos">4</div><div class="lang">EN</div>
+      <div class="what"><div><span class="v">Proofread 2 mis-transcriptions</span> · <span class="scope">U01 T01</span></div><div class="why">blocks ZH export</div></div>
+      <div class="due">≈ 16 Oct<span class="sl">2 d slack</span></div><div class="act"><button class="btn pri">Review</button></div></div>
+    <div class="row over"><div class="pos">–</div><div class="lang">EN</div>
+      <div class="what"><div><span class="v">Chase asset</span> · <span class="scope">evidence-pyramid.png · U02 T01</span><span class="tag red">overdue</span></div><div class="why">blocks validate → render → the U02 recording</div></div>
+      <div class="due">11 Oct<span class="sl">1 d late</span></div><div class="act"><button class="btn">Open assets.md</button></div></div>
+    <div class="row"><div class="pos">10</div><div class="lang zh">ZH</div>
+      <div class="what"><div><span class="v">Fix slide overflow</span> · <span class="scope">U01 T01 · slide 5</span><span class="tag red">blocked</span></div><div class="why">RENDER_SAFE_AREA</div></div>
+      <div class="due">≈ 16 Oct<span class="sl">4 d slack</span></div><div class="act"><button class="btn">Open slide</button></div></div>
+    <div class="row"><div class="pos">14</div><div class="lang">EN</div>
+      <div class="what"><div><span class="v">Record session</span> · <span class="scope">U02 · 5 topics</span></div><div class="why">~25 min of footage · <span class="after">after ↑ chase asset</span></div></div>
+      <div class="due">14 Oct<span class="sl">2 d slack</span></div><div class="act"><button class="btn">Teleprompter</button></div></div>
+    <div class="row"><div class="pos">19</div><div class="lang">EN</div>
+      <div class="what"><div><span class="v">Re-render 2 topics</span> · <span class="scope">U03 T02, T04</span><span class="tag amber">stale</span></div><div class="why">script edited after render</div></div>
+      <div class="due">20 Oct<span class="sl">U03 recording</span></div><div class="act"><button class="btn">Run</button></div></div>
+  </div>
+  <p style="font-size:12px;color:var(--muted);margin-top:8px">Position numbers are the row's place in the full programme queue, so you can see where this module's work ranks against everything else.</p>
+</div>
+</main>
+
+<script>
+document.querySelectorAll('[data-go]').forEach(function (el) {
+  el.addEventListener('click', function () {
+    var id = el.getAttribute('data-go');
+    document.querySelectorAll('.screen').forEach(function (s) { s.classList.toggle('on', s.id === id); });
+    document.querySelectorAll('header.app nav a').forEach(function (a) { a.classList.toggle('on', a.getAttribute('data-go') === id); });
+    window.scrollTo(0, 0);
+  });
+});
+document.querySelectorAll('[data-why]').forEach(function (el) {
+  el.addEventListener('click', function () { el.closest('.row').classList.toggle('open'); });
+});
+</script>
+</body>
+</html>
