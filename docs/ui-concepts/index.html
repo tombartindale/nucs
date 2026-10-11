@@ -1,0 +1,182 @@
+<title>NUCS UI Directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single reading column; three concept cards side by side on wide screens, then a comparison table, shared gaps and open questions. */
+:root{
+  --bg:#f6f7f5; --surface:#ffffff; --fg:#1d2321; --muted:#5d6764; --line:#dfe3e0;
+  --accent:#1f6f62; --accent-soft:#e3f0ec; --warn:#a65d00; --warn-soft:#fbefdc; --bad:#b3261e;
+  --display:"Fraunces", Georgia, serif; --body:"IBM Plex Sans", system-ui, sans-serif; --mono:"IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141917; --surface:#1c2220; --fg:#e6ebe8; --muted:#9aa5a1; --line:#2f3835;
+  --accent:#6cc3b1; --accent-soft:#1f3631; --warn:#f0b05a; --warn-soft:#3a2c17; --bad:#ff8a80; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141917; --surface:#1c2220; --fg:#e6ebe8; --muted:#9aa5a1; --line:#2f3835;
+  --accent:#6cc3b1; --accent-soft:#1f3631; --warn:#f0b05a; --warn-soft:#3a2c17; --bad:#ff8a80; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.55}
+.wrap{max-width:1120px;margin:0 auto;padding-inline:20px;padding-block:40px 64px;display:grid;gap:48px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;font-weight:650}
+h1{font-size:clamp(28px,4vw,40px);line-height:1.15}
+h2{font-size:24px}
+h3{font-size:20px}
+p{margin:0;max-width:68ch}
+.lede{color:var(--muted);font-size:16px;margin-top:10px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.chip{font-size:13px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:3px 10px}
+.chip b{font-weight:600}
+section{display:grid;gap:16px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px;display:grid;gap:12px;align-content:start;min-width:0}
+.card .tag{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.card .idea{font-size:15px}
+.card ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.card h4{margin:0;font-size:12px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:500}
+.pro li::marker{color:var(--accent)}
+.con li::marker{color:var(--bad)}
+.links{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+.btn{display:inline-block;text-decoration:none;font-weight:500;font-size:14px;padding:7px 12px;border-radius:6px;border:1px solid var(--accent);color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--surface)}
+.btn:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.tablebox{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:14px}
+th,td{text-align:left;vertical-align:top;padding:10px 14px;border-bottom:1px solid var(--line)}
+thead th{font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:500}
+tbody th{font-weight:600;width:22%}
+tr:last-child td,tr:last-child th{border-bottom:0}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle;background:var(--line)}
+.dot.s{background:var(--accent)} .dot.m{background:var(--warn)}
+.gaps{display:grid;gap:10px;padding:0;margin:0;list-style:none}
+.gaps li{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:6px;padding:10px 14px}
+.gaps code,.card code{font-family:var(--mono);font-size:13px;background:var(--accent-soft);padding:0 4px;border-radius:3px}
+.qs{counter-reset:q;display:grid;gap:12px;padding:0;margin:0;list-style:none}
+.qs li{counter-increment:q;background:var(--accent-soft);border-radius:8px;padding:12px 16px 12px 48px;position:relative}
+.qs li::before{content:counter(q);position:absolute;left:16px;top:12px;font-family:var(--mono);font-weight:500;color:var(--accent)}
+.note{font-size:13px;color:var(--muted)}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">NUCS / Beacon UI · design exploration</div>
+    <h1>Three ways to show what's done and what to do next</h1>
+    <p class="lede">Three design agents worked from one shared brief. Each wrote a concept and a clickable static mockup. None of the app code was changed.</p>
+    <div class="chips">
+      <span class="chip"><b>User:</b> producer who does the work</span>
+      <span class="chip"><b>Order:</b> module delivery dates (planning.ts)</span>
+      <span class="chip"><b>Mandarin:</b> equal to English</span>
+      <span class="chip"><b>Constraint:</b> no pipeline logic in the UI</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>The three directions</h2>
+    <div class="cards">
+      <article class="card">
+        <div class="tag">A · a-action-queue</div>
+        <h3>Next-Action Queue</h3>
+        <p class="idea">The landing page is one to-do list. Each row has a verb, a scope, why it's there, a due date and a button, grouped across topics and sorted by deadline slack. Sections are Today, This week, Later, Waiting and Unscheduled.</p>
+        <h4>Strong at</h4>
+        <ul class="pro">
+          <li>Answers "what do I do right now" literally</li>
+          <li>Jobs run inside their row, and the topics move to their next row when it finishes</li>
+          <li>The "why?" toggle shows the arithmetic behind a row's position</li>
+          <li>English and Mandarin actions in one list</li>
+        </ul>
+        <h4>Weak at</h4>
+        <ul class="con">
+          <li>The overall picture is squeezed into one strip</li>
+          <li>The order rests on rough effort guesses</li>
+          <li>Doesn't show whether the whole plan is achievable</li>
+        </ul>
+        <div class="links">
+          <a class="btn primary" href="a-action-queue/mockup.html" target="_blank" rel="noopener">Open mockup</a>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="tag">B · b-delivery-runway</div>
+        <h3>Delivery Runway</h3>
+        <p class="idea">The landing page is a timeline with a "today" line and one lane per module (English and Mandarin sub-lanes) running to delivery. Lateness, spare time and clashes show up as shapes. "What now" is whatever the today line crosses.</p>
+        <h4>Strong at</h4>
+        <ul class="pro">
+          <li>Shows that no time is scheduled for editing or translation after recording</li>
+          <li>A "your days" strip shows two modules needing the same day</li>
+          <li>Drills down to a session sheet per unit</li>
+          <li>Includes a concrete fix for undated Mandarin work, with a preview toggle</li>
+        </ul>
+        <h4>Weak at</h4>
+        <ul class="con">
+          <li>Makes rough estimates look precise</li>
+          <li>Below unit level it's really a checklist</li>
+          <li>Problems with no date attached feel less important</li>
+        </ul>
+        <div class="links">
+          <a class="btn primary" href="b-delivery-runway/mockup.html" target="_blank" rel="noopener">Open mockup</a>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="tag">C · c-flow-board</div>
+        <h3>Pipeline Flow Board</h3>
+        <p class="idea">Stage columns with English and Mandarin swimlanes. Cards are modules, or units once you filter. The boundary between two columns carries its action ("38 ready · Render 38"), and a red "needs you" shelf collects blocked work.</p>
+        <h4>Strong at</h4>
+        <ul class="pro">
+          <li>Shows where work is piling up (e.g. 96 topics waiting to be recorded)</li>
+          <li>One click moves a whole batch of ready topics on</li>
+          <li>Folds Translation into the board itself</li>
+          <li>Reading rule: right to left, red first</li>
+        </ul>
+        <h4>Weak at</h4>
+        <ul class="con">
+          <li>Gives an exact next step less precisely</li>
+          <li>Needs about 1,300px of width</li>
+          <li>One urgent topic can hide inside a module card</li>
+        </ul>
+        <div class="links">
+          <a class="btn primary" href="c-flow-board/mockup.html" target="_blank" rel="noopener">Open mockup</a>
+        </div>
+      </article>
+    </div>
+    <p class="note">Each concept's full write-up is in <code>docs/ui-concepts/&lt;folder&gt;/concept.md</code> on the branch <code>claude/ui-design-alternatives-4tvlun</code>.</p>
+  </section>
+
+  <section>
+    <h2>Against your two goals</h2>
+    <div class="tablebox">
+      <table>
+        <thead><tr><th></th><th>A · Queue</th><th>B · Runway</th><th>C · Board</th></tr></thead>
+        <tbody>
+          <tr><th>Overall status</th><td><span class="dot m"></span>One strip of modules: on track or behind</td><td><span class="dot s"></span>Lateness and spare time drawn on a timeline, plus clashes between modules</td><td><span class="dot s"></span>Where the work sits by stage, bottlenecks, ageing</td></tr>
+          <tr><th>What to do</th><td><span class="dot s"></span>A row with a verb and a button</td><td><span class="dot m"></span>Read off the today line, then the session sheet</td><td><span class="dot s"></span>The action on each column boundary, plus the shelf</td></tr>
+          <tr><th>When</th><td><span class="dot s"></span>Today / week / later, from slack</td><td><span class="dot s"></span>A literal calendar</td><td><span class="dot m"></span>Cards sorted by slack, red edge when overdue</td></tr>
+          <tr><th>In what order</th><td><span class="dot s"></span>An explicit ranked list</td><td><span class="dot m"></span>Top lane, leftmost bar</td><td><span class="dot m"></span>Right to left, red first</td></tr>
+          <tr><th>Mandarin as an equal</th><td>Same queue</td><td>Sub-lane per module, with the gap shown openly</td><td>Its own swimlane, aligned to delivery</td></tr>
+          <tr><th>Nav change</th><td>Queue · Modules · Translation · History · Transfer</td><td>Runway · Verification · Translation · Intake; jobs move to a tray</td><td>Board replaces Programme and Translation; jobs move to a tray</td></tr>
+          <tr><th>Est. effort (1 dev)</th><td>Not given</td><td>~3 wks (4–5 with the Mandarin schedule)</td><td>~3–3.5 wks</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note"><span class="dot s"></span>strong &nbsp; <span class="dot m"></span>partial. My own judgement from reading all three.</p>
+  </section>
+
+  <section>
+    <h2>Data gaps all three agents found</h2>
+    <ul class="gaps">
+      <li><b>Mandarin has no dates.</b> <code>planning.ts</code> gives the translated and packaged milestones no due date. All three propose a translator turnaround setting, and B adds an edit/post-production buffer on <code>module_plans</code>.</li>
+      <li><b>No time after recording.</b> The last recording session lands on delivery minus 1, leaving zero days for cues, packaging and translation. A module can read "on track" when it isn't.</li>
+      <li><b>No record of how long work has been waiting.</b> <code>bcn status</code> doesn't report when a topic reached its stage or when a translation batch was exported (<code>stage_since</code>, <code>exported_at</code>).</li>
+      <li><b>Modules are planned in isolation.</b> Nothing adds up your hours across modules, so two "on track" modules can need the same day. <code>/api/plans</code> would also need to return per-unit tasks.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Questions for you</h2>
+    <ol class="qs">
+      <li>Which landing page fits your Monday morning: a list of next actions (A), a timeline (B) or a stage board (C)? Or one as the landing page with another as a tab? For example, A's queue on the landing page with C's board or B's runway on the module page.</li>
+      <li>Should I fix the Mandarin and post-recording scheduling gap first, since all three depend on it? It means turnaround and edit-buffer settings in <code>module_plans</code>, with <code>planning.ts</code> extended to schedule them.</li>
+      <li>Is adding up your hours across modules (B's "your days" strip) important? It's the one thing only B shows.</li>
+      <li>Next step: a merged concept, or a working prototype of one direction as a new route in the Vue app beside the existing pages?</li>
+    </ol>
+  </section>
+</div>
