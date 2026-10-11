@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delivery Runway mockup</title>
+<style>
+:root {
+  --bg: #f6f6f4; --card: #fff; --ink: #1d1d1b; --ink2: #5c5c58; --ink3: #8d8d88; --line: #e2e2de; --line2: #cfcfca;
+  --bar: #d9d9d4; --bar-ink: #3b3b38; --rec: #4a4a46; --done: #b9b9b3; --weekend: #efefeb;
+  --red: #c62828; --red-bg: #fdecec; --amber: #b26a00; --amber-bg: #fff4e0;
+  font: 13px/1.4 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--ink);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); }
+.appbar { display: flex; align-items: center; gap: 4px; background: #2b2b29; color: #fff; padding: 0 16px; height: 44px; }
+.appbar .brand { font-weight: 700; margin-right: 20px; }
+.appbar .nav { padding: 12px 12px; color: #c9c9c4; border-bottom: 2px solid transparent; }
+.appbar .nav.on { color: #fff; border-bottom-color: #fff; }
+.appbar .sp { flex: 1; }
+.appbar .jobs { font-size: 12px; color: #c9c9c4; border: 1px solid #555; border-radius: 3px; padding: 2px 8px; }
+.mockbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; background: #fff; border-bottom: 1px solid var(--line); }
+.mockbar .lbl { color: var(--ink3); font-size: 12px; margin-right: 4px; }
+button { font: inherit; border: 1px solid var(--line2); background: #fff; border-radius: 4px; padding: 4px 10px; cursor: pointer; color: var(--ink); }
+button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.toggle { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; font-size: 12px; color: var(--ink2); border: 1px dashed var(--line2); padding: 4px 8px; border-radius: 4px; }
+main { padding: 16px; }
+.screen { display: none; }
+.screen.on { display: block; }
+h1 { font-size: 20px; margin: 0; }
+h2 { font-size: 14px; margin: 0 0 6px; }
+.crumbs { color: var(--ink3); font-size: 12px; margin-bottom: 4px; }
+.crumbs a { color: var(--ink2); }
+.pagehead { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.pagehead .sub { color: var(--ink2); }
+.pagehead .tools { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 6px; }
+.headline { display: flex; gap: 0; margin-bottom: 12px; }
+.headline > div { flex: 1; padding: 10px 14px; border-right: 1px solid var(--line); }
+.headline > div:last-child { border-right: 0; }
+.headline .v { font-size: 22px; font-weight: 700; }
+.headline .l { color: var(--ink2); font-size: 12px; }
+.red { color: var(--red); } .amber { color: var(--amber); } .muted { color: var(--ink3); }
+.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+.tabs span { padding: 6px 14px; color: var(--ink2); border-bottom: 2px solid transparent; }
+.tabs span.on { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
+
+/* runway */
+.rw-scroll { overflow-x: auto; }
+.rw { position: relative; }
+.rw .row { position: relative; border-bottom: 1px solid var(--line); }
+.rw .row.sub { border-bottom: 1px dotted var(--line); }
+.rw .row.lanehead { border-top: 1px solid var(--line2); }
+.rw .lab { position: absolute; left: 0; top: 0; bottom: 0; padding: 3px 10px; background: #fff; z-index: 3; border-right: 1px solid var(--line); overflow: hidden; }
+.rw .lab .t { font-weight: 600; }
+.rw .lab .s { font-size: 11px; color: var(--ink2); white-space: nowrap; }
+.rw .lang { position: absolute; font-size: 10px; font-weight: 700; color: var(--ink3); letter-spacing: .04em; z-index: 3; }
+.wk { position: absolute; top: 0; bottom: 0; background: var(--weekend); z-index: 0; }
+.gridline { position: absolute; top: 0; bottom: 0; border-left: 1px solid #ececea; z-index: 0; }
+.axis { position: relative; height: 36px; border-bottom: 1px solid var(--line2); background: #fff; }
+.axis .m { position: absolute; top: 2px; font-size: 11px; font-weight: 700; color: var(--ink2); }
+.axis .d { position: absolute; top: 18px; font-size: 10px; color: var(--ink3); transform: translateX(-50%); white-space: nowrap; }
+.today { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid var(--ink); z-index: 6; pointer-events: none; }
+.today b { position: absolute; top: -1px; left: -1px; background: var(--ink); color: #fff; font-size: 10px; padding: 1px 5px; white-space: nowrap; border-radius: 0 3px 3px 0; }
+.bar { position: absolute; height: 14px; border-radius: 2px; font-size: 10px; line-height: 14px; padding: 0 3px; overflow: hidden; white-space: nowrap; z-index: 2; }
+.bar.scripts { background: var(--bar); color: var(--bar-ink); border: 1px solid #c4c4be; }
+.bar.rec { background: var(--rec); color: #fff; }
+.bar.now { outline: 2px solid var(--ink); outline-offset: 1px; }
+.bar.over { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
+.bar.rec.over { background: var(--red); color: #fff; }
+.bar.zhout { background: repeating-linear-gradient(90deg, #e8e8e4 0 6px, #f3f3f0 6px 8px); border: 1px solid #c4c4be; color: var(--bar-ink); }
+.bar.zhout.over { border-color: var(--red); color: var(--red); background: var(--red-bg); }
+.bar.open { background: transparent; border: 1px dashed var(--ink3); color: var(--ink3); }
+.bar.prop { background: transparent; border: 1px dashed #77776f; color: var(--ink2); }
+.bar.prop.over { border-color: var(--red); color: var(--red); }
+.bar.tail { background: repeating-linear-gradient(135deg, transparent 0 4px, #e3e3df 4px 6px); border: 1px solid var(--line2); color: var(--ink2); }
+.bar.float { background: repeating-linear-gradient(90deg, #f0f0ed 0 2px, transparent 2px 5px); border: 1px dotted var(--line2); color: var(--ink3); height: 10px; line-height: 10px; }
+.bar.blk { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
+.tick { position: absolute; width: 2px; height: 12px; background: var(--done); z-index: 2; }
+.tickl { position: absolute; font-size: 9px; color: var(--ink3); z-index: 2; white-space: nowrap; }
+.dia { position: absolute; width: 11px; height: 11px; transform: rotate(45deg); z-index: 4; }
+.dia.deliv { background: var(--ink); }
+.dia.proj { border: 2px solid var(--ink); background: #fff; }
+.dia.proj.over { border-color: var(--red); }
+.dia.ms { background: #fff; border: 1.5px solid var(--ink2); width: 9px; height: 9px; }
+.bracket { position: absolute; height: 0; border-top: 1.5px solid var(--ink2); z-index: 3; }
+.bracket.over { border-top: 2px solid var(--red); }
+.bracket span { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 700; white-space: nowrap; background: rgba(255,255,255,.85); padding: 0 2px; }
+.flag { position: absolute; font-size: 10px; padding: 0 4px; border-radius: 2px; z-index: 5; white-space: nowrap; line-height: 14px; }
+.flag.blocked { background: var(--red); color: #fff; }
+.flag.stale { background: var(--amber); color: #fff; }
+.flag.gap { border: 1px dashed var(--ink3); color: var(--ink2); background: #fff; }
+.flag.over { border: 1px solid var(--red); color: var(--red); background: #fff; }
+.flag.plain { color: var(--ink2); background: #fff; border: 1px solid var(--line2); }
+.edge { position: absolute; font-size: 10px; color: var(--ink2); z-index: 4; white-space: nowrap; background: #fff; padding: 0 3px; }
+.vline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--ink3); z-index: 1; }
+.vline.deliv { border-left: 2px solid var(--ink2); }
+.vline span { position: absolute; top: 2px; left: 3px; font-size: 10px; color: var(--ink2); white-space: nowrap; background: rgba(246,246,244,.9); }
+.chip { display: inline-block; font-size: 11px; border: 1px solid var(--line2); border-radius: 10px; padding: 0 7px; margin: 1px 2px 1px 0; white-space: nowrap; color: var(--ink2); background: #fff; }
+.chip.ok { color: var(--ink3); text-decoration: line-through; }
+.chip.need { color: var(--ink); border-color: var(--ink3); }
+.chip.blocked { background: var(--red); border-color: var(--red); color: #fff; }
+.chip.stale { background: var(--amber); border-color: var(--amber); color: #fff; }
+.chip.over { color: var(--red); border-color: var(--red); }
+.lanegroup { font-size: 11px; font-weight: 700; color: var(--ink2); text-transform: uppercase; letter-spacing: .05em; padding: 10px 10px 4px; background: var(--bg); border-bottom: 1px solid var(--line2); }
+.slice { margin-top: 12px; display: grid; grid-template-columns: 220px 1fr; }
+.slice .h { padding: 10px; border-right: 1px solid var(--line); }
+.slice ul { margin: 0; padding: 8px 14px; list-style: none; columns: 2; column-gap: 28px; }
+.slice li { padding: 3px 0; break-inside: avoid; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 11px; color: var(--ink2); margin: 10px 2px; align-items: center; }
+.legend i { display: inline-block; vertical-align: middle; margin-right: 4px; position: static; }
+.note { font-size: 12px; color: var(--ink2); background: #fff; border-left: 3px solid var(--ink3); padding: 6px 10px; margin: 10px 0; }
+.note.gap { border-left-style: dashed; }
+.sidebox { display: grid; grid-template-columns: 1fr 300px; gap: 12px; align-items: start; }
+.session dl { display: grid; grid-template-columns: 110px 1fr; margin: 0; gap: 4px 8px; font-size: 12px; }
+.session dt { color: var(--ink2); }
+.session dd { margin: 0; }
+.session .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.load .cell { position: absolute; bottom: 0; background: #cdcdc7; z-index: 1; }
+.load .cell.over { background: var(--red); }
+.load .cap { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--ink3); z-index: 2; }
+.load .rc { position: absolute; top: 2px; font-size: 9px; z-index: 2; color: var(--ink2); }
+.load .rc.over { color: var(--red); font-weight: 700; }
+a { color: inherit; }
+</style>
+</head>
+<body>
+<div class="appbar">
+  <span class="brand">NU Content Studio</span>
+  <span class="nav on">Runway</span><span class="nav">Verification</span><span class="nav">Translation</span><span class="nav">Intake</span>
+  <span class="sp"></span><span class="jobs">Jobs · 1 running ▾</span>
+</div>
+<div class="mockbar">
+  <span class="lbl">Mockup screens:</span>
+  <button data-s="s1" class="on">1 · Programme runway (landing)</button>
+  <button data-s="s2">2 · Module runway · KV7015</button>
+  <button data-s="s3">3 · Unit runway · KV7015 U05</button>
+  <label class="toggle"><input type="checkbox" id="zhprop"> Preview proposed ZH back-schedule (needs new data, see concept.md)</label>
+</div>
+<main>
+  <section id="s1" class="screen on"></section>
+  <section id="s2" class="screen"></section>
+  <section id="s3" class="screen"></section>
+</main>
+<script>
+const DAY = 86400000;
+const d2n = (s) => Math.round(Date.parse(s + 'T00:00:00Z') / DAY);
+const n2d = (n) => new Date(n * DAY).toISOString().slice(0, 10);
+const TODAY = d2n('2026-10-11');
+const BRIEF_MIN = 20, REC_MULT = 1.5, HOURS = 3, DEF_MIN = 40;
+// Proposed ZH tail (data gap: none of these exist today)
+const ZH = { edit: 3, turnaround: 10, fix: 1, pkg: 1 };
+const ZH_TAIL = ZH.edit + ZH.turnaround + ZH.fix + ZH.pkg;
+
+// u: [code, title, topics, drafted, recorded, minutesEach, enPost, zh, recordedOn]
+const U = (code, title, n, dr, rec, m, en = '', zh = 'ns', recOn = null, flags = {}) => ({ code, title, n, dr, rec, m, en, zh, recOn, ...flags });
+const MODULES = [
+  { id: 'KV7015', title: 'Research Methods', delivery: '2026-10-30', owner: 'Tom B.', units: [
+    U('U01', 'Asking questions', 10, 10, 10, 8, 'pk10', 'par10', '2026-09-08'),
+    U('U02', 'Reading evidence', 10, 10, 10, 8, 'pk10', 'out10:2026-09-29', '2026-09-15'),
+    U('U03', 'Designing studies', 10, 10, 10, 7, 'cu7', 'ns', '2026-09-24'),
+    U('U04', 'Sampling', 10, 10, 0, 7, '', 'ns', null, { blocked: 1, stale: 1 }),
+    U('U05', 'Measurement', 10, 6, 0, 6, '', 'ns', null, { blocked: 1, stale: 1 }),
+    U('U06', 'Qualitative data', 10, 0, 0, 7),
+    U('U07', 'Synthesis', 10, 0, 0, 8),
+    U('U08', 'Reporting', 10, 0, 0, 6) ] },
+  { id: 'KV7016', title: 'Data Analysis', delivery: '2026-10-14', owner: 'Tom B.', units: [
+    U('U01', 'Describing data', 10, 10, 10, 7, 'pk10', 'ret10', '2026-08-25'),
+    U('U02', 'Distributions', 10, 10, 10, 7, 'pk10', 'out10:2026-09-15', '2026-09-01'),
+    U('U03', 'Estimation', 10, 10, 10, 8, 'pk10', 'out10:2026-09-15', '2026-09-10'),
+    U('U04', 'Testing', 10, 10, 10, 8, 'cu10', 'ns', '2026-09-22'),
+    U('U05', 'Regression', 10, 10, 0, 8),
+    U('U06', 'Categorical outcomes', 10, 4, 0, 7, '', 'ns', null, { blocked: 2 }),
+    U('U07', 'Repeated measures', 10, 0, 0, 7),
+    U('U08', 'Reporting results', 10, 0, 0, 6) ] },
+  { id: 'KV7017', title: 'Research Ethics', delivery: '2026-12-11', owner: 'Tom B.', units: [
+    U('U01', 'Why ethics', 10, 10, 0, 6),
+    U('U02', 'Consent', 10, 0, 0, 6), U('U03', 'Risk and harm', 10, 0, 0, 7), U('U04', 'Data protection', 10, 0, 0, 7),
+    U('U05', 'Vulnerable groups', 10, 0, 0, 6), U('U06', 'Online research', 10, 0, 0, 6), U('U07', 'Review boards', 10, 0, 0, 5), U('U08', 'Integrity', 10, 0, 0, 6) ] },
+  { id: 'KV7018', title: 'Qualitative Inquiry', delivery: '2026-10-23', owner: 'Tom B.', units: [
+    U('U01', 'Paradigms', 10, 10, 10, 7, 'pk10', 'out10:2026-10-02', '2026-09-03'),
+    U('U02', 'Interviewing', 10, 10, 10, 8, 'cu10', 'ns', '2026-09-17'),
+    U('U03', 'Focus groups', 10, 10, 0, 7, '', 'ns', null, { stale: 2 }),
+    U('U04', 'Observation', 10, 10, 0, 7),
+    U('U05', 'Coding', 10, 3, 0, 8),
+    U('U06', 'Thematic analysis', 10, 0, 0, 8),
+    U('U07', 'Rigour', 10, 0, 0, 6), U('U08', 'Writing up', 10, 0, 0, 6) ] },
+  { id: 'KV7019', title: 'Applied Statistics II', delivery: '2027-01-15', owner: 'Tom B.', units:
+    ['Models', 'GLMs', 'Mixed models', 'Survival', 'Missing data', 'Bayes', 'Power', 'Reporting'].map((t, i) => U(`U0${i + 1}`, t, 10, 0, 0, 7)) },
+  { id: 'KV7020', title: 'Systematic Reviews', delivery: '2026-10-23', owner: 'Tom B.', units: [
+    U('U01', 'Protocols', 10, 10, 10, 7, 'pk10', 'out10:2026-09-15', '2026-07-21'),
+    U('U02', 'Searching', 10, 10, 10, 7, 'pk10', 'out10:2026-09-15', '2026-07-28'),
+    U('U03', 'Screening', 10, 10, 10, 7, 'pk10', 'out10:2026-09-15', '2026-08-04'),
+    U('U04', 'Extraction', 10, 10, 10, 7, 'pk10', 'out10:2026-09-15', '2026-08-11'),
+    U('U05', 'Risk of bias', 10, 10, 10, 8, 'pk10', 'ret10', '2026-08-18', { zhBlocked: 3 }),
+    U('U06', 'Meta-analysis', 10, 10, 10, 8, 'pk10', 'ret10', '2026-08-25', { zhBlocked: 1 }),
+    U('U07', 'GRADE', 10, 10, 10, 6, 'cu10', 'ns', '2026-09-01'),
+    U('U08', 'Reporting', 10, 10, 10, 6, 'cu8', 'ns', '2026-09-08', { stale: 1 }) ] },
+  { id: 'KV7021', title: 'Dissertation Skills', delivery: null, owner: '', units:
+    ['Choosing a topic', 'Proposals', 'Supervision', 'Literature', 'Methods chapter', 'Results', 'Discussion', 'Viva'].map((t, i) => U(`U0${i + 1}`, t, 10, i < 2 ? 10 : (i === 2 ? 2 : 0), 0, 6)) },
+  { id: 'KV7022', title: 'Academic Writing', delivery: null, owner: '', units:
+    ['Voice', 'Argument', 'Paragraphs', 'Citing', 'Editing', 'Feedback', 'Abstracts', 'Publishing'].map((t, i) => U(`U0${i + 1}`, t, 10, 0, 0, 5)) },
+];
+
+function tasksFor(mod) {
+  const t = [];
+  for (const u of mod.units) {
+    const nd = u.n - u.dr, nr = u.n - u.rec;
+    if (nd > 0) t.push({ unit: u.code, kind: 'scripts', count: nd, min: nd * BRIEF_MIN });
+    if (nr > 0) t.push({ unit: u.code, kind: 'recording', count: nr, min: nr * (u.m || DEF_MIN) * REC_MULT });
+  }
+  return t;
+}
+const costOf = (t) => (t.kind === 'recording' ? 1 : t.min / 60 / HOURS);
+// Port of computeModulePlan's backward walk; shift moves the anchor earlier (ZH proposal).
+function planFor(mod, shift = 0) {
+  const tasks = tasksFor(mod);
+  tasks.forEach((t) => { t.cost = costOf(t); });
+  if (!mod.delivery) {
+    // Undated: forward ASAP projection from today, same costs (proposal, not in planning.ts)
+    let acc = 0;
+    for (const t of tasks) { acc += t.cost; t.due = TODAY + Math.ceil(acc) - 1; }
+    return { tasks, dated: false, asapEnd: tasks.length ? tasks[tasks.length - 1].due : TODAY, workDays: acc };
+  }
+  let cursor = d2n(mod.delivery) - shift, acc = 0;
+  for (let i = tasks.length - 1; i >= 0; i--) {
+    acc += tasks[i].cost;
+    const w = Math.floor(acc);
+    if (w > 0) { cursor -= w; acc -= w; }
+    tasks[i].due = cursor;
+  }
+  const earliest = tasks.length ? Math.min(...tasks.map((t) => t.due)) : null;
+  const float = earliest === null ? null : earliest - TODAY; // negative = daysBehind
+  return { tasks, dated: true, earliest, float, daysBehind: float !== null && float < 0 ? -float : 0,
+    onTrack: earliest === null || earliest >= TODAY, delivery: d2n(mod.delivery), anchor: d2n(mod.delivery) - shift };
+}
+// ---------- view helpers ----------
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const dt = (n) => new Date(n * DAY);
+const fmt = (n) => `${dt(n).getUTCDate()} ${MON[dt(n).getUTCMonth()]}`;
+const fmtD = (n) => `${DOW[dt(n).getUTCDay()]} ${fmt(n)}`;
+const fmtMin = (m) => (m < 60 ? `${Math.round(m)} min` : `${Math.floor(m / 60)}h${Math.round(m % 60) ? ' ' + Math.round(m % 60) + 'm' : ''}`);
+const pl = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+let PROP = false;
+
+function TL(start, end, ppd, labW) {
+  return { start, end, ppd, labW, x: (n) => labW + (n - start) * ppd, w: labW + (end - start) * ppd };
+}
+function axis(t) {
+  let h = `<div class="axis" style="width:${t.w}px"><div class="lab" style="width:${t.labW}px"><span class="s">${PROP ? 'with proposed ZH tail' : 'from planning.ts, as today'}</span></div>`;
+  for (let n = t.start; n < t.end; n++) {
+    const d = dt(n);
+    if (d.getUTCDate() === 1 || n === t.start) h += `<span class="m" style="left:${t.x(n) + 3}px">${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}</span>`;
+    if (d.getUTCDay() === 1 || t.ppd >= 28) h += `<span class="d" style="left:${t.x(n) + t.ppd / 2}px">${t.ppd >= 28 ? DOW[d.getUTCDay()].slice(0, 2) + ' ' : ''}${d.getUTCDate()}</span>`;
+  }
+  return h + '</div>';
+}
+function bg(t, top) {
+  let h = `<div style="position:absolute;left:0;top:${top}px;bottom:0;width:${t.w}px;pointer-events:none">`;
+  for (let n = t.start; n < t.end; n++) {
+    const d = dt(n).getUTCDay();
+    if (d === 0 || d === 6) h += `<div class="wk" style="left:${t.x(n)}px;width:${t.ppd}px"></div>`;
+    if (d === 1) h += `<div class="gridline" style="left:${t.x(n)}px"></div>`;
+  }
+  h += '</div>';
+  if (TODAY >= t.start && TODAY < t.end) h += `<div class="today" style="left:${t.x(TODAY)}px;top:${top - 14}px"><b>today ${fmtD(TODAY)}</b></div>`;
+  return h;
+}
+// a bar from day s (inclusive) to e (exclusive), clipped to the window
+function bar(t, s, e, cls, text, top, title = '') {
+  const s2 = Math.max(s, t.start), e2 = Math.min(e, t.end);
+  if (e2 <= t.start || s2 >= t.end) return '';
+  const left = t.x(s2), w = Math.max((e2 - s2) * t.ppd, 3);
+  const fits = text && text.length * 5.6 + 6 < w;
+  return `<div class="bar ${cls}" title="${esc(title || text)}" style="left:${left}px;width:${w}px;top:${top}px">${fits ? text : ''}</div>`
+    + (!fits && text ? `<span class="tickl" style="left:${left + w + 3}px;top:${top + 1}px">${text}</span>` : '');
+}
+const flag = (t, n, cls, text, top, dx = 0, title = '') => (n < t.start || n > t.end ? '' :
+  `<span class="flag ${cls}" title="${esc(title || text)}" style="left:${t.x(n) + dx}px;top:${top}px">${text}</span>`);
+function dia(t, n, cls, top, title) {
+  if (n < t.start || n > t.end) return '';
+  return `<span class="dia ${cls}" title="${esc(title)}" style="left:${t.x(n) - 5}px;top:${top}px"></span>`;
+}
+function bracket(t, a, b, top, label, over) {
+  const l = t.x(Math.max(Math.min(a, b), t.start)), r = t.x(Math.min(Math.max(a, b), t.end));
+  if (r <= l) return '';
+  return `<div class="bracket ${over ? 'over' : ''}" style="left:${l}px;width:${r - l}px;top:${top}px"><span class="${over ? 'red' : ''}">${label}</span></div>`;
+}
+const taskBox = (task) => (task.kind === 'recording' ? [task.due, task.due + 1] : [task.due + 1 - Math.max(task.cost, 0.3), task.due + 1]);
+const taskCls = (task) => {
+  const [s, e] = taskBox(task);
+  return `${task.kind === 'recording' ? 'rec' : 'scripts'}${task.due < TODAY ? ' over' : ''}${s <= TODAY && TODAY < e ? ' now' : ''}`;
+};
+const unitOf = (m, code) => m.units.find((u) => u.code === code);
+const enCued = (u) => /^(cu|pk)/.test(u.en);
+function zhState(u) {
+  const m = /^(out|ret|par|pk|ns)(\d*)(?::(.*))?$/.exec(u.zh);
+  return { kind: m[1], since: m[3] ? d2n(m[3]) : null };
+}
+// Proposed ZH projection per unit (data gap: zh_turnaround_days, edit_days do not exist yet)
+function zhProjection(m, p) {
+  const out = [];
+  for (const u of m.units) {
+    const z = zhState(u);
+    const rec = p.tasks.find((x) => x.unit === u.code && x.kind === 'recording');
+    let exp = null, ret = null, end = null, note = '';
+    if (z.kind === 'pk' || z.kind === 'par') { end = TODAY + (z.kind === 'par' ? ZH.pkg : 0); note = 'parity checked'; }
+    else if (z.kind === 'ret') { end = TODAY + ZH.fix + ZH.pkg; note = 'returned'; }
+    else if (z.kind === 'out') { exp = z.since; ret = Math.max(z.since + ZH.turnaround, TODAY + 1); end = ret + ZH.fix + ZH.pkg; }
+    else if (rec) { exp = rec.due + 1 + ZH.edit; ret = exp + ZH.turnaround; end = ret + ZH.fix + ZH.pkg; }
+    else { exp = TODAY + (enCued(u) ? 0 : ZH.edit); ret = exp + ZH.turnaround; end = ret + ZH.fix + ZH.pkg; }
+    out.push({ unit: u.code, exp, ret, end, recDue: rec ? rec.due : null, kind: z.kind, since: z.since, note });
+  }
+  return out;
+}
+const groupRange = (codes) => (codes.length > 1 ? `${codes[0]}–${codes[codes.length - 1]}` : codes[0]);
+
+// ---------- screen 1: programme runway ----------
+function screen1() {
+  const t = TL(d2n('2026-09-28'), d2n('2026-12-21'), 13, 230);
+  const shift = PROP ? ZH_TAIL : 0;
+  const dated = MODULES.filter((m) => m.delivery).map((m) => {
+    const p = planFor(m, shift), zh = zhProjection(m, p);
+    const zhEnd = Math.max(...zh.map((z) => z.end));
+    const key = p.float !== null ? p.float : (PROP ? p.delivery - zhEnd : -2);
+    return { m, p, zh, zhEnd, key };
+  }).sort((a, b) => a.key - b.key);
+  const undated = MODULES.filter((m) => !m.delivery).map((m) => ({ m, p: planFor(m) }));
+
+  // load strip: script minutes per day + recording sessions per day, dated modules only
+  const load = {}, recs = {};
+  for (const { m, p } of dated) for (const k of p.tasks) {
+    if (k.kind === 'recording') { (recs[k.due] = recs[k.due] || []).push(`${m.id} ${k.unit}`); continue; }
+    const days = Math.max(1, Math.ceil(k.cost));
+    for (let i = 0; i < days; i++) load[k.due - i] = (load[k.due - i] || 0) + k.min / days;
+  }
+  const behind = dated.filter((d) => d.p.daysBehind > 0).length;
+  const tight = dated.filter((d) => d.p.float !== null && d.p.float >= 0 && d.p.float <= 3).length;
+  const zhLate = dated.filter((d) => d.zhEnd > d.p.delivery).length;
+  const clashes = Object.entries(recs).filter(([, v]) => v.length > 1);
+  const overDays = Object.values(load).filter((v) => v > HOURS * 60).length;
+
+  let h = `<div class="pagehead"><div><h1>Runway</h1><div class="sub">8 modules · 640 topics · each lane runs from today to its delivery date. Read down the black line for what is due now.</div></div>
+    <div class="tools"><span class="muted">Zoom</span><button>4 wk</button><button class="on">12 wk</button><button>6 mo</button><span class="muted" style="margin-left:8px">Lanes</span><button class="on">EN + ZH</button><button>EN</button><button>ZH</button></div></div>`;
+  h += `<div class="card headline">
+    <div><div class="v ${behind ? 'red' : ''}">${behind}</div><div class="l">modules behind (out of runway)</div></div>
+    <div><div class="v">${tight}</div><div class="l">modules with ≤3 days float</div></div>
+    <div><div class="v ${clashes.length || overDays ? 'red' : ''}">${clashes.length + overDays}</div><div class="l">days double-booked across modules (${pl(clashes.length, 'recording clash')}, ${overDays} over 3h scripting)</div></div>
+    <div><div class="v ${PROP && zhLate ? 'red' : ''}">${PROP ? zhLate : '—'}</div><div class="l">${PROP ? 'modules whose ZH lands after delivery' : 'ZH lanes undated (data gap)'}</div></div>
+    <div><div class="v">${undated.length}</div><div class="l">modules with no delivery date</div></div></div>`;
+
+  const AX = 36, LOADH = 46;
+  let rows = '';
+  // load row
+  rows += `<div class="row load" style="height:${LOADH}px"><div class="lab" style="width:${t.labW}px"><div class="t">Your days</div><div class="s">script hours vs 3h/day · ● recording sessions</div></div>`;
+  for (let n = t.start; n < t.end; n++) {
+    const v = load[n] || 0;
+    if (v) rows += `<div class="cell ${v > HOURS * 60 ? 'over' : ''}" title="${fmtD(n)}: ${fmtMin(v)} of scripts due" style="left:${t.x(n) + 1}px;width:${t.ppd - 2}px;height:${Math.min(v / 60 / 6, 1) * 30}px"></div>`;
+    if (recs[n]) rows += `<span class="rc ${recs[n].length > 1 ? 'over' : ''}" title="${esc(recs[n].join(', '))}" style="left:${t.x(n) + 1}px">${'●'.repeat(Math.min(recs[n].length, 3))}</span>`;
+  }
+  rows += `<div class="cap" style="left:${t.labW}px;bottom:15px"></div></div>`;
+
+  rows += `<div class="lanegroup" style="width:${t.w}px">Dated modules · least float first</div>`;
+  for (const { m, p, zh, zhEnd } of dated) {
+    const EN = 34, ZHH = 26;
+    const blocked = m.units.reduce((a, u) => a + (u.blocked || 0) + (u.zhBlocked || 0), 0);
+    const stale = m.units.reduce((a, u) => a + (u.stale || 0), 0);
+    let status;
+    if (p.float === null) status = '<span>EN chain done</span>';
+    else if (p.daysBehind) status = `<b class="red">${p.daysBehind}d behind</b>`;
+    else status = `<b>float ${p.float}d</b>`;
+    const link = m.id === 'KV7015' ? ` onclick="go('s2')" style="cursor:pointer;width:${t.labW}px"` : ` style="width:${t.labW}px"`;
+    rows += `<div class="row lanehead" style="height:${EN + ZHH}px">
+      <div class="lab"${link}><div class="t">${m.id} <span style="font-weight:400">${m.title}</span></div>
+      <div class="s">Delivery ${fmtD(p.delivery)} · ${status}</div>
+      <div class="s">${blocked ? `<span class="red">▲ ${blocked} blocked</span> ` : ''}${stale ? `<span class="amber">◆ ${stale} stale</span>` : ''}</div></div>
+      <span class="lang" style="left:${t.labW + 3}px;top:3px">EN</span><span class="lang" style="left:${t.labW + 3}px;top:${EN + 4}px">ZH</span>`;
+    // EN: actuals (recording dates from edit/master.mp4 mtime)
+    for (const u of m.units) if (u.recOn) {
+      const n = d2n(u.recOn);
+      if (n >= t.start) rows += `<span class="tick" title="${u.code} recorded ${fmtD(n)} (from master.mp4 mtime)" style="left:${t.x(n)}px;top:12px"></span><span class="tickl" style="left:${t.x(n) + 3}px;top:12px">${u.code.slice(1)}</span>`;
+    }
+    for (const k of p.tasks) {
+      const [s, e] = taskBox(k);
+      const u = unitOf(m, k.unit);
+      rows += bar(t, s, e, taskCls(k), k.kind === 'recording' ? k.unit.slice(1) : `✎${k.count}`, 10,
+        `${m.id} ${k.unit}: ${k.kind === 'recording' ? `record ${pl(k.count, 'topic')} (~${fmtMin(k.min)} session)` : `write ${pl(k.count, 'script')} (${fmtMin(k.min)})`} · due ${fmtD(k.due)}`);
+      if (k.kind === 'recording' && u.blocked) rows += flag(t, k.due + 1, 'blocked', `▲${u.blocked}`, 0, 1, `${u.blocked} blocked topic(s) inside this recording batch`);
+      if (k.kind === 'recording' && u.stale && !u.blocked) rows += flag(t, k.due + 1, 'stale', `◆${u.stale}`, 0, 1, 'stale topic(s) in this batch');
+    }
+    if (p.float === null) {
+      const left = m.units.filter((u) => !/pk10/.test(u.en));
+      rows += flag(t, TODAY, 'plain', `EN recorded · ${left.map((u) => u.code).join(', ')} still to cue/package (undated)`, 10, 4);
+    }
+    const last = p.tasks.filter((k) => k.kind === 'recording').map((k) => k.due).pop();
+    if (!PROP && last !== undefined && last >= p.delivery - 1) rows += flag(t, p.delivery, 'gap', '0d post-prod', 10, 8, 'Last recording is scheduled the day before delivery: no time for edit, cues, package or ZH');
+    // delivery, projected finish, float bracket
+    if (p.delivery > t.end) rows += `<span class="edge" style="left:${t.w - 90}px;top:10px">delivery ${fmt(p.delivery)} →</span>`;
+    rows += dia(t, p.delivery, 'deliv', 12, `Delivery ${fmtD(p.delivery)}`);
+    if (p.float !== null) {
+      const proj = p.delivery - p.float - (PROP ? ZH_TAIL : 0);
+      const anchor = PROP ? p.anchor : p.delivery;
+      rows += dia(t, proj, `proj ${p.float < 0 ? 'over' : ''}`, 12, `Projected EN finish if you keep pace: ${fmtD(proj)}`);
+      rows += bracket(t, proj, anchor, 30, p.float < 0 ? `${-p.float}d late` : `float ${p.float}d`, p.float < 0);
+    }
+    // ZH sub-lane: actuals
+    const outs = {};
+    for (const u of m.units) { const z = zhState(u); if (z.kind === 'out') (outs[z.since] = outs[z.since] || []).push(u.code); }
+    for (const [since, codes] of Object.entries(outs)) {
+      const s = +since, age = TODAY - s;
+      const over = PROP && age > ZH.turnaround;
+      rows += bar(t, s, TODAY, `zhout ${over ? 'over' : ''}`, `${groupRange(codes)} out ${age}d`, EN + 5, `${codes.join(', ')} exported ${fmtD(s)}; no return date recorded`);
+      if (!PROP) rows += bar(t, TODAY, TODAY + 4, 'open', '?', EN + 5, 'return date unknown: no ZH turnaround in the data');
+    }
+    let dx = 6;
+    const ret = m.units.filter((u) => zhState(u).kind === 'ret');
+    const retBlocked = ret.reduce((a, u) => a + (u.zhBlocked || 0), 0);
+    if (ret.length) { const txt = retBlocked ? `▲${retBlocked} parity fails ${groupRange(ret.map((u) => u.code))}` : `${groupRange(ret.map((u) => u.code))} returned: import`; rows += flag(t, TODAY, retBlocked ? 'blocked' : 'plain', txt, EN + 5, dx + (Object.keys(outs).length && !PROP ? 4 * t.ppd : 0)); dx += txt.length * 5.6 + 12; }
+    const ready = m.units.filter((u) => zhState(u).kind === 'ns' && enCued(u));
+    if (ready.length && !PROP) rows += flag(t, TODAY, 'plain', `ready to send: ${groupRange(ready.map((u) => u.code))}`, EN + 5, dx + (Object.keys(outs).length ? 4 * t.ppd : 0));
+    if (!PROP) rows += flag(t, Math.min(p.delivery, t.end - 6), 'gap', 'ZH undated', EN + 5, 8, 'planning.ts gives ZH no dates: translated/packaged milestones have dueDate null');
+    else {
+      const firstExp = Math.min(...zh.filter((z) => z.exp !== null && z.kind !== 'out').map((z) => z.exp));
+      if (isFinite(firstExp)) rows += bar(t, firstExp, zhEnd, `prop ${zhEnd > p.delivery ? 'over' : ''}`, `proposed ZH: exports from ${fmt(firstExp)}, last packaged ${fmt(zhEnd)}`, EN + 5);
+      rows += dia(t, zhEnd, `proj ${zhEnd > p.delivery ? 'over' : ''}`, EN + 6, `Projected ZH packaged ${fmtD(zhEnd)}`);
+      if (zhEnd > p.delivery) rows += bracket(t, p.delivery, zhEnd, EN + 22, `ZH ${zhEnd - p.delivery}d late`, true);
+    }
+    rows += '</div>';
+  }
+
+  rows += `<div class="lanegroup" style="width:${t.w}px">No delivery date · drawn as "if started today" (forward from today, same estimates)</div>`;
+  for (const { m, p } of undated) {
+    rows += `<div class="row lanehead" style="height:38px"><div class="lab" style="width:${t.labW}px"><div class="t">${m.id} <span style="font-weight:400">${m.title}</span></div>
+      <div class="s">No delivery date · <a href="#" onclick="return false">set one</a> or drag a ◆ onto the runway</div></div>`;
+    rows += bar(t, TODAY, p.asapEnd + 1, 'prop', `~${Math.ceil(p.workDays)} working days of scripts + recording if started today → earliest ${fmtD(p.asapEnd + 1)}`, 6);
+    rows += flag(t, p.asapEnd + 1, 'gap', 'not in "Your days" load', 6, 8);
+    rows += '</div>';
+  }
+
+  h += `<div class="card rw-scroll"><div class="rw" style="width:${t.w}px">${axis(t)}${bg(t, AX)}${rows}</div></div>`;
+
+  // today slice
+  const items = [];
+  for (const { m, p, zh } of dated) {
+    for (const k of p.tasks) {
+      const [s, e] = taskBox(k);
+      const what = k.kind === 'recording' ? `record ${k.unit} (${pl(k.count, 'topic')}, ~${fmtMin(k.min)})` : `write ${pl(k.count, 'script')} for ${k.unit}`;
+      if (k.due < TODAY) items.push(`<span class="red">● ${m.id}</span> ${what}: <b class="red">window closed ${fmtD(k.due)}</b>`);
+      else if (s <= TODAY + 1 && e > TODAY) items.push(`● ${m.id} ${what}: due ${fmtD(k.due)}, under the line now`);
+      const u = unitOf(m, k.unit);
+      if (k.kind === 'recording' && u.blocked && k.due - TODAY <= 14) items.push(`<span class="red">▲ ${m.id} ${k.unit}</span>: ${pl(u.blocked, 'blocked topic')} in a session due ${fmtD(k.due)}`);
+    }
+    for (const u of m.units) {
+      const z = zhState(u);
+      if (z.kind === 'out' && TODAY - z.since >= 14 && u === m.units.find((v) => zhState(v).since === z.since)) items.push(`ZH ${m.id}: batch out since ${fmtD(z.since)} (${TODAY - z.since}d), no return date known`);
+      if (z.kind === 'ret' && u.zhBlocked) items.push(`<span class="red">▲ ZH ${m.id} ${u.code}</span>: ${pl(u.zhBlocked, 'parity failure')} to send back`);
+    }
+  }
+  for (const [n, v] of clashes) items.push(`<span class="red">● ${fmtD(+n)}</span>: two recording sessions planned (${v.join(', ')})`);
+  h += `<div class="card slice"><div class="h"><h2>Under the today-line</h2><div class="muted" style="font-size:12px">What the black line crosses, plus anything whose window has already closed. Lane order, not a queue: click to jump to the bar.</div></div><ul>${items.slice(0, 12).map((x) => `<li>${x}</li>`).join('')}</ul></div>`;
+
+  h += `<div class="legend"><span><i class="bar scripts" style="width:22px;height:10px"></i>write scripts (unit batch)</span><span><i class="bar rec" style="width:12px;height:10px"></i>recording session (1 day)</span>
+    <span><i class="bar over" style="width:16px;height:10px"></i>deadline passed</span><span><i class="dia deliv" style="width:9px;height:9px"></i>delivery</span><span><i class="dia proj" style="width:9px;height:9px"></i>projected finish</span>
+    <span><i class="tick" style="height:10px"></i>actually recorded (file date)</span><span><i class="bar zhout" style="width:22px;height:10px"></i>ZH batch out with translator</span><span><i class="bar prop" style="width:22px;height:10px"></i>proposed / hypothetical</span>
+    <span><span class="flag blocked" style="position:static">▲</span> blocked</span><span><span class="flag stale" style="position:static">◆</span> stale</span><span>shaded columns = weekends (plan ignores them)</span></div>`;
+  return h;
+}
+
+// ---------- screen 2: module runway ----------
+function screen2() {
+  const m = MODULES.find((x) => x.id === 'KV7015');
+  const t = TL(d2n('2026-09-20'), d2n('2026-11-11'), 22, 270);
+  const p = planFor(m, PROP ? ZH_TAIL : 0), zh = zhProjection(m, p);
+  const zhEnd = Math.max(...zh.map((z) => z.end));
+  const sc = p.tasks.filter((k) => k.kind === 'scripts'), rc = p.tasks.filter((k) => k.kind === 'recording');
+  const briefsDue = Math.max(...sc.map((k) => k.due)), recDue = Math.max(...rc.map((k) => k.due));
+  const notDrafted = m.units.reduce((a, u) => a + u.n - u.dr, 0), notRec = m.units.reduce((a, u) => a + u.n - u.rec, 0);
+  const notTr = m.units.filter((u) => !/par|pk/.test(u.zh)).length * 10;
+  let h = `<div class="crumbs"><a href="#" onclick="go('s1');return false">Runway</a> › KV7015</div>
+    <div class="pagehead"><div><h1>KV7015 · Research Methods</h1><div class="sub">80 topics · delivery <b>${fmtD(p.delivery)}</b> <a href="#" onclick="return false">change</a> · owner ${m.owner} · <b class="${p.daysBehind ? 'red' : ''}">${p.daysBehind ? p.daysBehind + 'd behind' : 'float ' + p.float + 'd'}</b>${PROP ? ' (counting the proposed ZH tail)' : ''}</div></div>
+    <div class="tools"><button>Subscribe (.ics)</button><button>Email digest</button></div></div>
+    <div class="tabs"><span class="on">Runway</span><span>Grid</span><span>Documents</span></div>
+    <div class="card headline">
+      <div><div class="v">${notDrafted}</div><div class="l">scripts to write · briefs_done due <b>${fmtD(briefsDue)}</b></div></div>
+      <div><div class="v">${notRec}</div><div class="l">topics to record · recorded due <b>${fmtD(recDue)}</b></div></div>
+      <div><div class="v">${notTr}</div><div class="l">to translate · ${PROP ? `projected <b class="${zhEnd > p.delivery ? 'red' : ''}">${fmtD(zhEnd)}</b>` : '<span class="muted">no due date (data gap)</span>'}</div></div>
+      <div><div class="v">${m.units.filter((u) => u.en !== 'pk10').length * 10 - 0}</div><div class="l">to package (EN+ZH) · <span class="muted">no due date</span></div></div></div>`;
+
+  const AX = 36, EN = 30, ZHH = 24;
+  let rows = '';
+  // chain summary row
+  rows += `<div class="row" style="height:44px"><div class="lab" style="width:${t.labW}px"><div class="t">Whole module</div><div class="s">the back-scheduled chain, one producer</div></div>`;
+  for (const k of p.tasks) { const [s, e] = taskBox(k); rows += bar(t, s, e, taskCls(k), '', 8); }
+  rows += dia(t, p.delivery, 'deliv', 9, 'Delivery');
+  const proj = p.anchor - p.float;
+  rows += dia(t, proj, `proj ${p.float < 0 ? 'over' : ''}`, 9, 'Projected EN finish');
+  rows += bracket(t, proj, p.anchor, 30, p.float < 0 ? `${-p.float}d late` : `float ${p.float}d: the whole chain can slip this much`, p.float < 0);
+  if (PROP) rows += flag(t, p.anchor, 'gap', `ZH tail ${ZH_TAIL}d`, 24, 4, 'edit + translator turnaround + fix + package');
+  rows += '</div>';
+
+  for (const u of m.units) {
+    const z = zhState(u), zp = zh.find((x) => x.unit === u.code);
+    const tasks = p.tasks.filter((k) => k.unit === u.code);
+    const pips = (n, of) => '<span style="letter-spacing:-1px">' + '▮'.repeat(n) + '<span style="color:#d6d6d0">' + '▮'.repeat(of - n) + '</span></span>';
+    const click = u.code === 'U05' ? ` onclick="go('s3')" style="cursor:pointer;width:${t.labW}px"` : ` style="width:${t.labW}px"`;
+    rows += `<div class="row lanehead" style="height:${EN + ZHH}px"><div class="lab"${click}>
+      <div class="t">${u.code} <span style="font-weight:400">${u.title}</span> ${u.blocked ? `<span class="flag blocked" style="position:static">▲${u.blocked}</span>` : ''} ${u.stale ? `<span class="flag stale" style="position:static">◆${u.stale}</span>` : ''}</div>
+      <div class="s">✎ ${pips(u.dr, u.n)} written · ● ${u.rec}/${u.n} recorded</div>
+      <div class="s">ZH: ${{ ns: 'not sent', out: `out since ${z.since ? fmt(z.since) : ''}`, ret: 'returned', par: 'parity checked', pk: 'packaged' }[z.kind]}</div></div>
+      <span class="lang" style="left:${t.labW + 3}px;top:2px">EN</span><span class="lang" style="left:${t.labW + 3}px;top:${EN + 3}px">ZH</span>`;
+    if (u.recOn) {
+      const n = d2n(u.recOn);
+      rows += `<span class="tick" style="left:${t.x(n)}px;top:9px"></span><span class="tickl" style="left:${t.x(n) + 4}px;top:9px">recorded ${fmt(n)}</span>`;
+      const left = u.en === 'pk10' ? null : u.en.startsWith('cu') ? `${10 - +u.en.slice(2)} to cue, 10 to package` : '';
+      if (left) rows += bar(t, TODAY, TODAY + 7, 'tail', `${left} · undated`, 9, 'Post-recording steps have no planned dates');
+    }
+    for (const k of tasks) {
+      const [s, e] = taskBox(k);
+      rows += bar(t, s, e, taskCls(k), k.kind === 'recording' ? `● record ${k.count} · ~${fmtMin(k.min)}` : `✎ ${k.count} scripts · ${fmtMin(k.min)}`, 8, `due ${fmtD(k.due)}`);
+      if (k.kind === 'recording') rows += `<span class="tickl" style="left:${t.x(k.due)}px;top:-1px">${fmtD(k.due)}</span>`;
+    }
+    // ZH
+    if (z.kind === 'out') {
+      rows += bar(t, z.since, TODAY, `zhout ${PROP && TODAY - z.since > ZH.turnaround ? 'over' : ''}`, `out ${TODAY - z.since}d`, EN + 4);
+      if (!PROP) rows += bar(t, TODAY, TODAY + 4, 'open', '? no return date', EN + 4);
+    }
+    if (z.kind === 'par') rows += flag(t, TODAY, 'plain', 'parity ✓ · render + package ZH', EN + 3, 4);
+    if (z.kind === 'ns' && enCued(u) && !PROP) rows += flag(t, TODAY, 'plain', 'cue 3 more, then send', EN + 3, 4);
+    if (PROP && zp.kind !== 'par') {
+      const over = zp.end > p.delivery;
+      if (zp.kind !== 'out') rows += bar(t, zp.exp - (zp.recDue !== null ? ZH.edit : 0), zp.exp, 'prop', 'edit', EN + 4);
+      if (zp.kind !== 'out') rows += bar(t, zp.exp, zp.ret, `prop ${over ? 'over' : ''}`, `translator ${ZH.turnaround}d`, EN + 4);
+      rows += bar(t, zp.ret, zp.end, `prop ${over ? 'over' : ''}`, 'fix·pkg', EN + 4);
+    } else if (!PROP && !u.recOn) rows += flag(t, Math.max(...tasks.map((k) => k.due)) + 1, 'gap', 'ZH: no date', EN + 3, 4);
+    rows += '</div>';
+  }
+  const vl = (n, cls, label) => (n >= t.start && n <= t.end ? `<div class="vline ${cls}" style="left:${t.x(n)}px;top:${AX}px"><span>${label}</span></div>` : '');
+  const lines = vl(briefsDue + 1, '', `briefs_done ${fmt(briefsDue)}`) + vl(recDue + 1, '', `recorded ${fmt(recDue)}`) + vl(p.delivery, 'deliv', `delivery ${fmt(p.delivery)}`);
+  h += `<div class="card rw-scroll"><div class="rw" style="width:${t.w}px">${axis(t)}${bg(t, AX)}${lines}${rows}</div></div>`;
+  h += `<div class="note">Read it like this: bars left of the black line that are still drawn are late; the bracket on the top row is the module's float. The chain is strictly serial (one producer, one unit at a time), so <b>every outstanding task is on the critical path</b> and they all share the same float. A slip anywhere moves everything to its right.</div>`;
+  h += `<div class="note gap"><b>Things the geometry exposes in today's plan:</b> U05's scripts and its recording are both due ${fmtD(rc.find((k) => k.unit === 'U05').due)} (the 4 scripts cost under a day, so the backward walk never steps back). U06's session lands on ${fmtD(rc.find((k) => k.unit === 'U06').due)}: the plan has no working calendar. U08 records the day before delivery, which leaves 0 days for edit, cues, package and all of ZH.</div>`;
+  return h;
+}
+
+// ---------- screen 3: unit runway ----------
+function screen3() {
+  const m = MODULES.find((x) => x.id === 'KV7015'), u = unitOf(m, 'U05');
+  const p = planFor(m, PROP ? ZH_TAIL : 0);
+  const rec = p.tasks.find((k) => k.unit === 'U05' && k.kind === 'recording');
+  const scr = p.tasks.find((k) => k.unit === 'U05' && k.kind === 'scripts');
+  const t = TL(d2n('2026-10-04'), d2n('2026-11-11'), 26, 400);
+  const S = rec.due;
+  // topic needs before the session: written → validated (fresh, passing) → recording script (fresh)
+  const TOP = [
+    ['T01', 'Operationalising concepts', 6, ['ok', 'ok', 'ok']],
+    ['T02', 'Scales and indices', 6, ['ok', 'ok', 'ok']],
+    ['T03', 'Likert items', 5, ['ok', 'ok', 'stale']],
+    ['T04', 'Validity', 7, ['ok', 'blocked', 'need']],
+    ['T05', 'Reliability coefficients', 6, ['ok', 'need', 'need']],
+    ['T06', 'Measurement error', 6, ['ok', 'ok', 'need']],
+    ['T07', 'Standardised instruments', 6, ['need', 'need', 'need']],
+    ['T08', 'Translating instruments', 6, ['need', 'need', 'need']],
+    ['T09', 'Pilot testing', 6, ['need', 'need', 'need']],
+    ['T10', 'Reporting measures', 6, ['need', 'need', 'need']],
+  ];
+  const STEP = ['write', 'validate', 'rec. script'];
+  const ready = TOP.filter((x) => x[3].every((s) => s === 'ok')).length;
+  const content = TOP.reduce((a, x) => a + x[2], 0);
+  let h = `<div class="crumbs"><a href="#" onclick="go('s1');return false">Runway</a> › <a href="#" onclick="go('s2');return false">KV7015</a> › U05</div>
+    <div class="pagehead"><div><h1>U05 · Measurement</h1><div class="sub">Recording session <b>${fmtD(S)}</b> (${S - TODAY} days) · scripts due <b>${fmtD(scr.due)}</b> · shares KV7015's <b class="${p.float < 0 ? 'red' : ''}">${p.float < 0 ? -p.float + 'd delay' : p.float + 'd float'}</b></div></div></div>`;
+  h += '<div class="sidebox"><div>';
+  const AX = 36, RH = 34;
+  let rows = '';
+  rows += `<div class="row" style="height:30px"><div class="lab" style="width:${t.labW}px"><div class="t">Session readiness</div><div class="s">${ready} of 10 topics ready to record</div></div>`;
+  rows += bar(t, TODAY, scr.due + 1, scr.due < TODAY ? 'over' : 'float', `prep window: ${scr.due - TODAY + 1} days to make 10 topics ready`, 9);
+  rows += '</div>';
+  for (const [code, title, min, st] of TOP) {
+    const isBlocked = st.includes('blocked'), isStale = st.includes('stale');
+    const allOk = st.every((s) => s === 'ok');
+    const chips = st.map((s, i) => `<span class="chip ${s === 'ok' ? 'ok' : s}">${STEP[i]}${s === 'blocked' ? ': 1,180 words, max 960' : s === 'stale' ? ': older than topic.md' : ''}</span>`).join('');
+    rows += `<div class="row" style="height:${RH}px"><div class="lab" style="width:${t.labW}px"><div><b>${code}</b> ${title} <span class="muted">${min} min</span></div><div>${chips}</div></div>`;
+    if (allOk) rows += flag(t, TODAY, 'plain', '✓ ready', 9, 4);
+    else {
+      // remaining prep, docked against the scripts deadline (the slot planning.ts gives it)
+      const work = st[0] === 'need' ? BRIEF_MIN : 0;
+      const e = scr.due + 1, s = e - Math.max(work / 60 / HOURS, 0.25);
+      rows += bar(t, TODAY, s, 'float', '', 12, 'float: could be done any day in here');
+      rows += bar(t, s, e, isBlocked ? 'blk' : (scr.due < TODAY ? 'over' : 'scripts'), work ? `${work}m` : '', 9, work ? 'write: 20 min estimate' : 'validate / script: minutes');
+      if (isBlocked) rows += flag(t, TODAY, 'blocked', '▲ needs you: word count over · not estimated', 9, 4);
+      if (isStale) rows += flag(t, TODAY, 'stale', '◆ re-run Recording script', 9, 4);
+    }
+    rows += bar(t, S, S + 1, `rec ${S < TODAY ? 'over' : ''}`, '●', 9);
+    // after the session: EN and ZH tails
+    if (PROP) {
+      rows += bar(t, S + 1, S + 1 + ZH.edit, 'prop', 'edit', 4) + bar(t, S + 1 + ZH.edit, S + 1 + ZH.edit + ZH.turnaround, `prop ${S + 1 + ZH.edit + ZH.turnaround + 2 > p.delivery ? 'over' : ''}`, 'ZH out', 4)
+        + bar(t, S + 1 + ZH.edit + ZH.turnaround, S + 3 + ZH.edit + ZH.turnaround, `prop ${S + 3 + ZH.edit + ZH.turnaround > p.delivery ? 'over' : ''}`, 'fix·pkg', 4);
+      rows += bar(t, S + 1 + ZH.edit, S + 2 + ZH.edit, 'prop', 'cues·pkg', 19);
+    } else {
+      rows += bar(t, S + 1, S + 6, 'tail', 'EN: edit → cues → package (undated)', 3) + bar(t, S + 1, S + 6, 'open', 'ZH: export → translator → parity (undated)', 18);
+    }
+    rows += '</div>';
+  }
+  const vl = (n, cls, label) => `<div class="vline ${cls}" style="left:${t.x(n)}px;top:${AX}px"><span>${label}</span></div>`;
+  h += `<div class="card rw-scroll"><div class="rw" style="width:${t.w}px">${axis(t)}${bg(t, AX)}${vl(S, '', `● session ${fmt(S)}`)}${vl(p.delivery, 'deliv', `module delivery ${fmt(p.delivery)}`)}${rows}</div></div>`;
+  h += `<div class="note">Each topic's remaining prep is docked against the slot planning.ts gives the unit's scripts (${fmtD(scr.due)}); the dotted band to its left is the slack it can use. Steps are what <code>bcn status</code> already reports (stage, stale, blocked). Nothing here is computed by the UI except placing them on the calendar.</div></div>`;
+  // session sheet
+  h += `<div class="card session" style="padding:12px"><h2>Session sheet</h2><dl>
+    <dt>Date</dt><dd><b>${fmtD(S)}</b> (planned, not booked)</dd>
+    <dt>Topics</dt><dd>10 · ${content} min of content</dd>
+    <dt>Session length</dt><dd>~${fmtMin(content * REC_MULT)} (1.5× content)</dd>
+    <dt>Ready now</dt><dd>${ready} / 10</dd>
+    <dt>Prep left</dt><dd>4 scripts to write (1h20) · 2 to validate · 1 blocked · 4 recording scripts</dd>
+    <dt>After session</dt><dd class="muted">EN post-production and ZH have no dates yet</dd></dl>
+    <div class="acts"><button>Intake U05 scripts</button><button>Validate U05</button><button>Recording script (U05)</button><button>Teleprompter</button><button>Fix T04 in editor</button></div>
+    <div class="muted" style="font-size:11px;margin-top:8px">Each button queues the existing bcn job for unit scope, with the usual confirm dialog. Progress shows in the Jobs tray.</div></div>`;
+  h += '</div>';
+  return h;
+}
+
+function render() {
+  document.getElementById('s1').innerHTML = screen1();
+  document.getElementById('s2').innerHTML = screen2();
+  document.getElementById('s3').innerHTML = screen3();
+}
+function go(id) {
+  document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('on', s.id === id));
+  document.querySelectorAll('.mockbar button').forEach((b) => b.classList.toggle('on', b.dataset.s === id));
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll('.mockbar button').forEach((b) => b.addEventListener('click', () => go(b.dataset.s)));
+document.getElementById('zhprop').addEventListener('change', (e) => { PROP = e.target.checked; render(); });
+render();
+(() => { const hsh = location.hash.slice(1).split(','); if (hsh.includes('prop')) { document.getElementById('zhprop').checked = true; PROP = true; render(); } const s = hsh.find((x) => /^s\d$/.test(x)); if (s) go(s); })();
+
+</script>
+</body>
+</html>
