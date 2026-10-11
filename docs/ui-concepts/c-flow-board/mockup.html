@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flow Board mockup</title>
+<style>
+:root {
+  --bg: #f6f6f4; --panel: #ffffff; --line: #dcdcd8; --line2: #ebebe8; --ink: #1d1d1b; --ink2: #5b5b57; --ink3: #8d8d88;
+  --red: #c62828; --red-bg: #fdecea; --amber: #b26a00; --amber-bg: #fff4e0; --sel: #1d1d1b;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.35 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+header.app { display: flex; align-items: center; gap: 20px; padding: 0 16px; height: 44px; background: #2b2b29; color: #fff; }
+header.app b { font-size: 14px; }
+header.app nav a { color: #cfcfca; text-decoration: none; margin-right: 14px; font-size: 13px; }
+header.app nav a.on { color: #fff; border-bottom: 2px solid #fff; padding-bottom: 11px; }
+header.app .sp { flex: 1; }
+.screen-tabs { display: flex; gap: 8px; padding: 10px 16px 0; }
+.screen-tabs button { font: inherit; border: 1px solid var(--line); background: var(--panel); padding: 6px 12px; border-radius: 4px; cursor: pointer; }
+.screen-tabs button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.screen { display: none; padding: 12px 16px 70px; }
+.screen.on { display: block; }
+.note { color: var(--ink2); font-size: 12px; max-width: 1100px; margin: 0 0 10px; }
+
+/* top strip */
+.strip { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; margin-bottom: 10px; }
+.kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; min-width: 150px; }
+.kpi .v { font-size: 22px; font-weight: 700; }
+.kpi .l { color: var(--ink2); font-size: 12px; }
+.kpi.alert .v { color: var(--red); }
+.howto { background: var(--panel); border: 1px dashed var(--line); border-radius: 6px; padding: 8px 12px; font-size: 12px; color: var(--ink2); flex: 1; min-width: 300px; }
+.howto ol { margin: 4px 0 0 18px; padding: 0; }
+
+.filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+.filters .lbl { font-weight: 600; margin-right: 4px; }
+.chip { border: 1px solid var(--line); background: var(--panel); border-radius: 14px; padding: 3px 10px; font-size: 12px; cursor: default; white-space: nowrap; }
+.chip.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.chip.behind { border-color: var(--red); color: var(--red); }
+.chip.on.behind { background: var(--red); color: #fff; }
+.chip small { opacity: .75; }
+.filters .sp { flex: 1; }
+label.tog { font-size: 12px; display: inline-flex; gap: 4px; align-items: center; }
+
+/* board */
+.boardwrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.board { display: grid; min-width: 1320px; grid-template-columns: 74px repeat(6, minmax(116px, 1fr) 96px) minmax(116px, 1fr); }
+.lanehead { grid-column: 1 / -1; padding: 8px 10px; font-weight: 700; border-top: 1px solid var(--line); background: #fafaf8; display: flex; gap: 12px; align-items: baseline; }
+.lanehead:first-child { border-top: 0; }
+.lanehead span { font-weight: 400; color: var(--ink2); font-size: 12px; }
+.rowlbl { padding: 8px 8px; font-size: 11px; color: var(--ink2); border-right: 1px solid var(--line2); }
+.rowlbl b { display: block; color: var(--ink); font-size: 12px; }
+.colh { padding: 6px 8px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink2); border-bottom: 1px solid var(--line2); }
+.colh.deliv { color: var(--ink); font-weight: 700; }
+.gh { border-bottom: 1px solid var(--line2); }
+.shelf { min-height: 40px; padding: 5px 6px; border-bottom: 1px solid var(--line2); background: repeating-linear-gradient(135deg, #fff, #fff 6px, #fbf7f7 6px, #fbf7f7 12px); }
+.shelf.gap { background: #fff; }
+.shelf .hi { display: block; border: 1px solid var(--red); background: var(--red-bg); color: var(--red); border-radius: 4px; padding: 3px 6px; margin-bottom: 4px; font-size: 11px; }
+.shelf .hi b { color: var(--ink); }
+.shelf .hi code { font-size: 10px; color: var(--ink2); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shelf .hi { overflow: hidden; }
+.shelf .hi .act { float: right; text-decoration: underline; cursor: pointer; }
+.cell { padding: 6px; border-right: 1px solid var(--line2); min-height: 120px; vertical-align: top; }
+.cell.dim { background: #f7f7f5; color: var(--ink3); }
+.cellhead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; cursor: pointer; }
+.cellhead .n { font-size: 20px; font-weight: 700; }
+.cellhead .w { font-size: 10px; color: var(--ink2); }
+.cell.pile .cellhead { background: repeating-linear-gradient(90deg, #eee 0 3px, #fff 3px 6px); border-radius: 3px; padding: 0 3px; }
+.cell.pile .cellhead .w { color: var(--ink); font-weight: 700; }
+.stalebar { display: block; font-size: 11px; color: var(--amber); background: var(--amber-bg); border: 1px solid #f0c27a; border-radius: 3px; padding: 1px 5px; margin-bottom: 5px; }
+.card { border: 1px solid var(--line); border-left: 3px solid #b9b9b4; border-radius: 4px; padding: 3px 6px; margin-bottom: 4px; background: #fff; cursor: pointer; }
+.card .t { display: flex; justify-content: space-between; font-weight: 600; }
+.card .m { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 6px; font-size: 11px; color: var(--ink2); }
+.card .nt { display: block; font-size: 10px; color: var(--ink2); font-style: italic; }
+.card.late { border-left-color: var(--red); }
+.card.late .sl { color: var(--red); font-weight: 700; }
+.card .age { font-weight: 700; color: var(--ink); }
+.card.faded { opacity: .28; }
+.card.trace { outline: 2px dashed var(--ink); outline-offset: 1px; }
+.more { font-size: 11px; color: var(--ink2); padding: 2px 4px; }
+.gate { padding: 8px 4px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; text-align: center; position: relative; border-right: 1px solid var(--line2); }
+.gate::before { content: ""; position: absolute; left: 0; right: 0; top: 30px; border-top: 1px dashed #c8c8c3; z-index: 0; }
+.gate > * { position: relative; z-index: 1; }
+.gate .g { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 5px 5px 6px; width: 88px; }
+.gate .g.human { border-style: dashed; }
+.gate .g.dep { border-style: dotted; color: var(--ink2); }
+.gate .ic { font-size: 11px; color: var(--ink2); }
+.gate .c { font-weight: 700; font-size: 12px; }
+.gate .s { font-size: 10px; color: var(--ink2); }
+.gate .s.late { color: var(--red); font-weight: 700; }
+.gate button { margin-top: 4px; font: inherit; font-size: 11px; padding: 3px 6px; border: 1px solid var(--ink); background: var(--ink); color: #fff; border-radius: 3px; cursor: pointer; width: 100%; }
+.gate button[disabled] { background: #eee; border-color: #ccc; color: #999; cursor: default; }
+.gate .human button, .gate .dep button { background: #fff; color: var(--ink); }
+.gate .arrow { font-size: 16px; color: #b0b0aa; line-height: 1; margin-top: 2px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 11px; color: var(--ink2); margin-top: 8px; }
+.legend i { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; margin-right: 4px; border: 1px solid var(--line); }
+
+.tray { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--line); padding: 8px 16px; font-size: 12px; display: flex; gap: 18px; align-items: center; }
+.tray .bar { display: inline-block; width: 80px; height: 6px; background: #eee; border-radius: 3px; vertical-align: middle; margin: 0 4px; }
+.tray .bar b { display: block; height: 6px; background: #555; border-radius: 3px; }
+
+/* drill-down */
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 12px; align-items: start; }
+.drawer { background: var(--panel); border: 1px solid var(--ink); border-radius: 6px; box-shadow: 0 4px 18px rgba(0,0,0,.08); }
+.drawer h3 { margin: 0; padding: 10px 12px; font-size: 14px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
+.drawer h3 span { font-weight: 400; color: var(--ink2); font-size: 12px; }
+.drawer .sec { padding: 10px 12px; border-bottom: 1px solid var(--line2); }
+.drawer .gatebox { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.drawer button { font: inherit; font-size: 12px; padding: 4px 9px; border: 1px solid var(--ink); background: var(--ink); color: #fff; border-radius: 3px; cursor: pointer; }
+.drawer button.o { background: #fff; color: var(--ink); }
+table.t { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.t th { text-align: left; font-weight: 400; color: var(--ink2); font-size: 11px; padding: 4px 4px; border-bottom: 1px solid var(--line); }
+table.t td { padding: 5px 4px; border-bottom: 1px solid var(--line2); vertical-align: top; }
+table.t tr.blk td { background: var(--red-bg); }
+table.t tr.blk td.why { color: var(--red); }
+table.t tr.grp td { background: #fafaf8; font-weight: 700; font-size: 11px; color: var(--ink2); }
+.pips { letter-spacing: 1px; font-size: 9px; color: var(--ink2); white-space: nowrap; }
+.tracebox { background: #fafaf8; border: 1px dashed var(--ink); border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; font-size: 12px; }
+.tracebox b { font-size: 13px; }
+.mono { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+.late-t { color: var(--red); font-weight: 700; }
+a { color: inherit; }
+</style>
+</head>
+<body>
+<header class="app">
+  <b>NU Content Studio</b>
+  <nav>
+    <a class="on" href="#">Board</a><a href="#">Verification</a><a href="#">Transfer</a><a href="#">Jobs</a>
+  </nav>
+  <span class="sp"></span>
+  <span style="font-size:12px;color:#cfcfca">Sun 11 Oct 2026 · live</span>
+</header>
+
+<div class="screen-tabs">
+  <button class="on" data-s="s1">1 · Landing: programme board</button>
+  <button data-s="s2">2 · Drill-down: KV7015 filtered + cell drawer + unit trace</button>
+</div>
+
+<!-- ============================ SCREEN 1 ============================ -->
+<section class="screen on" id="s1">
+  <p class="note">Mockup. 640 topics in 8 modules. Columns are stages, with delivery on the right. Each language is a swimlane. ZH is right-aligned so that both lanes end at the same delivery edge. The red shelf above each lane holds work pulled out of the flow because it needs you. Each gutter between columns is a <b>gate</b>, showing what moves the work across it and how much is ready to go. Cards are modules here, and units once you filter to a module.</p>
+  <div class="strip" id="kpis1"></div>
+  <div class="filters" id="filters1"></div>
+  <div class="boardwrap"><div class="board" id="board1"></div></div>
+  <div class="legend">
+    <span><i style="border-left:3px solid var(--red)"></i>card with negative slack: its planning.ts deadline has passed</span>
+    <span><i style="background:var(--red-bg);border-color:var(--red)"></i>needs a human (blocked, unplaceable cue, unproofread, parity fail)</span>
+    <span><i style="background:var(--amber-bg);border-color:#f0c27a"></i>stale: built from older inputs</span>
+    <span><i style="background:repeating-linear-gradient(90deg,#ddd 0 3px,#fff 3px 6px)"></i>pile-up over WIP limit</span>
+    <span>⚙ machine gate: one click, runs unattended &nbsp; ✋ human gate: your hours &nbsp; ⇢ waiting on someone else</span>
+    <span><b>⏱ 26d</b> = oldest item has sat in this column 26 days</span>
+  </div>
+</section>
+
+<!-- ============================ SCREEN 2 ============================ -->
+<section class="screen" id="s2">
+  <p class="note">Filtered to KV7015 (delivery 14 Oct, 1 day behind). Cards are now <b>units</b>, the recording batch that planning.ts schedules by. Each card carries its own deadline. Clicking card U07 traces that unit across both lanes. Clicking the EN · Recorded cell opens the drawer: its topics, why two of them are stuck, and the gate action scoped to this cell.</p>
+  <div class="strip" id="kpis2"></div>
+  <div class="filters" id="filters2"></div>
+  <div class="split">
+    <div>
+      <div class="tracebox">
+        <b>Unit trace: U07 Measurement</b> · recording deadline <span class="late-t">10 Oct (−1d)</span> · session held 9 Oct. The editor has delivered 4 of 8 masters, and 4 are still with the editor (<span class="mono">next: await_recording</span>). Mandarin can't start until the unit is cued and proofread.
+        <span style="float:right"><a href="#">clear trace</a></span>
+      </div>
+      <div class="boardwrap"><div class="board" id="board2" style="min-width:1180px"></div></div>
+    </div>
+    <aside class="drawer">
+      <h3>EN · Recorded · KV7015 <span>10 topics · cell drill-down</span></h3>
+      <div class="sec gatebox">
+        <div><b>⚙ Gate Recorded → Cued</b><br><span style="color:var(--ink2);font-size:12px">8 ready · <span class="mono">next: cues</span> · ordered U07 first (−1d), then U06 (+3d)</span></div>
+        <button>Run cues on 8</button>
+      </div>
+      <div class="sec">
+        <table class="t">
+          <thead><tr><th>Topic</th><th>EN</th><th>ZH</th><th>In column</th><th>Next / why stuck</th></tr></thead>
+          <tbody>
+            <tr class="grp"><td colspan="5">U07 Measurement · slack −1d</td></tr>
+            <tr><td><a href="#">U07-T01</a> Validity</td><td class="pips">●●●●●○○</td><td class="pips">○○○○○○○</td><td>1d</td><td class="mono">cues</td></tr>
+            <tr><td><a href="#">U07-T02</a> Reliability</td><td class="pips">●●●●●○○</td><td class="pips">○○○○○○○</td><td>1d</td><td class="mono">cues</td></tr>
+            <tr class="blk"><td><a href="#">U07-T03</a> Likert scales</td><td class="pips">●●●●●○○</td><td class="pips">○○○○○○○</td><td>1d</td><td class="why">CUE_LOW_CONFIDENCE: break 2→3, conf 0.62 · <a href="#">open at boundary</a></td></tr>
+            <tr><td><a href="#">U07-T04</a> Instruments</td><td class="pips">●●●●●○○</td><td class="pips">○○○○○○○</td><td>1d</td><td class="mono">cues</td></tr>
+            <tr class="grp"><td colspan="5">U06 Sampling · slack +3d (module delivery)</td></tr>
+            <tr><td><a href="#">U06-T01</a> Populations and samples</td><td class="pips">●●●●●○○</td><td class="pips">○○○○○○○</td><td>2d</td><td class="mono">cues</td></tr>
+            <tr class="blk"><td><a href="#">U06-T02</a> Probability sampling</td><td class="pips">●●●●●○○</td><td class="pips">○○○○○○○</td><td>2d</td><td class="why">CUE_LOW_CONFIDENCE: edit cut across break 4→5, conf 0.41 · <a href="#">open at boundary</a></td></tr>
+            <tr><td><a href="#">U06-T03</a> Purposive sampling</td><td class="pips">●●●●●○○</td><td class="pips">○○○○○○○</td><td>2d</td><td class="mono">cues</td></tr>
+            <tr><td><a href="#">U06-T04</a> Sample size</td><td class="pips">●●●●●○○</td><td class="pips">○○○○○○○</td><td>2d</td><td class="mono">cues</td></tr>
+            <tr><td><a href="#">U06-T05</a> Saturation</td><td class="pips">●●●●●○○</td><td class="pips">○○○○○○○</td><td>2d</td><td class="mono">cues</td></tr>
+            <tr><td><a href="#">U06-T06</a> Sampling bias</td><td class="pips">●●●●●○○</td><td class="pips">○○○○○○○</td><td>2d</td><td class="mono">cues</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="sec" style="font-size:12px;color:var(--ink2)">
+        Running cues on the ready 8 will create proofreading work: suspected mis-transcriptions land on the shelf above <b>Cued</b>, and Mandarin export stays locked until they're reviewed. The two red rows are fixed in the Topic page player (set to playhead). <br><br>
+        <button class="o">Select all 10 → bulk…</button> <button class="o">Open in grid view</button> <button class="o">Recording scripts for U07 (bcn script)</button>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<div class="tray">
+  <b>Jobs</b>
+  <span>render KV7012/U05 <span class="bar"><b style="width:62%"></b></span>62%</span>
+  <span>validate KV7014 (14 topics) <span class="bar"><b style="width:20%"></b></span>20%</span>
+  <span style="color:var(--ink2)">3 queued, ordered by slack: cues KV7015/U07 · cues KV7015/U06 · package KV7011</span>
+  <span class="sp" style="flex:1"></span><a href="#">all jobs</a>
+</div>
+
+<script>
+// ---- fake but consistent data (sums to 640 topics per lane) ----------------------------------
+const EN_COLS = ['Planned', 'Drafted', 'Validated', 'Rendered', 'Recorded', 'Cued', 'Packaged'];
+// ZH "Not sent" is split by bcn's own zh.next: null (waiting on EN) vs translation_export (ready).
+const ZH_COLS = ['Not sent · waiting on EN', 'Not sent · ready', 'Out for translation', 'Returned', 'Parity checked', 'Rendered', 'Packaged'];
+const MODS = [
+  // code, title, delivery, slack pre-record (min unit task) / post (delivery - today), daysBehind
+  { m: 'KV7011', t: 'Professional Practice', d: '30 Oct', pre: 17, post: 19, behind: 0, en: [0, 0, 0, 4, 6, 12, 50], zh: [4, 6, 10, 2, 8, 2, 40] },
+  { m: 'KV7012', t: 'Data Literacy', d: '13 Nov', pre: 23, post: 33, behind: 0, en: [4, 8, 6, 18, 9, 15, 20], zh: [38, 10, 22, 4, 4, 2, 0] },
+  { m: 'KV7013', t: 'Ethics & Governance', d: '27 Nov', pre: 37, post: 47, behind: 0, en: [10, 9, 8, 20, 8, 12, 9], zh: [49, 12, 10, 3, 2, 0, 0] },
+  { m: 'KV7014', t: 'Qualitative Methods', d: '11 Dec', pre: 45, post: 61, behind: 0, en: [22, 14, 10, 16, 6, 8, 8], zh: [64, 10, 6, 4, 0, 0, 0] },
+  { m: 'KV7015', t: 'Research Methods', d: '14 Oct', pre: [2, 1, 1, -1], post: 3, behind: 1, en: [6, 4, 2, 14, 10, 16, 26], zh: [36, 4, 14, 4, 6, 2, 12] },
+  { m: 'KV7016', t: 'Leading Change', d: '15 Jan', pre: 80, post: 96, behind: 0, en: [24, 12, 6, 14, 8, 8, 16], zh: [58, 12, 8, 2, 4, 4, 0] },
+  { m: 'KV7017', t: 'Health Economics', d: '5 Feb', pre: 100, post: 117, behind: 0, en: [44, 10, 4, 10, 0, 0, 12], zh: [68, 0, 12, 0, 0, 0, 0] },
+  { m: 'KV7018', t: 'Dissertation Skills', d: null, pre: null, post: null, behind: 0, en: [32, 4, 2, 0, 0, 0, 44], zh: [38, 2, 6, 2, 10, 2, 22] },
+];
+// Oldest age in column (days), where notable.
+const AGE = { 'KV7013:en:3': 34, 'KV7014:en:1': 18, 'KV7012:zh:2': 26, 'KV7011:en:5': 12, 'KV7017:zh:2': 21, 'KV7015:zh:2': 19, 'KV7016:en:3': 15 };
+const HUMAN = [
+  { l: 'en', c: 1, m: 'KV7014', n: 4, why: 'validate errors', code: 'MD_FORBIDDEN, MD_DATE', act: 'fix' },
+  { l: 'en', c: 1, m: 'KV7013', n: 3, why: 'validate errors', code: 'MD_DEICTIC', act: 'fix' },
+  { l: 'en', c: 3, m: 'KV7017', n: 6, why: 'cloud-only files', code: 'FS_NOT_HYDRATED', act: 'how' },
+  { l: 'en', c: 3, m: 'KV7016', n: 2, why: 'asset request open', code: 'assets.md', act: 'open' },
+  { l: 'en', c: 4, m: 'KV7015', n: 2, why: 'cue break unplaceable', code: 'CUE_LOW_CONFIDENCE', act: 'place' },
+  { l: 'en', c: 4, m: 'KV7012', n: 2, why: 'cue break unplaceable', code: 'CUE_LOW_CONFIDENCE', act: 'place' },
+  { l: 'en', c: 5, m: 'KV7013', n: 2, why: 'to proofread (✎5)', code: 'CUE_MISTRANSCRIPTION', act: 'review' },
+  { l: 'en', c: 5, m: 'KV7012', n: 2, why: 'to proofread (✎3)', code: 'CUE_MISTRANSCRIPTION', act: 'review' },
+  { l: 'en', c: 6, m: 'KV7018', n: 1, why: 'sync conflict copy', code: 'FS_SYNC_CONFLICT', act: 'resolve' },
+  { l: 'zh', c: 3, m: 'KV7015', n: 4, why: 'parity fails, back to translator', code: 'MD_PARITY_COUNT', act: 'message' },
+  { l: 'zh', c: 4, m: 'KV7018', n: 2, why: 'ZH text over safe area', code: 'RENDER_SAFE_AREA', act: 'fix' },
+];
+const STALE = [
+  { l: 'en', c: 5, m: 'KV7011', n: 6 }, { l: 'en', c: 3, m: 'KV7013', n: 3 }, { l: 'en', c: 6, m: 'KV7016', n: 2 }, { l: 'zh', c: 3, m: 'KV7012', n: 2 },
+];
+const WIP = { 'en:3': 60, 'en:4': 40, 'zh:2': 60 };
+
+// Gates: what moves work from column i to i+1. Machine gates run bcn's own `next` step.
+const GATES = {
+  en: [
+    { k: 'human', name: 'Write', verb: 'to write', btn: 'Intake…', sub: 'next: KV7015 U10 scripts, 13 Oct' },
+    { k: 'machine', name: 'validate', verb: 'ready', btn: 'Validate' },
+    { k: 'machine', name: 'render', verb: 'ready', btn: 'Render' },
+    { k: 'human', name: 'Record + edit', verb: 'await camera', btn: 'Sessions…', sub: 'next: KV7015 U07', late: '−1d' },
+    { k: 'machine', name: 'cues', verb: 'ready', btn: 'Run cues' },
+    { k: 'machine', name: 'subtitles → compose → package', verb: 'ready', btn: 'Package' },
+  ],
+  zh: [
+    { k: 'dep', name: 'EN cued + proofread', verb: 'locked', btn: null, sub: 'unlocks itself' },
+    { k: 'machine', name: 'translation export', verb: 'ready', btn: 'Export' },
+    { k: 'dep', name: 'Translator', verb: 'out', btn: 'Import return…', sub: 'oldest 26d (KV7012)' },
+    { k: 'machine', name: 'validate + subtitles zh', verb: 'ready', btn: 'Check parity' },
+    { k: 'machine', name: 'render zh', verb: 'ready', btn: 'Render ZH' },
+    { k: 'machine', name: 'compose + package zh', verb: 'ready', btn: 'Package ZH' },
+  ],
+};
+
+const sum = (a) => a.reduce((x, y) => x + y, 0);
+const slackOf = (mod, l, c) => {
+  if (mod.pre === null) return null;
+  if (l === 'en' && c <= 3) return Array.isArray(mod.pre) ? mod.pre[c] : mod.pre;
+  return mod.post;
+};
+const fmtSlack = (s) => (s === null ? 'no date' : (s < 0 ? `${s}d` : `+${s}d`));
+const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; };
+
+function renderBoard(target, opts) {
+  const b = document.getElementById(target);
+  const lanes = ['en', 'zh'];
+  for (const l of lanes) {
+    const cols = l === 'en' ? EN_COLS : ZH_COLS;
+    const tot = cols.map((_, c) => sum(opts.items(l, c).map((x) => x.n)));
+    const label = l === 'en'
+      ? `English <span>${sum(tot)} topics · ${tot[6]} packaged</span>`
+      : `Mandarin <span>${sum(tot)} topics · ${tot[6]} packaged · right-aligned: the same distance from delivery as the English column above</span>`;
+    b.appendChild(el('div', 'lanehead', label));
+    // column headers
+    b.appendChild(el('div', 'rowlbl', ''));
+    cols.forEach((name, c) => {
+      b.appendChild(el('div', 'colh' + (c === 6 ? ' deliv' : ''), name + (c === 6 ? ' ▸ delivery' : '')));
+      if (c < 6) b.appendChild(el('div', 'gh', ''));
+    });
+    // human shelf
+    b.appendChild(el('div', 'rowlbl', '<b>✋ Needs you</b>pulled out of flow'));
+    cols.forEach((_, c) => {
+      const hs = opts.human(l, c);
+      const s = el('div', 'shelf' + (hs.length ? '' : ' gap'));
+      hs.forEach((h) => s.appendChild(el('span', 'hi', `<span class="act">${h.act}</span><b>${h.m} ×${h.n}</b> ${h.why}<code>${h.code}</code>`)));
+      b.appendChild(s);
+      if (c < 6) b.appendChild(el('div', 'shelf gap', ''));
+    });
+    // flow row
+    b.appendChild(el('div', 'rowlbl', '<b>Flow</b>cards sorted by slack, least first'));
+    cols.forEach((_, c) => {
+      const items = opts.items(l, c).filter((x) => x.n > 0)
+        .sort((a, z) => (a.slack ?? 1e9) - (z.slack ?? 1e9));
+      const wip = WIP[`${l}:${c}`];
+      const over = wip && tot[c] > wip;
+      const isDep = l === 'zh' && c === 0;
+      const cell = el('div', 'cell' + (over ? ' pile' : '') + (isDep ? ' dim' : '') + (opts.drawer === `${l}:${c}` ? ' sel' : ''));
+      if (opts.drawer === `${l}:${c}`) cell.style.outline = '2px solid var(--ink)';
+      cell.appendChild(el('div', 'cellhead', `<span class="n">${tot[c]}</span><span class="w">${over ? `▲ over ${wip}` : (wip ? `limit ${wip}` : '')}</span>`));
+      const st = opts.stale(l, c);
+      if (st) cell.appendChild(el('span', 'stalebar', `↻ ${st} stale · rebuild`));
+      const max = opts.max || 5;
+      items.slice(0, max).forEach((x) => {
+        const late = x.slack !== null && x.slack < 0;
+        const faded = opts.focus && x.slack !== null && x.slack > 14 ? ' faded' : '';
+        const tr = opts.trace && x.key === opts.trace ? ' trace' : '';
+        const age = x.age ? `<span class="age">⏱ ${x.age}d</span>` : '<span></span>';
+        cell.appendChild(el('div', 'card' + (late ? ' late' : '') + faded + tr,
+          `<div class="t"><span>${x.key}</span><span>${x.n}</span></div><div class="m"><span class="sl">${x.due ? x.due + ' ' : ''}${fmtSlack(x.slack)}</span>${age}</div>${x.note ? `<span class="nt">${x.note}</span>` : ''}`));
+      });
+      if (items.length > max) {
+        const rest = items.slice(max);
+        cell.appendChild(el('div', 'more', `+${rest.length} more · ${sum(rest.map((r) => r.n))} topics`));
+      }
+      b.appendChild(cell);
+      if (c < 6) {
+        const g = GATES[l][c];
+        const hum = sum(opts.human(l, c).map((h) => h.n));
+        const ready = tot[c] - hum - (opts.stale(l, c) || 0);
+        const gs = opts.gateSub && opts.gateSub[`${l}:${c}`];
+        const icon = g.k === 'machine' ? '⚙' : (g.k === 'human' ? '✋' : '⇢');
+        const count = g.k === 'dep' && c === 0 ? `${tot[c]} ${g.verb}` : `${g.k === 'machine' ? ready : tot[c]} ${g.verb}`;
+        const sub = gs || g.sub || '';
+        const lateSub = (gs ? false : !!g.late);
+        const gate = el('div', 'gate', `<div class="g ${g.k}"><div class="ic">${icon} ${g.name}</div>`
+          + `<div class="c">${count}</div>${sub ? `<div class="s${lateSub || (gs && gs.includes('−')) ? ' late' : ''}">${sub}${lateSub ? ' ' + g.late : ''}</div>` : ''}`
+          + `${g.btn ? `<button${g.k === 'machine' && ready === 0 ? ' disabled' : ''}>${g.btn}${g.k === 'machine' ? ' ' + ready + (g.name === 'translation export' ? '…' : '') : ''}</button>` : ''}</div><div class="arrow">→</div>`);
+        b.appendChild(gate);
+      }
+    });
+  }
+}
+
+// ---- screen 1: programme, cards = modules ----
+renderBoard('board1', {
+  items: (l, c) => MODS.map((mod) => ({ key: mod.m, n: mod[l][c], slack: slackOf(mod, l, c), age: AGE[`${mod.m}:${l}:${c}`] })),
+  human: (l, c) => HUMAN.filter((h) => h.l === l && h.c === c),
+  stale: (l, c) => sum(STALE.filter((s) => s.l === l && s.c === c).map((s) => s.n)),
+  focus: false,
+});
+
+function kpis(id, rows) {
+  const k = document.getElementById(id);
+  rows.forEach((r) => k.appendChild(el('div', 'kpi' + (r.a ? ' alert' : ''), `<div class="v">${r.v}</div><div class="l">${r.l}</div>`)));
+  k.appendChild(el('div', 'howto', '<b>Reading the board: right to left, red first.</b><ol>'
+    + '<li>Clear the red shelf, starting from the right. Those items are closest to delivery and stuck until you act.</li>'
+    + '<li>Fire every ⚙ gate that has work ready, rightmost first. They run unattended, queued least-slack-first.</li>'
+    + '<li>Spend your own hours on ✋ gates. The top card in the column before a gate is the one whose deadline is nearest.</li></ol>'));
+}
+kpis('kpis1', [
+  { v: 30, l: 'topics need you (red shelves)', a: true },
+  { v: 311, l: 'ready at ⚙ gates, one click each' },
+  { v: '96 · 13', l: 'awaiting camera · unit sessions' },
+  { v: 88, l: 'with translator · oldest 26d' },
+  { v: '185 / 74', l: 'packaged EN / ZH of 640' },
+]);
+
+function filters(id, active, focus) {
+  const f = document.getElementById(id);
+  f.appendChild(el('span', 'lbl', 'Module'));
+  f.appendChild(el('span', 'chip' + (active ? '' : ' on'), 'All 8'));
+  MODS.forEach((mod) => {
+    const cls = 'chip' + (mod.behind ? ' behind' : '') + (active === mod.m ? ' on' : '');
+    const st = mod.d === null ? 'no date' : (mod.behind ? `${mod.d} · ${mod.behind}d behind` : `${mod.d} · on track`);
+    f.appendChild(el('span', cls, `${mod.m} <small>${st}</small>`));
+  });
+  f.appendChild(el('span', 'sp'));
+  f.appendChild(el('label', 'tog', `<input type="checkbox" ${focus ? 'checked' : ''}> fade cards with slack &gt; 14d`));
+  f.appendChild(el('label', 'tog', '<input type="checkbox" checked> EN <input type="checkbox" checked> ZH'));
+}
+filters('filters1', null, false);
+
+// ---- screen 2: KV7015, cards = units ----
+const U = {
+  en: [[['U10', 6]], [['U09', 3], ['U10', 1]], [['U09', 2]], [['U07', 4], ['U08', 8], ['U09', 2]], [['U06', 6], ['U07', 4]], [['U04', 6], ['U05', 8], ['U06', 2]], [['U01', 8], ['U02', 8], ['U03', 8], ['U04', 2]]],
+  zh: [[['U06', 6], ['U07', 8], ['U08', 8], ['U09', 7], ['U10', 7]], [['U05', 2], ['U06', 2]], [['U04', 8], ['U05', 6]], [['U03', 4]], [['U02', 2], ['U03', 4]], [['U02', 2]], [['U01', 8], ['U02', 4]]],
+};
+const USLACK = { U07: -1, U08: 0, U09: 1, U10: 2 };
+const UDUE = { U07: 'rec 10 Oct', U08: 'rec 11 Oct', U09: 'rec 12 Oct', U10: 'scripts 13 Oct' };
+const UAGE = { 'zh:2:U04': 19 };
+const UNOTE = { 'en:3:U07': '4 edits awaited', 'en:3:U08': 'session not booked' };
+renderBoard('board2', {
+  items: (l, c) => U[l][c].map(([u, n]) => {
+    const pre = l === 'en' && c <= 3;
+    return { key: u, n, slack: pre && USLACK[u] !== undefined ? USLACK[u] : 3, due: pre ? UDUE[u] : '', age: UAGE[`${l}:${c}:${u}`], note: UNOTE[`${l}:${c}:${u}`] };
+  }),
+  human: (l, c) => {
+    if (l === 'en' && c === 4) return [{ m: 'U06-T02', n: 1, why: 'cue break 4→5', code: 'CUE_LOW_CONFIDENCE', act: 'place' }, { m: 'U07-T03', n: 1, why: 'cue break 2→3', code: 'CUE_LOW_CONFIDENCE', act: 'place' }];
+    if (l === 'zh' && c === 3) return [{ m: 'U03', n: 4, why: 'slide count ≠ EN', code: 'MD_PARITY_COUNT', act: 'message' }];
+    return [];
+  },
+  stale: () => 0,
+  max: 6,
+  trace: 'U07',
+  drawer: 'en:4',
+  gateSub: { 'en:0': 'U10 due 13 Oct', 'en:3': 'U07 −1d, then U08 0d', 'zh:2': 'U04 out 19d' },
+});
+kpis('kpis2', [
+  { v: 6, l: 'need you in KV7015', a: true },
+  { v: '1d behind', l: 'planning.ts: U07 recording was due 10 Oct', a: true },
+  { v: 42, l: 'ready at ⚙ gates' },
+  { v: '78', l: 'topics · 26 EN / 12 ZH packaged' },
+]);
+filters('filters2', 'KV7015', true);
+
+document.querySelectorAll('.screen-tabs button').forEach((btn) => btn.addEventListener('click', () => {
+  document.querySelectorAll('.screen-tabs button').forEach((x) => x.classList.toggle('on', x === btn));
+  document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('on', s.id === btn.dataset.s));
+}));
+</script>
+</body>
+</html>
