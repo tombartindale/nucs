@@ -57,7 +57,9 @@ RESULT_EXTRAS: dict[str, dict[str, Any]] = {
     "subtitles": {"cues": {"type": "integer"}, "modified": {"type": "boolean"}, "format": {"type": "string"},
                   "corrections": {"type": "array"}},
     "compose": {"mode": {"enum": ["draft", "full"]}, "subtitles": {"enum": ["sidecar", "burned"]},
-                "layout": {"type": "string"}, "resolution": {"type": "array"}, "body_offset": {"type": "number"},
+                "layouts": {"type": "array", "items": {"type": "object", "properties": {
+                    "name": {"type": "string"}, "arrangement": {"type": "string"}, "resolution": {"type": "array"}}}},
+                "body_offset": {"type": "number"},
                 "bumpers": {"type": "array"}, "duration": {"type": "number"},
                 "name_tag": {"type": ["string", "null"]}},
     "package": {"slides": {"type": "integer"}, "duration": {"type": "number"}, "files": {"type": "integer"},

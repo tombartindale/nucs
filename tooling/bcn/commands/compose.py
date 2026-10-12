@@ -40,9 +40,14 @@ FONT_CANDIDATES = ["/System/Library/Fonts/Helvetica.ttc", "/System/Library/Fonts
                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
 
 
+ARRANGEMENTS = ("side_by_side", "inset", "stacked", "full_bleed_inset")
+
+
 @dataclass
 class EncodeSpec:
-    """What compose actually builds to: [delivery] by default, [compose]'s draft_* under --draft."""
+    """What compose actually builds to, for one layout: that layout's own width/height
+    (scaled down for --draft, keeping its aspect ratio), [delivery]'s fps/codec/bitrate, and
+    [compose]'s draft_* quality knobs under --draft."""
     width: int
     height: int
     fps: int
@@ -54,13 +59,22 @@ class EncodeSpec:
     bitrate: tuple[str, str] | None  # (video, audio); None in draft mode, which uses crf instead
 
 
-def encode_spec(cfg: Config, draft: bool) -> EncodeSpec:
+def _draft_dims(width: int, height: int, budget: int = 960) -> tuple[int, int]:
+    """width/height scaled so the longer edge is `budget`, keeping the layout's own aspect
+    ratio and orientation (a 1920x1080 widescreen layout drafts at 960x540; a 1080x1920
+    vertical layout drafts at 540x960) rather than a single fixed draft frame size."""
+    scale = budget / max(width, height)
+    return _even(width * scale), _even(height * scale)
+
+
+def encode_spec(cfg: Config, layout: dict, draft: bool) -> EncodeSpec:
     c = cfg["compose"]
     if draft:
-        return EncodeSpec(c["draft_width"], c["draft_height"], c["draft_fps"], c["draft_watermark"],
+        w, h = _draft_dims(layout["width"], layout["height"])
+        return EncodeSpec(w, h, c["draft_fps"], c["draft_watermark"],
                           "h264", "aac", c["draft_crf"], c["draft_preset"], bitrate=None)
     d = cfg["delivery"]
-    return EncodeSpec(d["width"], d["height"], d["fps"], "", d["video_codec"], d["audio_codec"],
+    return EncodeSpec(layout["width"], layout["height"], d["fps"], "", d["video_codec"], d["audio_codec"],
                       crf=18, preset="slow", bitrate=(d["video_bitrate"], d["audio_bitrate"]))
 
 
@@ -71,10 +85,19 @@ def add_args(p: argparse.ArgumentParser) -> None:
                         "never delivered")
     p.add_argument("--burn-subtitles", action="store_true",
                    help="burn subtitles into the video instead of writing a sidecar SRT")
+    p.add_argument("--layout", action="append", default=None,
+                   help="a layout name from [compose.layouts] to build (repeatable); "
+                        "default is [compose].default_layouts")
 
 
 def _even(x: float) -> int:
     return max(2, int(round(x / 2)) * 2)
+
+
+def _presenter_band_height(c: dict, H: int) -> int:
+    """The presenter's share of a stacked layout's frame height, shared by filter_graph and
+    name_tag_box so the two never disagree about where the band ends."""
+    return _even(H * c["split_ratio"])
 
 
 def _esc(s: str) -> str:
@@ -110,24 +133,42 @@ def name_tag_box(c: dict, es: EncodeSpec, theme: Theme) -> tuple[int, int, int, 
     """(x, y, width, height, name font px) of the tag at the encode size.
 
     The area spans the presenter's share in side_by_side (the half of the frame on the
-    aligned side for inset), with its bottom edge clear of the subtitle safe area. The tag's
-    box sits at its left or right per [name_tag] align, so "right" is against the frame's
-    right edge, inset by the margin. The logo watermark lives inside the safe area at the
-    bottom right, so the two never meet.
+    aligned side for inset and full_bleed_inset, or the presenter's own band for stacked),
+    with its bottom edge clear of the subtitle safe area (or, for stacked, clear of the band's
+    own bottom — there is no slide-with-subtitles below it to avoid). The tag's box sits at
+    its left or right per [name_tag] align, so "right" is against the frame's right edge,
+    inset by the margin — except full_bleed_inset, which instead anchors to the side opposite
+    the slide's inset_position, so the tag and the slide PiP box cannot land in the same
+    corner. The logo watermark lives inside the safe area at the bottom right, so the two
+    never meet.
     """
     W, H = _even(es.width), _even(es.height)
     k = H / theme.height
     nt = theme.name_tag or {}
     font = round(nt.get("font_size_px") * k) if nt.get("font_size_px") else round(H * 0.036)
     m = _even(H * 0.03)
-    if c["layout"] == "side_by_side":
+    h = _even(font * 2.6)
+    arrangement = c["arrangement"]
+    if arrangement == "side_by_side":
         left = W - _even(W * theme.safe_right)
         x, w = left + m, (W - left) - 2 * m
-    else:
+        y = H - round(theme.safe_bottom * k) - h - m
+    elif arrangement == "inset":
         w = _even(W * 0.5)
         x = W - w - m if nt.get("align", "right") == "right" else m
-    h = _even(font * 2.6)
-    y = H - round(theme.safe_bottom * k) - h - m
+        y = H - round(theme.safe_bottom * k) - h - m
+    elif arrangement == "stacked":
+        ph = _presenter_band_height(c, H)
+        w = _even(W * 0.5)
+        x = W - w - m if nt.get("align", "right") == "right" else m
+        y = ph - h - m
+    elif arrangement == "full_bleed_inset":
+        w = _even(W * 0.5)
+        x = m if "right" in c["inset_position"] else W - w - m
+        y = H - round(theme.safe_bottom * k) - h - m
+    else:
+        raise Fail("CONFIG_INVALID", f"compose arrangement '{arrangement}' is not one of {', '.join(ARRANGEMENTS)}.",
+                   file="programme.toml")
     return x, y, _even(w), h, font
 
 
@@ -156,14 +197,20 @@ body {{ display: flex; align-items: flex-end; justify-content: {'flex-end' if si
 """
 
 
-def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None, sub_font: str,
+def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None, sub_font: str, sub_font_size: int,
                  watermark_font: str | None, fonts_dir: Path | None = None, safe_right: float = 0.5,
                  logo_input: str | None = None, tag: NameTag | None = None) -> str:
     """burn_subs is the SRT filename to burn in, or None to leave the video plain (sidecar mode).
 
+    c is this layout's own entry from [compose.layouts] (arrangement, inset_scale,
+    inset_position, inset_margin, split_ratio).
+
     safe_right is the theme's safe_area.right (the fraction of the frame kept clear of slide
     content for side_by_side): the presenter fills exactly that share, full height, cropped to
-    fit with no letterboxing, on the assumption the footage is already framed for it.
+    fit with no letterboxing, on the assumption the footage is already framed for it. The
+    slide input (input 1) is assumed pre-rendered to match: full-bleed (no reservation) for
+    every arrangement except side_by_side, which gets the safe-area-reserved render instead
+    (bcn render produces both; compose_topic picks the matching one per layout).
 
     logo_input is the ffmpeg input label (e.g. "2:v") of a pre-rendered, transparent logo PNG
     to draw over the bottom-right corner of the whole frame, side_by_side only: a watermark on
@@ -174,7 +221,8 @@ def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None
     """
     W, H, fps = _even(es.width), _even(es.height), es.fps
     parts = []
-    if c["layout"] == "side_by_side":
+    arrangement = c["arrangement"]
+    if arrangement == "side_by_side":
         sw = W - _even(W * safe_right)  # where the presenter's share starts: the theme's safe_right
         pw = W - sw                     # the presenter's share: exactly the width the theme reserves
         # The slide PNG is already the full 1920x1080 frame with its content confined to the
@@ -189,7 +237,7 @@ def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None
             base = "base1"
         else:
             base = "base"
-    elif c["layout"] == "inset":
+    elif arrangement == "inset":
         iw = _even(W * c["inset_scale"])
         m = c["inset_margin"]
         pos = c["inset_position"]
@@ -199,8 +247,33 @@ def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None
         parts.append(f"[0:v]scale={iw}:-2,fps={fps},setsar=1[pres]")
         parts.append(f"[slides][pres]overlay=x={x}:y={y}:eof_action=repeat[base]")
         base = "base"
+    elif arrangement == "stacked":
+        # The presenter's band (top, full width) over the slide's band (the rest), each
+        # produced with the idioms already used above: force-fill-and-crop for the presenter
+        # (same as side_by_side's column, just full width instead of a share of it), scale-
+        # and-pad for the slide (same as every arrangement's full-frame slide base, just onto
+        # a band instead of the whole frame).
+        ph = _presenter_band_height(c, H)
+        sh = H - ph
+        parts.append(f"[0:v]scale={W}:{ph}:force_original_aspect_ratio=increase,crop={W}:{ph},fps={fps},setsar=1[pres]")
+        parts.append(f"[1:v]scale={W}:{sh}:force_original_aspect_ratio=decrease,pad={W}:{sh}:(ow-iw)/2:(oh-ih)/2,fps={fps},setsar=1[slides]")
+        parts.append("[pres][slides]vstack=inputs=2[base]")
+        base = "base"
+    elif arrangement == "full_bleed_inset":
+        # inset's mirror image: the presenter fills the whole frame (cropped to fit, same as
+        # side_by_side's column but full-frame) and the slide becomes the small inset box.
+        iw = _even(W * c["inset_scale"])
+        m = c["inset_margin"]
+        pos = c["inset_position"]
+        x = f"W-w-{m}" if "right" in pos else str(m)
+        y = f"H-h-{m}" if "bottom" in pos else str(m)
+        parts.append(f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={fps},setsar=1[base0]")
+        parts.append(f"[1:v]scale={iw}:-2,fps={fps},setsar=1[slidepip]")
+        parts.append(f"[base0][slidepip]overlay=x={x}:y={y}:eof_action=repeat[base]")
+        base = "base"
     else:
-        raise Fail("CONFIG_INVALID", f"compose.layout '{c['layout']}' is not one of inset, side_by_side.", file="programme.toml")
+        raise Fail("CONFIG_INVALID", f"compose arrangement '{arrangement}' is not one of {', '.join(ARRANGEMENTS)}.",
+                   file="programme.toml")
     if tag:
         out_at = tag.start + tag.hold - tag.fade
         parts.append(f"[{tag.input}]format=rgba,fade=t=in:st={tag.start:.3f}:d={tag.fade:.3f}:alpha=1,"
@@ -214,7 +287,7 @@ def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None
         draw = (f",drawtext={ff}text='{_esc(es.watermark)}':x=w-tw-{_even(W * 0.02)}:y=h-th-{_even(H * 0.02)}:"
                 f"fontsize={_even(H * 0.06)}:fontcolor=white@0.85:box=1:boxcolor=0xc0392b@0.75:boxborderw={_even(H * 0.012)}")
     if burn_subs:
-        style = f"FontName={sub_font},FontSize={c.get('subtitle_font_size', 16)},Outline=1,Shadow=0,MarginV=12"
+        style = f"FontName={sub_font},FontSize={sub_font_size},Outline=1,Shadow=0,MarginV=12"
         fd = f":fontsdir='{_esc(str(fonts_dir))}'" if fonts_dir and fonts_dir.is_dir() else ""
         parts.append(f"[comp]subtitles=filename='{_esc(burn_subs)}'{fd}:force_style='{_esc(style)}'{draw},format=yuv420p[v]")
     else:
@@ -247,7 +320,19 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
     c = cfg["compose"]
     draft = args.draft
     burn_in = draft or args.burn_subtitles
-    es = encode_spec(cfg, draft)
+
+    names = list(dict.fromkeys(args.layout or c["default_layouts"]))
+    unknown = [n for n in names if n not in c["layouts"]]
+    if unknown:
+        raise Fail("CONFIG_INVALID", f"Unknown layout(s): {', '.join(unknown)}. See [compose.layouts] in programme.toml.",
+                   file="programme.toml")
+    layouts = {name: c["layouts"][name] for name in names}
+    for name, layout in layouts.items():
+        if layout["arrangement"] not in ARRANGEMENTS:
+            raise Fail("CONFIG_INVALID",
+                       f"compose.layouts.{name}.arrangement '{layout['arrangement']}' is not one of {', '.join(ARRANGEMENTS)}.",
+                       file="programme.toml")
+
     require_input(t, t.video, stable=True)
     if not t.cues_csv.is_file():
         raise Fail("STEP_PREREQUISITE", "There is no cue sheet.", topic=t.id, hint="Run bcn cues first.")
@@ -257,9 +342,19 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
         raise Fail("STEP_PREREQUISITE", "The cue sheet is older than the script, SRT or video.", hint="Run bcn cues again.")
     require_step(t, "render", lang, [t.src(lang)], f"bcn render{' --lang ' + lang if lang != 'en' else ''}")
     n = len(parse(t.src(lang), t.src(lang).name, t.id).slides)
-    pngs = [t.slides_dir(lang) / t.slide_name(i, lang) for i in range(1, n + 1)]
-    for p in pngs:
-        require_input(t, p, lang, step_hint=f"bcn render{' --lang ' + lang if lang != 'en' else ''}")
+
+    # Each layout needs one of two slide-content renders: the safe-area-reserved one, for
+    # side_by_side (the presenter's column), or the full-bleed one, for every other
+    # arrangement (the presenter isn't confined to a fixed in-frame column there). bcn render
+    # produces both; resolve whichever set(s) the selected layouts actually need.
+    modes_needed = sorted({layout["arrangement"] != "side_by_side" for layout in layouts.values()})
+    pngs_by_mode: dict[bool, list[Path]] = {}
+    for full_bleed in modes_needed:
+        pngs = [t.slides_dir(lang, full_bleed) / t.slide_name(i, lang) for i in range(1, n + 1)]
+        for p in pngs:
+            require_input(t, p, lang, step_hint=f"bcn render{' --lang ' + lang if lang != 'en' else ''}")
+        pngs_by_mode[full_bleed] = pngs
+
     subs = t.subtitle_out(lang, "srt")
     if not subs.is_file():
         subs = t.srt(lang)
@@ -286,26 +381,35 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
                 else:
                     bumpers[kind] = p
 
-    out = t.draft(lang) if draft else t.composed(lang)
+    outputs = [(t.draft(lang, name) if draft else t.composed(lang, name)) for name in layouts]
     sidecar = None if (draft or burn_in) else t.composed_srt(lang)
-    outputs = [out, *([sidecar] if sidecar else [])]
+    if sidecar:
+        outputs.append(sidecar)
     theme = load_theme(t.root, resolve_theme_name(cfg, args.theme))
     course_map = t.module_dir / "course-map.md"
     speaker = speaker_for(load_course_map(t.module_dir), t.unit, lang)
+    all_pngs = [p for pngs in pngs_by_mode.values() for p in pngs]
     inputs = [t.video, t.cues_csv, subs, t.root / "programme.toml", *([course_map] if course_map.is_file() else []),
-              *theme.files(), *pngs, *bumpers.values()]
+              *theme.files(), *all_pngs, *bumpers.values()]
     if try_skip(t, r, "compose", lang, outputs, inputs, args.force):
         return
 
     # A watermark of the theme's logo over the presenter, side_by_side only: drawn on top of
     # everything, unlike bumpers' outro card, which sits on its own separate slide.
-    want_logo = c["layout"] == "side_by_side" and bool(theme.bumper) and bool(theme.bumper.get("logo"))
-    tl = tools.require(cfg, "ffmpeg", "ffprobe", *(["chrome"] if (want_logo or speaker) else []))
+    want_logo_any = (bool(theme.bumper) and bool(theme.bumper.get("logo"))
+                     and any(layout["arrangement"] == "side_by_side" for layout in layouts.values()))
+    tl = tools.require(cfg, "ffmpeg", "ffprobe", *(["chrome"] if (want_logo_any or speaker) else []))
     times = cuesheet.read(t.cues_csv, n, t.cues_csv.name)
     info = probe(tl, t.video, "edit/master.mp4")
     duration = info.duration
     if times[-1] >= duration:
         raise Fail("CUE_SHEET_INVALID", "The last slide starts after the video ends.", file=t.cues_csv.name)
+    if not speaker:
+        r.diagnostics.append(Diagnostic("COMPOSE_NO_SPEAKER", "The course map names no speaker, so the video has no name tag.",
+                                        topic=t.id, lang=lang, file=f"{t.module}/course-map.md",
+                                        hint="Add a line like '**Speaker.** Dr Jane Smith, Associate Professor' above the first "
+                                             "unit (or inside a unit, for that unit only)."))
+    body_lufs = loudness(tl, t.video) if bumpers else None
 
     sub_font = theme.subtitle_font(lang)
     wm_font = next((f for f in FONT_CANDIDATES if Path(f).is_file()), None)
@@ -313,113 +417,122 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
     work = t.build / f".compose-{lang}"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
+    body_offset = 0.0
+    layout_results: list[dict] = []
     try:
-        # Slide track on the body's own timeline: cues.csv is correct as written here.
-        lines = ["ffconcat version 1.0"]
-        for i, p in enumerate(pngs):
-            end = times[i + 1] if i + 1 < len(times) else duration
-            lines += [f"file '{p.as_posix()}'", f"duration {end - times[i]:.3f}"]
-        lines.append(f"file '{pngs[-1].as_posix()}'")
-        (work / "slides.ffconcat").write_text("\n".join(lines) + "\n")
         if burn_in:
             shutil.copyfile(subs, work / "subs.srt")
 
-        logo_args: list[str] = []
-        logo_input = None
-        if want_logo:
-            # A small page sized to the watermark itself (unlike the outro card, which is a
-            # full 1920x1080 frame with the logo centred in it): the image just fills it.
-            logo_h = _even(_even(es.height) * 0.08)
-            logo_w = _even(logo_h * 3)
-            (work / "logo.html").write_text(watermark_logo_html(theme, logo_w, logo_h), encoding="utf-8")
-            logo_code, _logo_out, logo_err = run_proc(
-                [tl.node or "node", str(tools.NODE_DIR / "card.mjs"), str(work / "logo.html"),
-                 str(work / "logo.png"), str(logo_w), str(logo_h), "1000", "1000", "transparent"],
-                env={"CHROME_PATH": tl.chrome or ""}, cwd=str(tools.NODE_DIR), timeout=180)
-            if logo_code != 0 or not (work / "logo.png").is_file():
-                r.diagnostics.append(Diagnostic("COMPOSE_BUMPER", f"Rendering the logo watermark failed (exit {logo_code}); composing without it.",
-                                                topic=t.id, lang=lang, data={"stderr": logo_err[-500:]}))
-            else:
-                logo_args = ["-i", str(work / "logo.png")]
-                logo_input = "2:v"
+        for idx, (name, layout) in enumerate(layouts.items()):
+            full_bleed = layout["arrangement"] != "side_by_side"
+            pngs = pngs_by_mode[full_bleed]
+            es = encode_spec(cfg, layout, draft)
+            slice_lo, slice_hi = idx / len(layouts), (idx + 1) / len(layouts)
 
-        # The speaker's name tag over the first seconds of the body. A missing name is only
-        # noted: the tag is wanted, but nothing about the video is wrong without it.
-        tag_args: list[str] = []
-        tag = None
-        if not speaker:
-            r.diagnostics.append(Diagnostic("COMPOSE_NO_SPEAKER", "The course map names no speaker, so the video has no name tag.",
-                                            topic=t.id, lang=lang, file=f"{t.module}/course-map.md",
-                                            hint="Add a line like '**Speaker.** Dr Jane Smith, Associate Professor' above the first "
-                                                 "unit (or inside a unit, for that unit only)."))
-        else:
-            tx, ty, tw, th, tfont = name_tag_box(c, es, theme)
-            (work / "tag.html").write_text(name_tag_html(theme, lang, *speaker, tw, th, tfont), encoding="utf-8")
-            tag_code, _tag_out, tag_err = run_proc(
-                [tl.node or "node", str(tools.NODE_DIR / "card.mjs"), str(work / "tag.html"),
-                 str(work / "tag.png"), str(tw), str(th), "1000", "1000", "transparent"],
-                env={"CHROME_PATH": tl.chrome or ""}, cwd=str(tools.NODE_DIR), timeout=180)
-            if tag_code != 0 or not (work / "tag.png").is_file():
-                r.diagnostics.append(Diagnostic("COMPOSE_NAME_TAG", f"Rendering the name tag failed (exit {tag_code}); composing without it.",
-                                                topic=t.id, lang=lang, data={"stderr": tag_err[-500:]}))
-            else:
-                nt = theme.name_tag
-                tag_args = ["-loop", "1", "-framerate", str(es.fps), "-t", f"{duration:.3f}", "-i", str(work / "tag.png")]
-                tag = NameTag(f"{2 + (1 if logo_args else 0)}:v", tx, ty, nt["start_seconds"], nt["hold_seconds"], nt["fade_seconds"])
+            def report(frac: float, label: str) -> None:
+                tp.update(min(99, round((slice_lo + frac * (slice_hi - slice_lo)) * 100)), f"{label} {name}")
 
-        share = 0.85 if bumpers else 1.0
-        body = work / "body.mp4"
-        graph = filter_graph(c, es, duration, "subs.srt" if burn_in else None, sub_font, wm_font, theme.fonts_dir,
-                             theme.safe_right, logo_input, tag)
-        tp.update(1, "encoding")
-        ffmpeg(tl, ["-i", str(t.video), "-f", "concat", "-safe", "0", "-i", "slides.ffconcat", *logo_args, *tag_args,
-                    "-filter_complex", graph, "-map", "[v]", "-map", "0:a?", "-t", f"{duration:.3f}",
-                    *_encode_args(es), str(body)],
-               duration=duration, on_pct=lambda pct: tp.update(pct * share, "encoding"), cwd=str(work))
+            # Slide track on the body's own timeline: cues.csv is correct as written here.
+            lines = ["ffconcat version 1.0"]
+            for i, p in enumerate(pngs):
+                end = times[i + 1] if i + 1 < len(times) else duration
+                lines += [f"file '{p.as_posix()}'", f"duration {end - times[i]:.3f}"]
+            lines.append(f"file '{pngs[-1].as_posix()}'")
+            (work / f"slides-{name}.ffconcat").write_text("\n".join(lines) + "\n")
 
-        body_offset = 0.0
-        if bumpers:
-            tp.update(86, "bumpers")
-            body_lufs = loudness(tl, t.video)
-            segs = []
-            W, H, fps = _even(es.width), _even(es.height), es.fps
-            for kind in ("intro", "outro"):
-                if kind not in bumpers:
-                    continue
-                src = bumpers[kind]
-                bi = probe(tl, src, str(src.relative_to(t.root)))
-                seg = work / f"{kind}.mp4"
-                vf = f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,fps={fps},setsar=1,format=yuv420p"
-                a_in = [] if bi.has_audio else ["-f", "lavfi", "-t", f"{bi.duration:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
-                af = f"loudnorm=I={body_lufs:.1f}:TP=-1.5:LRA=11,aresample=48000" if (body_lufs is not None and bi.has_audio) else "aresample=48000"
-                amap = "0:a" if bi.has_audio else "1:a"
-                ffmpeg(tl, ["-i", str(src), *a_in, "-vf", vf, "-af", af, "-map", "0:v", "-map", amap,
-                            "-t", f"{bi.duration:.3f}", *_encode_args(es), str(seg)], duration=bi.duration)
-                if kind == "intro":
-                    body_offset = bi.duration
-                segs.append((kind, seg))
-            order = [s for k, s in segs if k == "intro"] + [body] + [s for k, s in segs if k == "outro"]
-            (work / "join.ffconcat").write_text("ffconcat version 1.0\n" + "".join(f"file '{p.name}'\n" for p in order))
-            joined = work / "joined.mp4"
-            ffmpeg(tl, ["-f", "concat", "-safe", "0", "-i", "join.ffconcat", "-c", "copy", "-movflags", "+faststart", str(joined)],
-                   duration=None, cwd=str(work))
-            body = joined
+            # A watermark of the theme's logo over the presenter, side_by_side only.
+            want_logo = layout["arrangement"] == "side_by_side" and want_logo_any
+            logo_args: list[str] = []
+            logo_input = None
+            if want_logo:
+                # A small page sized to the watermark itself (unlike the outro card, which is a
+                # full 1920x1080 frame with the logo centred in it): the image just fills it.
+                logo_h = _even(_even(es.height) * 0.08)
+                logo_w = _even(logo_h * 3)
+                (work / f"logo-{name}.html").write_text(watermark_logo_html(theme, logo_w, logo_h), encoding="utf-8")
+                logo_code, _logo_out, logo_err = run_proc(
+                    [tl.node or "node", str(tools.NODE_DIR / "card.mjs"), str(work / f"logo-{name}.html"),
+                     str(work / f"logo-{name}.png"), str(logo_w), str(logo_h), "1000", "1000", "transparent"],
+                    env={"CHROME_PATH": tl.chrome or ""}, cwd=str(tools.NODE_DIR), timeout=180)
+                if logo_code != 0 or not (work / f"logo-{name}.png").is_file():
+                    r.diagnostics.append(Diagnostic("COMPOSE_BUMPER", f"Rendering the logo watermark failed (exit {logo_code}); composing {name} without it.",
+                                                    topic=t.id, lang=lang, data={"stderr": logo_err[-500:]}))
+                else:
+                    logo_args = ["-i", str(work / f"logo-{name}.png")]
+                    logo_input = "2:v"
 
-        with fsutil.atomic_path(out) as tmp:
-            shutil.move(str(body), tmp)
+            # The speaker's name tag over the first seconds of the body.
+            tag_args: list[str] = []
+            tag = None
+            if speaker:
+                tx, ty, tw, th, tfont = name_tag_box(layout, es, theme)
+                (work / f"tag-{name}.html").write_text(name_tag_html(theme, lang, *speaker, tw, th, tfont), encoding="utf-8")
+                tag_code, _tag_out, tag_err = run_proc(
+                    [tl.node or "node", str(tools.NODE_DIR / "card.mjs"), str(work / f"tag-{name}.html"),
+                     str(work / f"tag-{name}.png"), str(tw), str(th), "1000", "1000", "transparent"],
+                    env={"CHROME_PATH": tl.chrome or ""}, cwd=str(tools.NODE_DIR), timeout=180)
+                if tag_code != 0 or not (work / f"tag-{name}.png").is_file():
+                    r.diagnostics.append(Diagnostic("COMPOSE_NAME_TAG", f"Rendering the name tag failed (exit {tag_code}); composing {name} without it.",
+                                                    topic=t.id, lang=lang, data={"stderr": tag_err[-500:]}))
+                else:
+                    nt = theme.name_tag
+                    tag_args = ["-loop", "1", "-framerate", str(es.fps), "-t", f"{duration:.3f}", "-i", str(work / f"tag-{name}.png")]
+                    tag = NameTag(f"{2 + (1 if logo_args else 0)}:v", tx, ty, nt["start_seconds"], nt["hold_seconds"], nt["fade_seconds"])
+
+            share = 0.85 if bumpers else 1.0
+            body = work / f"body-{name}.mp4"
+            graph = filter_graph(layout, es, duration, "subs.srt" if burn_in else None, sub_font, c["subtitle_font_size"],
+                                 wm_font, theme.fonts_dir, theme.safe_right, logo_input, tag)
+            report(0, "encoding")
+            ffmpeg(tl, ["-i", str(t.video), "-f", "concat", "-safe", "0", "-i", f"slides-{name}.ffconcat", *logo_args, *tag_args,
+                        "-filter_complex", graph, "-map", "[v]", "-map", "0:a?", "-t", f"{duration:.3f}",
+                        *_encode_args(es), str(body)],
+                   duration=duration, on_pct=lambda pct: report(pct / 100 * share, "encoding"), cwd=str(work))
+
+            if bumpers:
+                report(share, "bumpers")
+                segs = []
+                W, H, fps = _even(es.width), _even(es.height), es.fps
+                for kind in ("intro", "outro"):
+                    if kind not in bumpers:
+                        continue
+                    src = bumpers[kind]
+                    bi = probe(tl, src, str(src.relative_to(t.root)))
+                    seg = work / f"{kind}-{name}.mp4"
+                    vf = f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,fps={fps},setsar=1,format=yuv420p"
+                    a_in = [] if bi.has_audio else ["-f", "lavfi", "-t", f"{bi.duration:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
+                    af = f"loudnorm=I={body_lufs:.1f}:TP=-1.5:LRA=11,aresample=48000" if (body_lufs is not None and bi.has_audio) else "aresample=48000"
+                    amap = "0:a" if bi.has_audio else "1:a"
+                    ffmpeg(tl, ["-i", str(src), *a_in, "-vf", vf, "-af", af, "-map", "0:v", "-map", amap,
+                                "-t", f"{bi.duration:.3f}", *_encode_args(es), str(seg)], duration=bi.duration)
+                    if kind == "intro" and idx == 0:
+                        body_offset = bi.duration
+                    segs.append((kind, seg))
+                order = [s for k, s in segs if k == "intro"] + [body] + [s for k, s in segs if k == "outro"]
+                (work / f"join-{name}.ffconcat").write_text("ffconcat version 1.0\n" + "".join(f"file '{p.name}'\n" for p in order))
+                joined = work / f"joined-{name}.mp4"
+                ffmpeg(tl, ["-f", "concat", "-safe", "0", "-i", f"join-{name}.ffconcat", "-c", "copy", "-movflags", "+faststart", str(joined)],
+                       duration=None, cwd=str(work))
+                body = joined
+
+            out = t.draft(lang, name) if draft else t.composed(lang, name)
+            with fsutil.atomic_path(out) as tmp:
+                shutil.move(str(body), tmp)
+            r.artifacts.append(Envelope.artifact_for(t.root, out, "draft" if draft else "composed"))
+            layout_results.append({"name": name, "arrangement": layout["arrangement"], "resolution": [_even(es.width), _even(es.height)]})
+
         if sidecar:
             with fsutil.atomic_path(sidecar) as tmp:
                 Path(tmp).write_text(_shift_srt(subs, body_offset), encoding="utf-8")
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
-    r.artifacts.append(Envelope.artifact_for(t.root, out, "draft" if draft else "composed"))
     if sidecar:
         r.artifacts.append(Envelope.artifact_for(t.root, sidecar, "composed_subtitles"))
     r.extra.update({"mode": "draft" if draft else "full", "subtitles": "burned" if burn_in else "sidecar",
-                    "layout": c["layout"], "resolution": [_even(es.width), _even(es.height)],
+                    "layouts": layout_results,
                     "body_offset": round(body_offset, 3), "bumpers": sorted(bumpers), "duration": round(duration, 3),
-                    "name_tag": speaker[0] if tag else None})
+                    "name_tag": speaker[0] if speaker else None})
     tp.update(100, "done")
 
 

@@ -6,5 +6,7 @@
 name = "New Beacon programme"
 theme = "default"
 
-[compose]
-layout = "side_by_side"  # presenter fills the right half: export the edit at 960x1080, square pixels
+# [compose] builds the "widescreen" layout (1920x1080, side_by_side: presenter fills the
+# right half, export the edit at 960x1080 square pixels) by default; nothing needs setting
+# here to keep that. See [compose.layouts] in tooling/bcn/config.py for the other built-in
+# presets (vertical_stacked, vertical_inset) and their fields.

@@ -18,7 +18,7 @@ export const STALL_MS = 10_000;
 
 // What the browser may ask for. Anything else is refused.
 export const COMMANDS = new Set(['validate', 'render', 'script', 'bumpers', 'cues', 'subtitles', 'compose', 'package', 'qa',
-  'review', 'intake', 'translation', 'transfer', 'sync', 'ack', 'edit', 'docedit', 'qti', 'coursemap', 'readinglist']);
+  'review', 'intake', 'translation', 'transfer', 'sync', 'ack', 'edit', 'docedit', 'qti', 'coursemap', 'docpdf', 'readinglist']);
 export const FLAG_ARGS = ['force', 'no_bumpers', 'draft', 'dump_narration', 'accept', 'clear', 'dry_run', 'export', 'pull', 'push', 'media', 'slides', 'nested', 'full', 'init', 'replace'];
 export const VALUE_ARGS: Record<string, RegExp> = {
   lang: /^(en|zh)$/,
@@ -36,6 +36,7 @@ export const VALUE_ARGS: Record<string, RegExp> = {
   fingerprint: /^[A-Z_]{3,40}\|(en|zh)\|s\d{1,3}\|[^\x00-\x1f]{0,300}$/,
   note: /^[^\x00-\x1f]{0,500}$/,
   only: /^[A-Z]{2}\d{4}\/[^\x00-\x1f]{1,300}$/,  // a local path under the root; may be a list
+  layout: /^[a-z][a-z0-9_]{0,39}$/,  // a [compose.layouts] name; may be a list (see scheduler.ts)
   // A module document's path relative to the module (e.g. course-map.md, U01/activity.md,
   // assignment-3.md) — bcn docedit is the actual authority on which of these are editable;
   // this just keeps the characters sane before it gets there.
@@ -60,7 +61,7 @@ export function validateArgs(command: string, targets: string[], args: JobArgs):
     if (FLAG_ARGS.includes(k)) {
       if (typeof v !== 'boolean') throw new BadRequest(`'${k}' must be true or false.`);
     } else if (k in VALUE_ARGS) {
-      const values = k === 'only' && Array.isArray(v) ? v : [v];
+      const values = (k === 'only' || k === 'layout') && Array.isArray(v) ? v : [v];
       const ok = values.length > 0 && values.every((x) =>
         (typeof x === 'string' || typeof x === 'number') && !String(x).includes('..') && VALUE_ARGS[k].test(String(x)));
       if (!ok) throw new BadRequest(`'${k}' has an invalid value.`);

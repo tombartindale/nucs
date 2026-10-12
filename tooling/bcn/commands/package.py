@@ -27,7 +27,7 @@ from ..markdown import parse
 from ..media import probe
 from ..progress import TopicProgress
 from ..runner import require_input, require_step, run_topics, try_skip
-from ..tree import Target, Topic
+from ..tree import DEFAULT_LAYOUT, Target, Topic
 
 HELP = "assemble the delivery folder"
 
@@ -83,7 +83,17 @@ def package_en(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
     require_input(t, sidecar, "en", step_hint="bcn compose (without --burn-subtitles)")
     bumpers = _bumpers(t, "en")
 
-    inputs = [src, t.video, t.srt("en"), t.cues_csv, composed, sidecar, *pngs, *bumpers, t.root / "programme.toml"]
+    # Every other configured layout is optional: the last compose run may not have selected
+    # it. Present files are delivered alongside the default layout's; present-but-stale ones
+    # are excluded with a diagnostic rather than failing the whole package. Freshness is
+    # judged against the true external sources only (not the default layout's own composed
+    # file or the shared sidecar, which compose always finishes writing last, after every
+    # layout's video — checking against those would call every layout "stale" by definition).
+    extra_names = [name for name in cfg["compose"]["layouts"] if name != DEFAULT_LAYOUT]
+    extra_composed = {name: t.composed("en", name) for name in extra_names if t.composed("en", name).is_file()}
+    source_inputs = [src, t.video, t.srt("en"), t.cues_csv, *pngs, *bumpers, t.root / "programme.toml"]
+
+    inputs = [*source_inputs, composed, sidecar, *extra_composed.values()]
     if try_skip(t, r, "package", "en", [t.manifest("en")], inputs, force):
         return
 
@@ -93,6 +103,20 @@ def package_en(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
     try:
         tp.update(5, "copying video")
         shutil.copyfile(composed, staging / f"{t.id}.mp4")
+        default_cfg = cfg["compose"]["layouts"][DEFAULT_LAYOUT]
+        delivered_layouts = [{"name": DEFAULT_LAYOUT, "video": f"{t.id}.mp4",
+                              "width": default_cfg["width"], "height": default_cfg["height"]}]
+        for name, extra_path in extra_composed.items():
+            if not fsutil.is_fresh([extra_path], source_inputs):
+                r.diagnostics.append(Diagnostic("PACKAGE_STALE_LAYOUT",
+                                                f"{name} is older than its sources; it is not delivered this run.",
+                                                topic=t.id, lang="en", file=str(extra_path.relative_to(t.root)),
+                                                hint=f"Run bcn compose --layout {name} again."))
+                continue
+            dest_name = f"{t.id}.{name}.mp4"
+            shutil.copyfile(extra_path, staging / dest_name)
+            layout_cfg = cfg["compose"]["layouts"][name]
+            delivered_layouts.append({"name": name, "video": dest_name, "width": layout_cfg["width"], "height": layout_cfg["height"]})
         tp.update(70, "copying subtitles")
         fmt = cfg["subtitles"]["format"]
         _deliver_subtitles(sidecar, staging / f"{t.id}.en.srt", fmt)
@@ -127,6 +151,7 @@ def package_en(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
             "subtitles_modified": subs_env.get("results", [{}])[0].get("modified", False),
             "body_offset": compose_result.get("body_offset", 0.0),
             "bumpers_composited": compose_result.get("bumpers", []),
+            "layouts": delivered_layouts,
             "files": [_file_entry(f) for f in en_files],
         }
         fsutil.write_json(staging / "manifest.json", manifest)
@@ -186,7 +211,12 @@ def package_zh(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
     require_input(t, composed, "zh", step_hint="bcn compose --lang zh")
     require_input(t, sidecar, "zh", step_hint="bcn compose --lang zh (without --burn-subtitles)")
     bumpers = _bumpers(t, "zh")
-    inputs = [src, t.srt("zh"), composed, sidecar, *pngs, *bumpers, t.manifest("en")]
+
+    extra_names = [name for name in cfg["compose"]["layouts"] if name != DEFAULT_LAYOUT]
+    extra_composed = {name: t.composed("zh", name) for name in extra_names if t.composed("zh", name).is_file()}
+    source_inputs = [src, t.srt("zh"), *pngs, *bumpers, t.manifest("en")]
+
+    inputs = [*source_inputs, composed, sidecar, *extra_composed.values()]
     if try_skip(t, r, "package", "zh", [t.manifest("zh")], inputs, force):
         return
 
@@ -197,6 +227,22 @@ def package_zh(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
     with fsutil.atomic_path(dest_video) as tmp:
         shutil.copyfile(composed, tmp)
     written.append(dest_video)
+    default_cfg = cfg["compose"]["layouts"][DEFAULT_LAYOUT]
+    delivered_layouts = [{"name": DEFAULT_LAYOUT, "video": dest_video.name,
+                          "width": default_cfg["width"], "height": default_cfg["height"]}]
+    for name, extra_path in extra_composed.items():
+        if not fsutil.is_fresh([extra_path], source_inputs):
+            r.diagnostics.append(Diagnostic("PACKAGE_STALE_LAYOUT",
+                                            f"{name} is older than its sources; it is not delivered this run.",
+                                            topic=t.id, lang="zh", file=str(extra_path.relative_to(t.root)),
+                                            hint=f"Run bcn compose --lang zh --layout {name} again."))
+            continue
+        dest = t.out / f"{t.id}.{name}.zh.mp4"
+        with fsutil.atomic_path(dest) as tmp:
+            shutil.copyfile(extra_path, tmp)
+        written.append(dest)
+        layout_cfg = cfg["compose"]["layouts"][name]
+        delivered_layouts.append({"name": name, "video": dest.name, "width": layout_cfg["width"], "height": layout_cfg["height"]})
     # Written straight into t.out, same as the slides and bumpers below: package_zh adds
     # beside an already-live package rather than replacing it whole (each file's own write
     # is still atomic).
@@ -223,6 +269,7 @@ def package_zh(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
         "built": utcnow(),
         "body_offset": compose_result.get("body_offset", 0.0),
         "bumpers_composited": compose_result.get("bumpers", []),
+        "layouts": delivered_layouts,
         # The cue sheet is shared: Mandarin has no cues step of its own (same presenter
         # footage, same timing), so <id>.cues.csv is delivered once, by package_en.
         "shares_cue_sheet_with": "manifest.json",

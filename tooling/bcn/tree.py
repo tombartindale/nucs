@@ -22,6 +22,7 @@ TOPIC_RE = re.compile(r"^T\d{2}$")
 TOPIC_ID_RE = re.compile(r"^[A-Z]{2}\d{4}-U\d{2}-T\d{2}$")
 
 LANGS = ("en", "zh")
+DEFAULT_LAYOUT = "widescreen"
 
 # macOS and sync-client noise. Never reported, never parsed.
 NOISE = [
@@ -113,14 +114,17 @@ class Topic:
     def step_file(self, step: str, lang: str = "en") -> Path:
         return self.build / (f"{step}.json" if lang == "en" else f"{step}.{lang}.json")
 
-    def slides_dir(self, lang: str = "en") -> Path:
-        return self.build / "slides" / lang
+    def slides_dir(self, lang: str = "en", full_bleed: bool = False) -> Path:
+        """full_bleed is bcn compose's own second slide render, with no presenter-column
+        safe area reserved (for every arrangement except side_by_side); never delivered,
+        never read by anything other than bcn compose."""
+        return self.build / "slides" / (f"{lang}-full" if full_bleed else lang)
 
     def slide_name(self, n: int, lang: str = "en") -> str:
         return f"{self.id}-s{n:02d}.png" if lang == "en" else f"{self.id}-{lang}-s{n:02d}.png"
 
-    def slide_pngs(self, lang: str = "en") -> list[Path]:
-        d = self.slides_dir(lang)
+    def slide_pngs(self, lang: str = "en", full_bleed: bool = False) -> list[Path]:
+        d = self.slides_dir(lang, full_bleed)
         if not d.is_dir():
             return []
         pat = re.compile(rf"^{re.escape(self.id)}{'' if lang == 'en' else '-' + lang}-s\d{{2}}\.png$")
@@ -143,12 +147,19 @@ class Topic:
     def subtitle_out(self, lang: str, ext: str) -> Path:
         return self.build / "subtitles" / f"{self.id}.{lang}.{ext}"
 
-    def draft(self, lang: str = "en") -> Path:
-        return self.build / ("draft.mp4" if lang == "en" else f"draft.{lang}.mp4")
+    def draft(self, lang: str = "en", layout: str = DEFAULT_LAYOUT) -> Path:
+        stem = "draft" if layout == DEFAULT_LAYOUT else f"draft.{layout}"
+        return self.build / (f"{stem}.mp4" if lang == "en" else f"{stem}.{lang}.mp4")
 
-    def composed(self, lang: str = "en") -> Path:
-        """The full-quality composed video (slides, presenter, bumpers): what package delivers."""
-        return self.build / ("composed.mp4" if lang == "en" else f"composed.{lang}.mp4")
+    def composed(self, lang: str = "en", layout: str = DEFAULT_LAYOUT) -> Path:
+        """The full-quality composed video (slides, presenter, bumpers): what package delivers.
+
+        layout names a [compose.layouts] entry; the default layout's file is named exactly as
+        before (DEFAULT_LAYOUT is invisible in the filename, same as English is for lang), so
+        a single-layout programme sees no change. Any other layout's name is inserted before
+        the lang suffix (composed.vertical_stacked.mp4, composed.vertical_stacked.zh.mp4)."""
+        stem = "composed" if layout == DEFAULT_LAYOUT else f"composed.{layout}"
+        return self.build / (f"{stem}.mp4" if lang == "en" else f"{stem}.{lang}.mp4")
 
     def composed_srt(self, lang: str = "en") -> Path:
         """The delivered subtitle file: master.srt shifted by the intro's duration, never burned in."""

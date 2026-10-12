@@ -26,10 +26,15 @@ def _yaml_str(s: str) -> str:
     return json.dumps(s, ensure_ascii=False)
 
 
-def marp_source(p: ParsedTopic, theme: Theme, lang: str) -> str:
+def marp_source(p: ParsedTopic, theme: Theme, lang: str, safe_right: float | None = None) -> str:
     """Our front matter out, Marp's in, narration stripped, asset paths rebased.
 
     Marp directives never go in files humans edit; they are generated here.
+
+    safe_right overrides theme.safe_right (default None: use the theme's own value, the
+    render bcn compose's side_by_side arrangement uses). bcn render also builds a second,
+    full-bleed pass with safe_right=1.0 (reserve nothing), for every other arrangement, which
+    doesn't confine the presenter to a fixed in-frame column.
     """
     fonts = ", ".join(f'"{f}"' if " " in f and f not in ("sans-serif", "serif") else f for f in theme.fonts[lang])
     size = theme.content_font_size.get(lang)
@@ -39,7 +44,7 @@ def marp_source(p: ParsedTopic, theme: Theme, lang: str) -> str:
     # The width of the strip reserved on the right, not where it starts: safe_area.right in
     # theme.toml is "keep clear from this fraction of the width onward", e.g. 0.5 reserves
     # the right half, so the padding is the remaining fraction of the frame.
-    safe_right_px = round(theme.width * (1 - theme.safe_right))
+    safe_right_px = round(theme.width * (1 - (safe_right if safe_right is not None else theme.safe_right)))
     style = faces + f"section {{ font-family: {fonts}; --bcn-safe-bottom: {theme.safe_bottom}px; --bcn-safe-right: {safe_right_px}px;"
     if size:
         style += f" --bcn-font-size: {size}px;"
@@ -74,7 +79,9 @@ def render_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, lang:
     p = parse(src, src.name, t.id)
     n = len(p.slides)
     assets = [t.dir / im.path for s in p.slides for im in s.images]
-    outputs = [t.slides_dir(lang) / t.slide_name(i, lang) for i in range(1, n + 1)] + [t.deck_pdf(lang)]
+    outputs = ([t.slides_dir(lang) / t.slide_name(i, lang) for i in range(1, n + 1)]
+               + [t.slides_dir(lang, full_bleed=True) / t.slide_name(i, lang) for i in range(1, n + 1)]
+               + [t.deck_pdf(lang)])
     step_inputs = inputs + assets + theme.files()
     if try_skip(t, r, "render", lang, outputs, step_inputs, force):
         return
@@ -168,11 +175,47 @@ def render_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, lang:
             shutil.copyfile(work / "deck.pdf", tmp)
         with fsutil.atomic_path(t.render_html(lang)) as tmp:
             shutil.copyfile(work / "deck.html", tmp)
+
+        # A second slide render, with no presenter-column safe area reserved: bcn compose
+        # uses this one for every arrangement except side_by_side, which doesn't confine the
+        # presenter to a fixed in-frame column, so the reserved-mode render above would leave
+        # an empty strip with nothing sitting over it. Images only: no PDF (never delivered,
+        # never read outside bcn compose), and no overflow re-measurement (a wider content
+        # box than the one just checked above, same font size and vertical budget, cannot
+        # newly overflow).
+        tp.update(90, "rendering full-bleed slides")
+        full_deck_md = work / "deck-full.md"
+        full_deck_md.write_text(marp_source(p, theme, lang, safe_right=1.0), encoding="utf-8")
+        full_cmd = base + ["--images", "png"] + (["--image-scale", str(scale)] if scale else []) + ["-o", str(work / "deckfull.png"), str(full_deck_md)]
+        code, out, err = run_proc(full_cmd, env=env, cwd=str(t.dir), timeout=600)
+        if code != 0:
+            raise Fail("RENDER_FAILED", f"Marp full-bleed PNG export failed (exit {code}).", file=src.name, data={"stderr": err[-2000:]},
+                       hint="See data.stderr. Check the pinned Chrome runs and the theme CSS is valid.")
+        full_pngs = sorted(work.glob("deckfull.*.png"))
+        full_numbers = [int(m.group(1)) for x in full_pngs if (m := re.match(r"deckfull\.(\d{3})\.png$", x.name))]
+        if full_numbers != list(range(1, len(full_numbers) + 1)) or len(full_numbers) != n:
+            raise Fail("RENDER_SLIDE_COUNT", f"Marp's full-bleed pass produced {len(full_numbers)} slide images; the reserved pass produced {n}.",
+                       file=src.name)
+        for i, png in enumerate(full_pngs, 1):
+            dims = fsutil.png_size(png)
+            want = (int(theme.width * (scale or 1)), int(theme.height * (scale or 1)))
+            if dims != want:
+                raise Fail("RENDER_RESOLUTION", f"Full-bleed slide {i} rendered at {dims}; the theme declares {want}.", slide=i,
+                           file=f"themes/{theme.name}/theme.toml")
+        full_dest = t.slides_dir(lang, full_bleed=True)
+        full_dest.mkdir(parents=True, exist_ok=True)
+        for i, png in enumerate(full_pngs, 1):
+            with fsutil.atomic_path(full_dest / t.slide_name(i, lang)) as tmp:
+                shutil.copyfile(png, tmp)
+        for old in t.slide_pngs(lang, full_bleed=True):
+            if old.name not in keep:
+                old.unlink()
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
     for i in range(1, n + 1):
         r.artifacts.append(Envelope.artifact_for(t.root, dest / t.slide_name(i, lang), "slide"))
+        r.artifacts.append(Envelope.artifact_for(t.root, full_dest / t.slide_name(i, lang), "slide_full"))
     r.artifacts.append(Envelope.artifact_for(t.root, t.deck_pdf(lang), "deck"))
     r.extra.update({
         "slides": n,

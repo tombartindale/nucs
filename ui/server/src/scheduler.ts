@@ -197,6 +197,8 @@ export class Scheduler {
     }
     const only = Array.isArray(args.only) ? args.only : args.only ? [args.only] : [];
     for (const p of only) argv.push('--only', String(p));
+    const layout = Array.isArray(args.layout) ? args.layout : args.layout ? [args.layout] : [];
+    for (const l of layout) argv.push('--layout', String(l));
     if ('import' in args) argv.push('--import', String(args.import));
     for (const k of FLAG_ARGS) if (args[k]) argv.push(`--${k.replace(/_/g, '-')}`);
     return argv;

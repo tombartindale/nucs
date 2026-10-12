@@ -69,6 +69,12 @@ DEFAULTS: dict[str, Any] = {
         "activity_headings": [],
         "activity_types": ["quiz", "task"],
         "assignment_headings": ["Brief", "Outcomes", "Assessment criteria"],
+        # Required headings for the Mandarin translation of an activity/assignment. Empty by
+        # default (heading check skipped for zh): there's no established convention yet for
+        # translated heading text, so a programme that wants it enforced fills these in itself,
+        # the same "off unless configured" pattern as [validate].names/localization.
+        "activity_headings_zh": [],
+        "assignment_headings_zh": [],
     },
     "cues": {
         "min_confidence": 0.8,
@@ -89,31 +95,58 @@ DEFAULTS: dict[str, Any] = {
     },
     "delivery": {
         # Placeholder: the partner's delivery specification is unconfirmed.
-        # What bcn compose encodes to in full (non-draft) mode: the delivered video is
+        # What bcn compose encodes to in full (non-draft) mode, other than frame size (each
+        # [compose.layouts.*] entry carries its own width/height): the delivered video is
         # always built to this spec from scratch, so there is no separate "transcode if
         # it doesn't match" step any more.
         "video_codec": "h264",
         "audio_codec": "aac",
-        "width": 1920,
-        "height": 1080,
         "fps": 25,
         "video_bitrate": "8M",
         "audio_bitrate": "192k",
     },
     "compose": {
-        # side_by_side: slides on the left, the presenter filling the right share the theme's
-        # safe_area.right keeps clear (export the edit at 960x1080). inset is the alternative.
-        "layout": "side_by_side",  # "side_by_side" or "inset"
-        "inset_scale": 0.3,
-        "inset_position": "top-right",  # top-left, top-right, bottom-left, bottom-right; bottom sits over subtitles
-        "inset_margin": 16,
+        # Which [compose.layouts] entries to build when --layout (or the UI's layout
+        # checkboxes) select none: the single 16:9 output every programme got before
+        # multiple layouts existed.
+        "default_layouts": ["widescreen"],
+        # Each entry is one output variant: its own frame size and its own arrangement of
+        # slides vs. presenter. side_by_side and inset keep the presenter within a 16:9
+        # frame (side_by_side: presenter fills the share of the right the theme's
+        # safe_area.right keeps clear; inset: presenter is a small box over full-frame
+        # slides). stacked and full_bleed_inset are for a vertical (portrait) frame instead:
+        # stacked splits the frame into a presenter band and a slide band; full_bleed_inset
+        # is inset's mirror image, presenter filling the frame with the slide as the small
+        # box. inset_scale/inset_position/inset_margin apply to inset and full_bleed_inset;
+        # split_ratio (the presenter's share of the frame height) applies to stacked only —
+        # every entry carries the same fields regardless, so none of them needs special-casing
+        # in programme.toml.
+        "layouts": {
+            "widescreen": {
+                "arrangement": "side_by_side",
+                "width": 1920, "height": 1080,
+                "inset_scale": 0.3, "inset_position": "top-right", "inset_margin": 16,
+                "split_ratio": 0.5,
+            },
+            "vertical_stacked": {
+                "arrangement": "stacked",
+                "width": 1080, "height": 1920,
+                "inset_scale": 0.3, "inset_position": "top-right", "inset_margin": 16,
+                "split_ratio": 0.45,
+            },
+            "vertical_inset": {
+                "arrangement": "full_bleed_inset",
+                "width": 1080, "height": 1920,
+                "inset_scale": 0.38, "inset_position": "top-right", "inset_margin": 24,
+                "split_ratio": 0.5,
+            },
+        },
         "subtitle_font_size": 16,  # libass units at the default 288-line script resolution; --burn-subtitles only
-        # Full mode (the default) delivers, so it encodes at [delivery]'s own resolution/fps/codec/
-        # bitrate and subtitles go out as a shifted sidecar file, never burned in. --draft is for
-        # quickly checking cue timing only: it is never delivered, so it keeps its own small, fast,
-        # watermarked settings below, independent of [delivery].
-        "draft_width": 960,
-        "draft_height": 540,
+        # Full mode (the default) delivers, so it encodes at the layout's own resolution and
+        # [delivery]'s fps/codec/bitrate, and subtitles go out as a shifted sidecar file, never
+        # burned in. --draft is for quickly checking cue timing only: it is never delivered, so
+        # it keeps its own fast, watermarked quality settings below, scaled to the layout's own
+        # aspect ratio rather than a fixed size (see compose.py's _draft_dims).
         "draft_fps": 25,
         "draft_watermark": "DRAFT",
         "draft_crf": 30,

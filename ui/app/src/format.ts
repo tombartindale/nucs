@@ -27,13 +27,15 @@ export const STEP_HELP: Record<string, string> = {
     + 'Mandarin reuses the English timings.',
   subtitles: 'Prepare the subtitles for delivery, applying any approved fixes to misheard words (timings are never '
     + 'changed). For Mandarin, it checks the translator kept every timing exactly.',
-  compose: 'Build a draft video (slides with the presenter inset and subtitles burned in) to check that the '
-    + 'slides change at the right moments. For checking only; it is not delivered.',
+  compose: 'Build a draft video (slides with the presenter and subtitles burned in, in whichever layout(s) are '
+    + 'selected below) to check that the slides change at the right moments. For checking only; it is not delivered.',
   package: 'Assemble the delivery folder: the video, slide images, subtitles, cue sheet and script, with '
     + 'checksums. Needs cues and subtitles to be done.',
   qa: 'Run every check on the topic, plus cross-checks: video length, files older than the script, and '
     + 'misheard words not yet reviewed.',
   coursemap: 'Print the module map as a PDF, to share with collaborators who do not have the working copy.',
+  docpdf: 'Print an assignment brief or unit activity as a PDF, to share with collaborators who do not have the '
+    + 'working copy. A quiz is printed as its questions and options, with the correct answer marked.',
 };
 
 export const LANG_NAME = { en: 'English', zh: 'Mandarin' } as const;

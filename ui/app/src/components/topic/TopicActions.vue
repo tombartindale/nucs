@@ -42,12 +42,23 @@ const WAIT_HELP: Record<string, string> = {
 
 const LANGS = ['en', 'zh'] as const;
 
+// Mirrors the built-in presets in tooling/bcn/config.py's [compose.layouts] DEFAULTS.
+// Hardcoded, like LANGS above: there's no backend endpoint exposing resolved programme.toml
+// config today, and a programme can't add a new preset name without a code change there
+// either (see config.py's _merge). Keep this list in sync if that ever changes.
+const LAYOUTS = [
+  { value: 'widescreen', label: 'Widescreen 16:9' },
+  { value: 'vertical_stacked', label: 'Vertical, stacked' },
+  { value: 'vertical_inset', label: 'Vertical, inset' },
+] as const;
+
 const emit = defineEmits<{ verify: [] }>();
 const t = inject(TOPIC)!;
 const beacon = useBeacon();
 const force = ref(false);
 const noBumpers = ref(true);
 const draftMode = ref(true);
+const selectedLayouts = ref<string[]>(['widescreen']);
 
 const stateOf = (lang: 'en' | 'zh') => t.status.value?.[lang] ?? null;
 
@@ -154,10 +165,11 @@ onBeforeUnmount(() => ro?.disconnect());
 watch(rows, () => nextTick(measure));
 
 async function run(step: string, lang: 'en' | 'zh') {
-  const args: Record<string, string | boolean> = { lang: step === 'cues' ? 'en' : lang };
+  const args: Record<string, string | boolean | string[]> = { lang: step === 'cues' ? 'en' : lang };
   if (force.value) args.force = true;
   if (step === 'compose' && noBumpers.value) args.no_bumpers = true;
   if (step === 'compose' && draftMode.value) args.draft = true;
+  if (step === 'compose') args.layout = selectedLayouts.value;
   if (step === 'qa') delete args.lang;
   await beacon.runJob(step, [t.rel], args);
 }
@@ -237,6 +249,13 @@ async function bumpers(lang: 'en' | 'zh') {
       </q-checkbox>
       <q-checkbox v-model="noBumpers" dense label="no bumpers">
         <q-tooltip max-width="320px">Leave the intro and outro off the video compose makes. Quicker, and the player's times then match the cue sheet exactly. Delivered files are unaffected.</q-tooltip>
+      </q-checkbox>
+      <q-separator vertical class="q-mx-xs" />
+      <span class="text-caption text-grey-7">layouts</span>
+      <q-checkbox v-for="l in LAYOUTS" :key="l.value" dense :label="l.label"
+        :model-value="selectedLayouts.includes(l.value)"
+        @update:model-value="(v) => { selectedLayouts = v ? [...selectedLayouts, l.value] : selectedLayouts.filter((x) => x !== l.value); }">
+        <q-tooltip max-width="320px">Which output(s) compose builds. Pick more than one to get, e.g., a widescreen cut and a vertical cut from the same recording in one run.</q-tooltip>
       </q-checkbox>
       <q-space />
       <q-btn flat dense no-caps icon="verified" label="Verify files" @click="emit('verify')">

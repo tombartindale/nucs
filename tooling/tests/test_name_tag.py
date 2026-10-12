@@ -8,7 +8,7 @@ import subprocess
 import pytest
 
 from bcn import tools
-from bcn.commands.compose import EncodeSpec, NameTag, filter_graph, name_tag_box
+from bcn.commands.compose import EncodeSpec, NameTag, _draft_dims, filter_graph, name_tag_box
 from bcn.config import load, load_theme
 from bcn.coursemap import load_course_map, speaker_for
 from bcn.envelope import Fail
@@ -61,15 +61,15 @@ def test_theme_name_tag_timing_validated(tree):
 def test_filter_graph_fades_tag_after_logo(tree):
     theme = load_theme(tree, "default")
     es = EncodeSpec(1920, 1080, 25, "", "h264", "aac", 18, "slow", ("8M", "192k"))
-    c = {**load(tree)["compose"], "layout": "side_by_side"}
+    c = {**load(tree)["compose"]["layouts"]["widescreen"], "arrangement": "side_by_side"}
     x, y, w, h, _ = name_tag_box(c, es, theme)
     assert x >= 1920 * (1 - theme.safe_right) and y + h <= 1080 - theme.safe_bottom  # in the presenter's half, above the subtitles
     assert 1920 - (x + w) < 1080 * 0.05  # its area reaches the frame's right edge, less the margin
     tag = NameTag("3:v", x, y, 1.0, 5.0, 0.5)
-    g = filter_graph(c, es, 60.0, None, "Helvetica", None, logo_input="2:v", tag=tag)
+    g = filter_graph(c, es, 60.0, None, "Helvetica", 16, None, logo_input="2:v", tag=tag)
     assert "fade=t=in:st=1.000:d=0.500:alpha=1" in g and "fade=t=out:st=5.500:d=0.500:alpha=1" in g
     assert g.index("[2:v]overlay") < g.index("[tag]overlay")  # the tag is drawn over the logo
-    plain = filter_graph(c, es, 60.0, None, "Helvetica", None)
+    plain = filter_graph(c, es, 60.0, None, "Helvetica", 16, None)
     assert "[tag]" not in plain and "[comp]" in plain
 
 
@@ -96,8 +96,9 @@ def test_compose_draws_tag_for_its_window(tree, capsys):
     assert env["results"][0]["name_tag"] == "Dr Jane Example"
 
     cfg = load(tree)
-    c = cfg["compose"]
-    es = EncodeSpec(c["draft_width"], c["draft_height"], c["draft_fps"], "", "h264", "aac", 30, "veryfast", None)
+    c = cfg["compose"]["layouts"]["widescreen"]
+    draft_w, draft_h = _draft_dims(c["width"], c["height"])
+    es = EncodeSpec(draft_w, draft_h, cfg["compose"]["draft_fps"], "", "h264", "aac", 30, "veryfast", None)
     x, y, w, h, font = name_tag_box(c, es, load_theme(tree, "default"))
     # The strip of padding just inside the box's right edge (align = "right"), past the accent
     # bar: box colour, no text.

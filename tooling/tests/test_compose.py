@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 
 from bcn import srt, tools
+from bcn.commands.compose import _draft_dims
 from bcn.config import load
 from bcn.markdown import parse
 from bcn.media import probe
@@ -41,8 +42,10 @@ def _build_up_to_cues(tree, capsys, t: Topic):
     (t.dir / "edit").mkdir(exist_ok=True)
     make_video(t.video, time_ + 2)
     t.srt("en").write_text(srt_text)
+    # Comfortably older than validate's own output, however long validate + render (now two
+    # Marp passes) + encoding the test video took on this machine.
     for f in (t.src("en"), t.video, t.srt("en")):
-        age(f, 30)
+        age(f, 300)
     code, env = bcn(capsys, "cues", str(t.dir))
     assert code == 0, env["diagnostics"]
     code, env = bcn(capsys, "subtitles", str(t.dir))
@@ -68,9 +71,10 @@ def test_compose_full_mode_delivery_quality(tree, capsys):
 
     info = tools.locate(load(tree))
     v = probe(info, t.composed("en"))
-    d = load(tree)["delivery"]
-    assert (v.width, v.height) == (d["width"], d["height"])
-    assert abs(v.fps - d["fps"]) < 0.5
+    cfg = load(tree)
+    widescreen = cfg["compose"]["layouts"]["widescreen"]
+    assert (v.width, v.height) == (widescreen["width"], widescreen["height"])
+    assert abs(v.fps - cfg["delivery"]["fps"]) < 0.5
 
     # No bumpers were made, so there is no offset and the sidecar's cues are unshifted.
     assert r["body_offset"] == 0.0
@@ -120,8 +124,9 @@ def test_compose_draft_mode_unchanged_behaviour(tree, capsys):
 
     info = tools.locate(load(tree))
     v = probe(info, t.draft("en"))
-    c = load(tree)["compose"]
-    assert (v.width, v.height) == (c["draft_width"], c["draft_height"])
+    widescreen = load(tree)["compose"]["layouts"]["widescreen"]
+    want = _draft_dims(widescreen["width"], widescreen["height"])
+    assert (v.width, v.height) == want
 
 
 def test_compose_burn_subtitles_in_full_mode_skips_sidecar(tree, capsys):
@@ -210,3 +215,78 @@ def test_status_next_is_compose_for_draft_only(tree, capsys):
     bcn(capsys, "compose", str(t.dir), "--draft")
     _, env = bcn(capsys, "status", str(t.dir))
     assert env["results"][0]["en"]["next"] == "compose"
+
+
+def test_compose_multiple_layouts_in_one_run(tree, capsys):
+    """Selecting more than one layout builds each its own file, at its own resolution, but
+    writes exactly one shared sidecar SRT (layout-independent: it's just shifted text)."""
+    t = Topic(tree, "KV7015", "U01", "T01")
+    _build_up_to_cues(tree, capsys, t)
+    code, env = bcn(capsys, "compose", str(t.dir), "--layout", "widescreen", "--layout", "vertical_stacked")
+    assert code == 0, env["diagnostics"]
+    r = env["results"][0]
+    names = {lo["name"] for lo in r["layouts"]}
+    assert names == {"widescreen", "vertical_stacked"}
+
+    cfg = load(tree)
+    info = tools.locate(cfg)
+    wide = probe(info, t.composed("en", "widescreen"))
+    vert = probe(info, t.composed("en", "vertical_stacked"))
+    ws, vs = cfg["compose"]["layouts"]["widescreen"], cfg["compose"]["layouts"]["vertical_stacked"]
+    assert (wide.width, wide.height) == (ws["width"], ws["height"])
+    assert (vert.width, vert.height) == (vs["width"], vs["height"])
+    assert vert.height > vert.width, "vertical_stacked must be portrait"
+
+    # One sidecar, shared by both layouts' delivery.
+    assert t.composed_srt("en").is_file()
+    assert not (t.build / "subtitles" / f"{t.id}.en.vertical_stacked.delivery.srt").exists()
+
+
+def test_compose_full_bleed_inset_arrangement(tree, capsys):
+    """vertical_inset: the presenter fills the frame; the slide is the small inset box."""
+    t = Topic(tree, "KV7015", "U01", "T01")
+    _build_up_to_cues(tree, capsys, t)
+    code, env = bcn(capsys, "compose", str(t.dir), "--layout", "vertical_inset")
+    assert code == 0, env["diagnostics"]
+    r = env["results"][0]["layouts"][0]
+    assert r["name"] == "vertical_inset" and r["arrangement"] == "full_bleed_inset"
+
+    cfg = load(tree)
+    info = tools.locate(cfg)
+    v = probe(info, t.composed("en", "vertical_inset"))
+    layout = cfg["compose"]["layouts"]["vertical_inset"]
+    assert (v.width, v.height) == (layout["width"], layout["height"])
+    assert v.height > v.width
+
+
+def test_compose_unknown_layout_fails(tree, capsys):
+    t = Topic(tree, "KV7015", "U01", "T01")
+    _build_up_to_cues(tree, capsys, t)
+    code, env = bcn(capsys, "compose", str(t.dir), "--layout", "square")
+    assert code != 0
+    assert env["diagnostics"][0]["code"] == "CONFIG_INVALID"
+
+
+def test_package_delivers_extra_layouts_and_excludes_stale_ones(tree, capsys):
+    t = Topic(tree, "KV7015", "U01", "T01")
+    _build_up_to_cues(tree, capsys, t)
+    code, env = bcn(capsys, "compose", str(t.dir), "--layout", "widescreen", "--layout", "vertical_stacked")
+    assert code == 0, env["diagnostics"]
+    # vertical_inset was never composed, so it's simply absent, not stale.
+    code, env = bcn(capsys, "package", str(t.dir))
+    assert code == 0, env["diagnostics"]
+    manifest = json.loads(t.manifest("en").read_text())
+    names = {lo["name"] for lo in manifest["layouts"]}
+    assert names == {"widescreen", "vertical_stacked"}
+    assert (t.out / f"{t.id}.mp4").is_file()
+    assert (t.out / f"{t.id}.vertical_stacked.mp4").is_file()
+
+    # Staling the extra layout's file (without touching the default layout's) excludes it
+    # from the next package with a diagnostic, instead of failing the whole package.
+    age(t.composed("en", "vertical_stacked"), 120)
+    code, env = bcn(capsys, "package", str(t.dir), "--force")
+    assert code == 0, env["diagnostics"]
+    manifest = json.loads(t.manifest("en").read_text())
+    names = {lo["name"] for lo in manifest["layouts"]}
+    assert names == {"widescreen"}
+    assert any(d["code"] == "PACKAGE_STALE_LAYOUT" for d in env["diagnostics"])

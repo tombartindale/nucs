@@ -140,7 +140,13 @@ def bumpers_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, lang
                                         lang=lang, file=f"themes/{theme.name}/theme.toml",
                                         hint="Put the logo in the theme directory and set logo under [bumper] in theme.toml."))
     tl = tools.require(cfg, "marp", "chrome", "ffmpeg")
-    b, d = theme.bumper, cfg["delivery"]
+    b = theme.bumper
+    # Bumpers aren't layout-aware: compose rescales the intro/outro it delivers to each
+    # layout's own frame size anyway (see compose.py's bumper re-encode), so the card/video
+    # built here just needs some base resolution — the default (widescreen) layout's, same
+    # as every programme already got before [delivery] carried a size of its own.
+    d = {**cfg["delivery"], "width": cfg["compose"]["layouts"]["widescreen"]["width"],
+         "height": cfg["compose"]["layouts"]["widescreen"]["height"]}
 
     work = t.build / f".bumpers-{lang}"
     shutil.rmtree(work, ignore_errors=True)

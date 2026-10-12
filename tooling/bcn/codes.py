@@ -66,6 +66,7 @@ CODES: dict[str, tuple[str, str]] = {
     "DOC_DUPLICATE_ID": ("error", "An id appears more than once."),
     "DOC_TOPIC_NOT_IN_MAP": ("error", "A topic is not listed in the course map."),
     "READINGLIST_EMPTY": ("info", "No unit in the course map has a Reading paragraph."),
+    "DOCPDF_NOTHING": ("info", "No assignment or activity document was found in scope."),
     # --- render ----------------------------------------------------------
     "RENDER_FAILED": ("error", "Marp did not produce the expected output."),
     "RENDER_SLIDE_COUNT": ("error", "Rendered slide count differs from the parsed slide count."),
@@ -104,6 +105,7 @@ CODES: dict[str, tuple[str, str]] = {
     "QUIZ_NO_CORRECT": ("error", "A quiz question has no option marked correct with ✔."),
     "QUIZ_NO_FEEDBACK": ("warn", "A quiz option has no → feedback."),
     "QUIZ_NOT_A_QUIZ": ("info", "The activity is not a quiz, so there is nothing to export."),
+    "QUIZ_ZH_PARITY": ("error", "A translated quiz has a different question count, options, or correct answer(s) than the English."),
     # --- compose ---------------------------------------------------------
     "COMPOSE_BUMPER": ("warn", "A bumper is configured but could not be used."),
     "COMPOSE_NAME_TAG": ("warn", "The speaker's name tag could not be rendered; the video was composed without it."),
@@ -111,6 +113,7 @@ CODES: dict[str, tuple[str, str]] = {
     # --- package ---------------------------------------------------------
     "PKG_COUNT_MISMATCH": ("error", "Slide image count, cue sheet rows and source slide count disagree."),
     "PKG_TRANSCODED": ("info", "The video was transcoded to the delivery specification."),
+    "PACKAGE_STALE_LAYOUT": ("warn", "An extra layout's composed video is older than its sources; it was not delivered this run."),
     # --- review ----------------------------------------------------------
     "REVIEW_UNKNOWN_ITEM": ("error", "No suspected mis-transcription with that id."),
     # --- edit ------------------------------------------------------------

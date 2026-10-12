@@ -19,10 +19,17 @@ max_divergence = 0.10
 format = "srt"           # PLACEHOLDER: "srt", "vtt" or "both"
 
 [delivery]
-# PLACEHOLDER: partner delivery spec unconfirmed; the defaults are 1920x1080, 25 fps, h264/aac.
+# PLACEHOLDER: partner delivery spec unconfirmed; the defaults are 25 fps, h264/aac (each
+# [compose.layouts.*] entry below carries its own frame size).
 
-[compose]
-layout = "side_by_side"  # presenter fills the right half: export the edit at 960x1080, square pixels
+# [compose] builds the "widescreen" layout (1920x1080, side_by_side: presenter fills the
+# right half, export the edit at 960x1080 square pixels) by default; nothing needs setting
+# here to keep that. Uncomment to also build a vertical layout when --layout/the UI selects
+# it, or to tune a preset's own fields:
+# [compose.layouts.widescreen]
+# inset_margin = 16
+# [compose.layouts.vertical_stacked]
+# split_ratio = 0.45
 
 [bumpers]
 intro = ""
