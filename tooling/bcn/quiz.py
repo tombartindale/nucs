@@ -196,6 +196,31 @@ def parse_quiz(path: Path, rel: str) -> Quiz:
     return Quiz(title, front, questions, diags)
 
 
+def parity_diagnostics(en: Quiz, zh: Quiz, rel: str) -> list[Diagnostic]:
+    """A translation must keep the same questions, the same lettered options, and the same
+    correct answer(s) — only the stem/option/feedback text is expected to differ. rel is the
+    zh file's path, since that's what the diagnostics are reported against."""
+    diags: list[Diagnostic] = []
+    if len(en.questions) != len(zh.questions):
+        diags.append(Diagnostic("QUIZ_ZH_PARITY", f"{rel} has {len(zh.questions)} question(s); the English has {len(en.questions)}.",
+                                file=rel, hint="A translation must keep the same questions, in the same order."))
+        return diags
+    for eq, zq in zip(en.questions, zh.questions):
+        where = {"file": rel, "line": zq.line}
+        e_letters, z_letters = [o.letter for o in eq.options], [o.letter for o in zq.options]
+        if e_letters != z_letters:
+            diags.append(Diagnostic("QUIZ_ZH_PARITY", f"{zq.title} has options ({', '.join(z_letters)}); "
+                                    f"the English has ({', '.join(e_letters)}).", **where))
+            continue
+        e_correct = [o.letter for o in eq.options if o.correct]
+        z_correct = [o.letter for o in zq.options if o.correct]
+        if e_correct != z_correct:
+            diags.append(Diagnostic("QUIZ_ZH_PARITY", f"{zq.title} marks ({', '.join(z_correct)}) correct; "
+                                    f"the English marks ({', '.join(e_correct)}).", **where,
+                                    hint="A translation must not change which answer is correct."))
+    return diags
+
+
 # -- QTI 2.1 ------------------------------------------------------------------------------
 
 def _p(paragraphs: list[str]) -> str:

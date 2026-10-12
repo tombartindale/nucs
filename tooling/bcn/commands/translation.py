@@ -3,11 +3,20 @@
 --export  For every topic in scope (all or nothing), put the English SRT (reviewed corrections
           applied) and the narration-stripped slide markdown in a batch folder
           and zip under translation/exports/, with a manifest, and record the
-          export in each topic's translation.json.
---import  Take returned <topic_id>.zh.md and <topic_id>.zh.srt files from a folder
-          or zip, place them as topic.zh.md and edit/master.zh.srt, then run
-          validate --lang zh and subtitles --lang zh across the batch and report
-          every failure together, so they go back to the translator in one message.
+          export in each topic's translation.json. In-scope assignment-N.md and
+          unit activity.md documents ride along in the same batch, raw text
+          (no stripping) under the flat name bcn sync already knows for them
+          (KV7016-assignment-1.md, KV7016-U01-activity.md) — ready the same
+          way a module document is ready anywhere else: no error from bcn
+          validate's module-document checks.
+--import  Take returned <topic_id>.zh.md / .zh.srt, <module>-assignment-N.zh.md and
+          <module>-<unit>-activity.zh.md files from a folder or zip, place them
+          as topic.zh.md/edit/master.zh.srt, assignment-N.zh.md and
+          activity.zh.md, then run validate --lang zh (and subtitles --lang zh
+          for topics) across the batch and report every failure together, so
+          they go back to the translator in one message. A translated quiz is
+          checked for parity against the English too: same questions, same
+          correct answer(s) — only the wording may differ.
 """
 
 from __future__ import annotations
@@ -21,13 +30,19 @@ import zipfile
 from pathlib import Path
 
 from .. import fsutil
+from ..coursemap import load_course_map, validate_activity, validate_doc
+from ..config import load
 from ..envelope import Diagnostic, Envelope, Fail, TopicResult, sha256_file, utcnow
 from ..markdown import parse
 from ..runner import run_topics
 from ..state import TopicState, module_context
+from ..sync import local_to_remote, remote_to_local
 from ..tree import Target, Topic, is_noise, topic_from_id
 from . import subtitles as subtitles_cmd
+from . import transfer as transfer_cmd
 from . import validate as validate_cmd
+
+DOC_ZH_RE = re.compile(r"^([A-Z]{2}\d{4})-(?:assignment-\d+|U\d{2}-activity)\.zh\.md$")
 
 HELP = "export topics for translation, or import what comes back"
 
@@ -36,6 +51,21 @@ def add_args(p: argparse.ArgumentParser) -> None:
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--export", action="store_true", help="export the topics beneath the path")
     g.add_argument("--import", dest="source", metavar="DIR_OR_ZIP", help="import returned files")
+
+
+def _doc_scope(root: Path, module: str, unit: str | None) -> list[str]:
+    """English assignment-N.md / unit activity.md names (relative to the module) in scope —
+    the same unit-narrowing bcn transfer's _module_files() uses: assignment-N.md only at
+    module/root scope, a unit's activity.md at any scope that reaches that unit."""
+    mdir = root / module
+    names: list[str] = []
+    if unit is None:
+        names.extend(sorted(p.name for p in mdir.glob("assignment-*.md") if not p.name.endswith(".zh.md")))
+    unit_dirs = [mdir / unit] if unit else sorted(mdir.glob("U[0-9][0-9]"))
+    for d in unit_dirs:
+        if (d / "activity.md").is_file():
+            names.append(f"{d.name}/activity.md")
+    return names
 
 
 def _export(env: Envelope, target: Target) -> None:
@@ -67,10 +97,28 @@ def _export(env: Envelope, target: Target) -> None:
             r.diagnostics.append(Diagnostic("XL_NOT_READY", f"{t.id} is not ready to export: {'; '.join(reasons)}.", topic=t.id, lang="zh"))
             continue
         ready.append((t, r))
-    if not ready or len(ready) < len(env.results):
+
+    unit = target.rel.split("/")[1] if target.level in ("unit", "topic") else None
+    doc_ready: list[tuple[str, str, Path, TopicResult]] = []
+    for m in target.modules:
+        mdir = target.root / m
+        diags = validate_cmd.module_documents(Target(target.root, mdir, "module", m, [m], [], []))
+        for name in _doc_scope(target.root, m, unit):
+            rel = f"{m}/{name}"
+            r = TopicResult(rel, rel)
+            env.results.append(r)
+            if any(d.level == "error" for d in diags if d.file == rel):
+                r.ok = False
+                r.diagnostics.append(Diagnostic("XL_NOT_READY", f"{rel} is not ready to export: it has not passed validate.",
+                                                file=rel, lang="zh"))
+                continue
+            doc_ready.append((m, name, mdir / name, r))
+
+    if not (ready or doc_ready) or (len(ready) + len(doc_ready)) < len(env.results):
         # A batch is a handover: all of the scope goes, or none of it does.
-        if ready:
-            env.diagnostics.append(Diagnostic("XL_NOT_READY", f"Nothing was exported: {len(env.results) - len(ready)} of {len(env.results)} topics are not ready.",
+        if ready or doc_ready:
+            not_ready = len(env.results) - len(ready) - len(doc_ready)
+            env.diagnostics.append(Diagnostic("XL_NOT_READY", f"Nothing was exported: {not_ready} of {len(env.results)} items are not ready.",
                                               hint="Fix them, or export a narrower scope."))
         return
     work = Path(tempfile.mkdtemp(prefix=".export-", dir=target.root))
@@ -84,11 +132,21 @@ def _export(env: Envelope, target: Target) -> None:
             shutil.copyfile(t.subtitle_out("en", "srt"), srt)
             for f in (md, srt):
                 files.append({"topic": t.id, "name": f.name, "bytes": f.stat().st_size, "sha256": sha256_file(f)})
+        for m, name, path, _r in doc_ready:
+            remote_name = local_to_remote(m, name)
+            dest = work / remote_name
+            shutil.copyfile(path, dest)
+            files.append({"topic": None, "document": f"{m}/{name}", "name": remote_name,
+                          "bytes": dest.stat().st_size, "sha256": sha256_file(dest)})
         manifest = {
-            "batch": batch, "created": utcnow(), "topics": [t.id for t, _ in ready], "files": files,
+            "batch": batch, "created": utcnow(), "topics": [t.id for t, _ in ready],
+            "documents": [f"{m}/{name}" for m, name, _, _ in doc_ready], "files": files,
             "return": "For each topic return <topic_id>.zh.md (same slides, same breaks, lang: zh, no Say blocks, "
                       "with the title: line and every slide heading translated) "
-                      "and <topic_id>.zh.srt (same cue count, identical timings, translated text).",
+                      "and <topic_id>.zh.srt (same cue count, identical timings, translated text). "
+                      "For each assignment or activity document, return its name with .zh added before .md "
+                      "(KV7016-assignment-1.md -> KV7016-assignment-1.zh.md): the same structure, translated — "
+                      "a quiz keeps the same questions, in the same order, with the same correct answer(s).",
         }
         fsutil.write_json(work / "manifest.json", manifest)
         out_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -110,6 +168,9 @@ def _export(env: Envelope, target: Target) -> None:
         fsutil.write_json(t.translation_file, rec)
         r.extra["batch"] = batch
         r.diagnostics.append(Diagnostic("XL_EXPORTED", f"{t.id} exported in batch {batch}.", topic=t.id, lang="zh"))
+    for m, name, _path, r in doc_ready:
+        r.extra["batch"] = batch
+        r.diagnostics.append(Diagnostic("XL_EXPORTED", f"{m}/{name} exported in batch {batch}.", file=f"{m}/{name}", lang="zh"))
     env.artifacts.append(env.artifact(zpath, "translation-export"))
     env.extra["batch"] = batch
     env.extra["folder"] = env.rel(out_dir)
@@ -135,16 +196,23 @@ def _import(env: Envelope, target: Target, source: str, args: argparse.Namespace
         else:
             raise Fail("USAGE", f"{source} must be a folder or a .zip.")
         found: dict[str, dict[str, Path]] = {}
+        doc_found: dict[str, Path] = {}  # "<module>/<local_rel>" -> the returned .zh.md file
         for f in sorted(base.rglob("*")):
             if not f.is_file() or is_noise(f.name) or "__MACOSX" in f.parts:
                 continue
             m = re.match(r"^([A-Z]{2}\d{4}-U\d{2}-T\d{2})\.zh\.(md|srt)$", f.name)
-            if not m:
-                if f.name != "manifest.json":
-                    env.diagnostics.append(Diagnostic("XL_UNKNOWN_FILE", f"'{f.name}' is not a <topic_id>.zh.md or <topic_id>.zh.srt file; ignored.",
-                                                      file=f.name))
+            if m:
+                found.setdefault(m.group(1), {})[m.group(2)] = f
                 continue
-            found.setdefault(m.group(1), {})[m.group(2)] = f
+            dm = DOC_ZH_RE.match(f.name)
+            local_rel = remote_to_local(dm.group(1), f.name) if dm else None
+            if dm and local_rel:
+                doc_found[f"{dm.group(1)}/{local_rel}"] = f
+                continue
+            if f.name != "manifest.json":
+                env.diagnostics.append(Diagnostic("XL_UNKNOWN_FILE",
+                                                  f"'{f.name}' is not a <topic_id>.zh.md/.zh.srt, <module>-assignment-N.zh.md, "
+                                                  f"or <module>-<unit>-activity.zh.md file; ignored.", file=f.name))
         in_scope = {t.id for t in target.topics}
         placed: list[Topic] = []
         results: dict[str, TopicResult] = {}
@@ -174,11 +242,32 @@ def _import(env: Envelope, target: Target, source: str, args: argparse.Namespace
                                                 topic=tid, lang="zh"))
             r.extra["files"] = actions
             placed.append(t)
+        placed_docs: list[tuple[str, str]] = []  # (module, local_rel), e.g. ("KV7015", "assignment-1.zh.md")
+        doc_results: dict[str, TopicResult] = {}
+        for key, f in sorted(doc_found.items()):
+            module, local_rel = key.split("/", 1)
+            rel = f"{module}/{local_rel}"
+            r = TopicResult(rel, rel)
+            doc_results[rel] = r
+            env.results.append(r)
+            if not transfer_cmd._in_scope(target, module, local_rel):
+                r.ok = False
+                r.diagnostics.append(Diagnostic("XL_UNKNOWN_FILE", f"{rel} is outside {target.rel}; it was not placed.", file=rel, lang="zh"))
+                continue
+            dest = target.root / module / local_rel
+            data = f.read_bytes()
+            if dest.is_file() and dest.read_bytes() == data:
+                r.extra["action"] = "unchanged"
+            else:
+                r.extra["action"] = "replaced" if dest.exists() else "placed"
+                fsutil.write_bytes(dest, data)
+                r.diagnostics.append(Diagnostic("XL_IMPORTED", f"{r.extra['action'].capitalize()} {rel}.", file=rel, lang="zh"))
+            placed_docs.append((module, local_rel))
     finally:
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    if not placed:
+    if not placed and not placed_docs:
         return
     # Check the whole batch at once: parity first, then SRT timings.
     sub = Target(target.root, target.path, target.level, target.rel, target.modules, placed, [])
@@ -194,11 +283,35 @@ def _import(env: Envelope, target: Target, source: str, args: argparse.Namespace
             r.diagnostics.extend(d for d in sr.diagnostics if d.level != "info")
     for r in results.values():
         r.ok = not any(d.level == "error" for d in r.diagnostics)
+
+    # Each returned assignment/activity document, checked against the zh headings config and
+    # (for a quiz) against its English sibling's structure — scoped to just this one document,
+    # so (unlike check_topic's whole-topic validate) every error it finds is relevant to report.
+    for module, local_rel in placed_docs:
+        rel = f"{module}/{local_rel}"
+        r = doc_results[rel]
+        mdir = target.root / module
+        docs_cfg = load(target.root, mdir)["documents"]
+        cm = load_course_map(mdir, docs_cfg["course_map_headings"])
+        path = mdir / local_rel
+        if local_rel.endswith("activity.zh.md"):
+            u = local_rel.split("/")[0]
+            diags = validate_activity(path, rel, docs_cfg["activity_headings"], cm.outcomes, module, u,
+                                      docs_cfg["activity_types"], lang="zh", required_zh=docs_cfg["activity_headings_zh"])
+        else:
+            diags = validate_doc(path, rel, docs_cfg["assignment_headings"], cm.outcomes, lang="zh",
+                                 required_zh=docs_cfg["assignment_headings_zh"])
+        r.diagnostics.extend(diags)
+        r.ok = not any(d.level == "error" for d in diags)
+
     env.extra["return_to_translator"] = [
         {"topic": d.topic, "code": d.code, "message": d.message}
         for r in results.values() for d in r.diagnostics
         if d.level == "error" and d.code in ("MD_PARITY_COUNT", "MD_PARITY_BREAK", "MD_SAY_IN_ZH", "MD_ZH_UNTRANSLATED",
                                              "SRT_ZH_CUE_COUNT", "SRT_ZH_TIMING", "FS_MISSING")
+    ] + [
+        {"topic": r.topic, "code": d.code, "message": d.message}
+        for r in doc_results.values() for d in r.diagnostics if d.level == "error"
     ]
 
 

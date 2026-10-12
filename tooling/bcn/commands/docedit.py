@@ -3,11 +3,14 @@
   bcn docedit <module> --doc course-map.md --from FILE [--expect-sha SHA] [--dry-run]
   bcn docedit <module> --doc U01/activity.md --from FILE
   bcn docedit <module> --doc assignment-1.md --from FILE
+  bcn docedit <module> --doc assignment-1.zh.md --from FILE
 
 --doc must be one of the module documents bcn already recognises: course-map.md,
-assets.md, reading-list.md, assignment-N.md, or a unit's activity.md. Anything
-else is refused — this is the one place that decides what counts as an editable
-module document, so nothing else needs its own copy of that list.
+assets.md, reading-list.md, assignment-N.md, a unit's activity.md, or either's
+.zh.md translation (bcn translation places these; this is also how a hand
+correction to a returned translation gets saved). Anything else is refused —
+this is the one place that decides what counts as an editable module document,
+so nothing else needs its own copy of that list.
 
 Generalizes bcn edit's sha-conflict and .history/ versioning (edit.py works on
 exactly one topic's topic.md/topic.zh.md; module documents have no topic, no
@@ -32,7 +35,7 @@ from .validate import module_documents
 
 HELP = "save edited text for a module document, then validate the module"
 KEEP_VERSIONS = 30
-DOC_NAME_RE = re.compile(r"^(?:course-map\.md|assets\.md|reading-list\.md|assignment-\d+\.md|U\d{2}/activity\.md)$")
+DOC_NAME_RE = re.compile(r"^(?:course-map\.md|assets\.md|reading-list\.md|assignment-\d+(?:\.zh)?\.md|U\d{2}/activity(?:\.zh)?\.md)$")
 
 
 def add_args(p: argparse.ArgumentParser) -> None:
@@ -52,7 +55,7 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
         raise Fail("USAGE", "docedit works on one module directory.")
     if not DOC_NAME_RE.match(args.doc):
         raise Fail("USAGE", f"'{args.doc}' is not a module document bcn recognises.",
-                   hint="Use course-map.md, assets.md, reading-list.md, assignment-N.md, or U01/activity.md.")
+                   hint="Use course-map.md, assets.md, reading-list.md, assignment-N.md, U01/activity.md, or either's .zh.md.")
     m = target.modules[0]
     mdir = target.root / m
     doc_path = mdir / args.doc

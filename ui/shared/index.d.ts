@@ -46,17 +46,18 @@ export type TopicStatus = Omit<GenTopic, 'en' | 'zh' | 'artifacts' | 'outcomes'>
 };
 /** A unit quiz (activity.md with type: quiz) and its QTI package from bcn qti. */
 export interface QuizInfo { questions: number; package: string; exists: boolean; stale: boolean | null }
-/** course-map.md's printed PDF from bcn coursemap. */
-export interface CoursemapPdfInfo { path: string; exists: boolean; stale: boolean | null }
+/** A document's printed PDF: course-map.md from bcn coursemap, or an assignment-N.md /
+ * activity.md (and its .zh.md translation, once made) from bcn docpdf. */
+export interface DocPdfInfo { path: string; exists: boolean; stale: boolean | null }
 export interface ModuleDocument {
-  path: string; exists: boolean; errors: number; warnings: number; quiz: QuizInfo | null; pdf: CoursemapPdfInfo | null;
+  path: string; exists: boolean; errors: number; warnings: number; quiz: QuizInfo | null; pdf: DocPdfInfo | null;
 }
 export interface ModuleSummary {
   topics: number; units: string[]; en: Record<string, number>; zh: Record<string, number>; complete: Record<Lang, number>;
   blocked: number; stale: number; cloud: number; diagnostics: Record<Level, number>; unreviewed: number;
   course_map: boolean; documents: ModuleDocument[]; errors: number; title: string; unit_titles: Record<string, string>;
   /** The module's reading list (bcn readinglist), null if there's no course-map.md to build it from. */
-  reading_list: CoursemapPdfInfo | null;
+  reading_list: DocPdfInfo | null;
 }
 /** GET /api/theme: whether a custom theme (themes/custom/) has been uploaded and/or activated. */
 export interface ThemeStatus { uploaded: boolean; active: boolean; files: string[] }

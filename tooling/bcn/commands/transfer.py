@@ -1,8 +1,9 @@
 """bcn transfer: a one-shot whole-tree handover, in or out, as a single zip.
 
 --export  Zip every recognised content file in scope — course-map.md, assets.md,
-          reading-list.md, assignment-N.md, activity.md, topic.md/topic.zh.md by
-          default; add --media for topic assets/ and the edited video/subtitles
+          reading-list.md, assignment-N.md, activity.md (and either's .zh.md
+          translation, once made), topic.md/topic.zh.md by default; add --media
+          for topic assets/ and the edited video/subtitles
           too, and/or --slides for each topic's narration-stripped slide
           markdown (generated fresh from topic.md, the same text package would
           deliver, whether or not the topic has actually been packaged yet) —
@@ -125,9 +126,9 @@ def _module_files(root: Path, module: str, unit: str | None) -> list[str]:
                 out.append(f.name)
     unit_dirs = [mdir / unit] if unit else sorted(mdir.glob("U[0-9][0-9]"))
     for unit_dir in unit_dirs:
-        activity = unit_dir / "activity.md"
-        if activity.is_file():
-            out.append(f"{unit_dir.name}/activity.md")
+        for name in ("activity.md", "activity.zh.md"):
+            if (unit_dir / name).is_file():
+                out.append(f"{unit_dir.name}/{name}")
     return out
 
 

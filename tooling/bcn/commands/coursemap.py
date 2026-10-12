@@ -5,6 +5,11 @@ labels, bullet/numbered lists and pipe tables. This renders exactly that subset
 to styled HTML and prints it with the pinned Chrome (the same tool bcn script
 uses), rather than pulling in a general markdown library. Written to
 <module>/build/course-map.pdf; skipped if already newer than course-map.md.
+
+document_html()/quiz_html() below are the same rendering, generalised, for
+bcn docpdf's own assignment-N.md/activity.md PDFs — kept here rather than
+duplicated there, since the CSS and theme/font-face plumbing (_font_stack,
+font_faces_css) already lives in this file and in .bumpers.
 """
 
 from __future__ import annotations
@@ -16,12 +21,11 @@ import shutil
 
 from .. import fsutil, tools
 from ..config import load, load_theme, resolve_theme_name
-from ..coursemap import load_course_map
+from ..coursemap import load_course_map, module_title
 from ..envelope import Diagnostic, Envelope, Fail, TopicResult
 from ..progress import run as run_proc
 from ..tree import Target
 from .bumpers import _font_stack, font_faces_css
-from .status import _module_title
 
 HELP = "the module's course map as a PDF"
 
@@ -44,6 +48,9 @@ th, td { border: 1px solid #ccc; padding: 4pt 6pt; text-align: left; vertical-al
 th { background: #f0f0f0; font-weight: 600; }
 ul, ol { margin: 0 0 10pt; padding-left: 18pt; font-size: 10pt; line-height: 1.45; }
 li { margin: 0 0 4pt; }
+ol.options { margin-bottom: 16pt; }
+ol.options li.correct { font-weight: 600; }
+ol.options .feedback { font-weight: 400; font-style: italic; color: #444; margin: 2pt 0 6pt; }
 """
 
 
@@ -66,6 +73,17 @@ def _table(rows: list[str]) -> str:
 
 
 def coursemap_html(module: str, title: str | None, lines: list[str], theme=None) -> str:
+    return document_html(module, lines, theme=theme, heading="Course map", title=title)
+
+
+def document_html(module: str, lines: list[str], theme=None, heading: str | None = None, title: str | None = None,
+                  lang: str = "en") -> str:
+    """Plain markdown (headings, bold labels, bullet/numbered lists, pipe tables) rendered to a
+    styled, printable HTML page — shared by bcn coursemap (course-map.md) and bcn docpdf
+    (assignment-N.md, a task's activity.md). heading is a generic label shown before an em
+    dash and the title ("Course map — KV7015"); pass heading=None for a document whose own
+    first-level heading is already a complete, self-describing title (an assignment brief,
+    say "Assignment 1: A research proposal") rather than a label needing a subject appended."""
     parts: list[str] = []
     i, n = 0, len(lines)
     list_tag: str | None = None
@@ -115,19 +133,46 @@ def coursemap_html(module: str, title: str | None, lines: list[str], theme=None)
         i += 1
     if list_tag:
         parts.append(f"</{list_tag}>")
+    return _page(module, heading, title, "".join(parts), theme, lang)
+
+
+def _page(module: str, heading: str | None, title: str | None, body: str, theme=None, lang: str = "en") -> str:
+    """The HTML page shell (doctype, head, header with id/title/logo) around already-built
+    body HTML — shared by document_html and quiz_html, which differ only in how they turn
+    their source (plain markdown, or a parsed Quiz) into that body."""
     theme_css = ""
     if theme:
-        theme_css = font_faces_css(theme) + f"body {{ font-family: {_font_stack(theme.fonts['en'])}; }}\n" \
+        theme_css = font_faces_css(theme) + f"body {{ font-family: {_font_stack(theme.fonts[lang])}; }}\n" \
             f":root {{ --title-weight: {theme.title_weight}; }}\n"
-    heading = f"{module}{' — ' + title if title else ''}"
+    page_title = f"{module}{' — ' + title if title else ''}"
     logo = ""
     if theme and theme.document["logo"]:
         logo = f"<img class='logo' src='{theme.asset(theme.document['logo']).as_uri()}' alt='' style='height: {theme.document['logo_height']:.0f}pt'>"
-    return (f"<!doctype html><html lang='en'><head><meta charset='utf-8'><title>{html.escape(heading)} course map</title>"
+    h1 = f"{html.escape(heading)}{' — ' + html.escape(title) if title else ''}" if heading else html.escape(title or module)
+    return (f"<!doctype html><html lang='{lang}'><head><meta charset='utf-8'><title>{html.escape(page_title)}</title>"
             f"<style>{CSS}{theme_css}</style></head><body>"
             f"<header><div class='row'><div><div class='id'>{html.escape(module)}</div>"
-            f"<h1>Course map{' — ' + html.escape(title) if title else ''}</h1></div>{logo}</div></header>"
-            + "".join(parts) + "</body></html>")
+            f"<h1>{h1}</h1></div>{logo}</div></header>"
+            + body + "</body></html>")
+
+
+def quiz_html(quiz, module: str, title: str | None, theme=None, lang: str = "en") -> str:
+    """A unit's quiz (bcn qti's own parsed Quiz) rendered for print: every question's stem,
+    its lettered options with the correct one marked the same way the source markdown marks
+    it, and each option's feedback shown beneath it — for sharing the quiz, answers included,
+    with a collaborator who shouldn't have to read raw markdown to review it."""
+    parts: list[str] = []
+    for q in quiz.questions:
+        parts.append(f"<h2>{_inline(q.title)}</h2>")
+        parts.extend(f"<p>{_inline(p)}</p>" for p in q.stem)
+        parts.append("<ol class='options' type='a'>")
+        for o in q.options:
+            parts.append(f"<li class='{'correct' if o.correct else ''}'>{_inline(o.text)}{' ✔' if o.correct else ''}")
+            if o.feedback:
+                parts.append(f"<div class='feedback'>{_inline(o.feedback)}</div>")
+            parts.append("</li>")
+        parts.append("</ol>")
+    return _page(module, None, title, "".join(parts), theme, lang)
 
 
 def add_args(p: argparse.ArgumentParser) -> None:
@@ -162,7 +207,7 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
         try:
             tl = tools.require(cfg, "marp", "chrome")
             cm = load_course_map(mdir, cfg["documents"]["course_map_headings"])
-            title = _module_title(src)
+            title = module_title(src)
             lines = src.read_text(encoding="utf-8-sig").splitlines()
             work = mdir / "build" / ".coursemap-pdf"
             work.mkdir(parents=True, exist_ok=True)

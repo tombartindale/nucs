@@ -33,6 +33,7 @@ Run the tests with `cd tooling && .venv/bin/python -m pytest` (bcn) and `cd ui &
 bcn validate|render|script|bumpers|cues|subtitles|compose|package|qa|status <path> [--lang en|zh] [--human] [--quiet] [--force] [--theme NAME] [--jobs N]
 bcn show|diagnostics|review|intake|translation <path> ...   # used by the UI; see --help
 bcn qti <unit|module|activity.md> [--force]                  # unit quizzes as QTI 2.1 packages for an LMS
+bcn coursemap|docpdf|readinglist <module|unit|root> [--force] # course map / assignment-N.md and activity.md / reading list, as PDF(s)
 bcn schema <tool> | bcn codes | bcn doctor
 ```
 
@@ -55,7 +56,8 @@ Exit codes are 0 OK, 1 validation, 2 usage, 3 missing input, 4 tool failure, and
 | `review` | Records accept/correct decisions on suspected mis-transcriptions in the topic's `review.json`. |
 | `cues --set N=HH:MM:SS.mmm` | Places a boundary by hand when `cues` cannot. It is recorded in `review.json`. |
 | `intake --from FILE` | The UI's paste box: identify, check against the course map, place, validate. It never overwrites a file that differs; it returns a diff instead. |
-| `translation --export / --import` | The batch round trip. Export is all or nothing. Import runs `validate --lang zh` and `subtitles --lang zh` on the whole batch and lists everything to send back to the translator. |
+| `translation --export / --import` | The batch round trip: topics, plus any in-scope `assignment-N.md`/`activity.md` that has passed validate, ride along in the same zip. Export is all or nothing. Import runs `validate --lang zh` (and `subtitles --lang zh` for a topic) on the whole batch and lists everything to send back to the translator — for a quiz, that includes a changed correct answer or question count. |
+| `docpdf <module|unit|root>` | Prints each in-scope `assignment-N.md`/`activity.md` (and its `.zh.md` translation, once made) to a PDF, the same way `coursemap` prints `course-map.md`. A quiz prints as its questions and options, correct answer marked. |
 | `doctor`, `codes` | Tool check and the full list of diagnostic codes. |
 
 ### Files in a topic folder
@@ -89,7 +91,7 @@ Exit codes are 0 OK, 1 validation, 2 usage, 3 missing input, 4 tool failure, and
 
 `assets.md` is a table with `Asset`, `Topic` and `Status` columns. Any status other than delivered, done, received, complete or closed counts as outstanding and blocks the listed topics.
 
-`activity.md` and `assignment-*.md` are checked for their required headings and for `LOn` references the course map can resolve. The required headings are configurable in `programme.toml` under `[documents]`.
+`activity.md` and `assignment-*.md` are checked for their required headings and for `LOn` references the course map can resolve. The required headings are configurable in `programme.toml` under `[documents]`. Each has its own `.zh.md` translation, same as a topic's `topic.zh.md` — required headings for the Mandarin version are configured separately (`activity_headings_zh`/`assignment_headings_zh`, empty/unchecked by default), and a quiz's zh version is checked against the English for the same questions, options and correct answer(s).
 
 ### Editing scripts
 

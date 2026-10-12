@@ -261,6 +261,23 @@ def _map_row(cm: CourseMap, unit: str, cells: list[str], ln: int, rel: str) -> N
     cm.topics.append(MapTopic(unit, code, title, minutes, outcomes, ln))
 
 
+def module_title(p: Path) -> str | None:
+    """A document's own subtitle: the text of its first "# " heading, with the parent
+    directory's name (the module code for course-map.md/assignment-N.md, the unit id for
+    activity.md) stripped off the front if it's there. None if the file can't be read, has
+    no such heading, or the heading is just a generic label ("KV7016 — Course map" names the
+    document, not the module, so that one's not a subtitle worth showing)."""
+    try:
+        for line in p.read_text(encoding="utf-8-sig").splitlines():
+            if line.startswith("# "):
+                title = line[2:].strip()
+                title = title[len(p.parent.name):].strip(" :-—–") if title.startswith(p.parent.name) else title
+                return None if title.lower() in ("course map", "course-map", "") else title
+    except OSError:
+        return None
+    return None
+
+
 @dataclass
 class AssetRequest:
     asset: str
@@ -295,11 +312,14 @@ def load_assets(module_dir: Path) -> list[AssetRequest]:
 
 
 def validate_doc(path: Path, rel: str, required: list[str], outcomes: dict[str, str], unit: str | None = None,
-                 text: str | None = None) -> list[Diagnostic]:
+                 text: str | None = None, lang: str = "en", required_zh: list[str] | None = None) -> list[Diagnostic]:
+    """lang picks which required-headings list applies: required for "en", required_zh (which
+    defaults to empty, i.e. skipped) for "zh" — there's no established convention yet for
+    translated heading text, so a programme that wants it checked configures required_zh itself."""
     diags: list[Diagnostic] = []
     lines = (text.replace("\r\n", "\n").replace("\r", "\n").splitlines() if text is not None
              else path.read_text(encoding="utf-8-sig").splitlines())
-    _check_headings(lines, required, rel, diags)
+    _check_headings(lines, (required_zh or []) if lang == "zh" else required, rel, diags)
     for i, line in enumerate(lines):
         for lo in LO_RE.findall(line):
             if outcomes and lo not in outcomes:
@@ -311,12 +331,17 @@ def validate_doc(path: Path, rel: str, required: list[str], outcomes: dict[str, 
 
 
 def validate_activity(path: Path, rel: str, required: list[str], outcomes: dict[str, str], module: str, unit: str,
-                      types: list[str], text: str | None = None) -> list[Diagnostic]:
+                      types: list[str], text: str | None = None, lang: str = "en",
+                      required_zh: list[str] | None = None) -> list[Diagnostic]:
     """An activity: optional front matter (unit, type, lang), required headings if configured, outcome refs.
     text overrides the file's real content; a quiz-type activity's question content is still
     read from disk even then (bcn qti's parser has no text-override hook), so a dry-run of an
-    edited quiz won't reflect unsaved question changes until it is actually saved."""
-    diags = validate_doc(path, rel, required, outcomes, unit, text=text)
+    edited quiz won't reflect unsaved question changes until it is actually saved.
+
+    lang="zh" (path is .../activity.zh.md): the quiz parity check also compares against the
+    English sibling activity.md, so a translation can't silently change which option is
+    correct or drop a question (text/feedback are expected to differ — that's the point)."""
+    diags = validate_doc(path, rel, required, outcomes, unit, text=text, lang=lang, required_zh=required_zh)
     lines = (text.replace("\r\n", "\n").replace("\r", "\n").splitlines() if text is not None
              else path.read_text(encoding="utf-8-sig").splitlines())
     if lines and lines[0].strip() == "---":
@@ -335,6 +360,11 @@ def validate_activity(path: Path, rel: str, required: list[str], outcomes: dict[
             diags.append(Diagnostic("DOC_ID_FORMAT", f"{rel} has type: {fm['type'][0]}; expected one of {', '.join(types)}.",
                                     file=rel, line=fm["type"][1]))
         if fm.get("type", ("",))[0] == "quiz":
-            from .quiz import parse_quiz  # the same parser bcn qti exports with
-            diags.extend(parse_quiz(path, rel).diagnostics)
+            from .quiz import parity_diagnostics, parse_quiz  # the same parser bcn qti exports with
+            zh_quiz = parse_quiz(path, rel)
+            diags.extend(zh_quiz.diagnostics)
+            if lang == "zh":
+                en_path = path.with_name(path.name[:-len(".zh.md")] + ".md")
+                if en_path.is_file():
+                    diags.extend(parity_diagnostics(parse_quiz(en_path, rel.replace(".zh.md", ".md")), zh_quiz, rel))
     return diags

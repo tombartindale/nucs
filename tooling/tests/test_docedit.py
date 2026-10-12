@@ -107,3 +107,21 @@ def test_creates_a_new_activity_doc(tree, capsys):
     assert code == 0, env["diagnostics"]
     assert env["results"][0]["written"] is True
     assert (tree / "KV7015" / "U02" / "activity.md").read_text() == "# U02 Activity\n\n## Task\n\nDo it.\n"
+
+
+def test_edits_a_translated_activity_doc(tree, capsys):
+    draft = tree.parent / "draft.md"
+    draft.write_text("# U01 活动\n\n## Task\n\n做吧。\n\n## Outcomes\n\nLO1\n")
+    code, env = bcn(capsys, "docedit", str(tree / "KV7015"), "--doc", "U01/activity.zh.md", "--from", str(draft))
+    assert code == 0, env["diagnostics"]
+    assert env["results"][0]["written"] is True
+    assert (tree / "KV7015" / "U01" / "activity.zh.md").is_file()
+
+
+def test_edits_a_translated_assignment_doc(tree, capsys):
+    draft = tree.parent / "draft.md"
+    draft.write_text("# 作业一\n\n## Brief\n\n写吧。\n\n## Outcomes\n\nLO1\n\n## Assessment criteria\n\n- 清晰度\n")
+    code, env = bcn(capsys, "docedit", str(tree / "KV7015"), "--doc", "assignment-1.zh.md", "--from", str(draft))
+    assert code == 0, env["diagnostics"]
+    assert env["results"][0]["written"] is True
+    assert (tree / "KV7015" / "assignment-1.zh.md").is_file()

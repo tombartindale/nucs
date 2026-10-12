@@ -29,10 +29,19 @@ const lines = computed(() => (text.value ?? '').replace(/\r\n/g, '\n').split('\n
 const worst = (ds: Diagnostic[]) => (ds.some((d) => d.level === 'error') ? 'error' : 'warn');
 // A unit quiz: export it for the LMS and download the package, from what bcn status reports.
 const beacon = useBeacon();
-const quiz = computed(() => beacon.status?.summary.modules[module]?.documents.find((d) => d.path === props.path)?.quiz ?? null);
+const doc = computed(() => beacon.status?.summary.modules[module]?.documents.find((d) => d.path === props.path) ?? null);
+const quiz = computed(() => doc.value?.quiz ?? null);
+const pdf = computed(() => doc.value?.pdf ?? null);
+const isCourseMap = props.path.endsWith('/course-map.md');
 const unitTarget = props.path.split('/').slice(0, 2).join('/');
 async function exportQuiz() {
   await beacon.runJob('qti', [unitTarget], { force: true });  // a button press always rebuilds; it takes milliseconds
+}
+async function exportPdf() {
+  // course-map.md's PDF is bcn coursemap, module-scoped; an assignment/activity's is bcn
+  // docpdf, which also only takes module/unit/root scope — an activity narrows to its unit.
+  const target = isCourseMap ? module : (/\/activity(?:\.zh)?\.md$/.test(props.path) ? unitTarget : module);
+  await beacon.runJob(isCourseMap ? 'coursemap' : 'docpdf', [target], { force: true });
 }
 const scrollTo = (n: number) => document.getElementById(`L${n}`)?.scrollIntoView({ block: 'center' });
 
@@ -70,6 +79,21 @@ onMounted(async () => {
         </q-btn-dropdown>
         <q-btn v-else outline no-caps icon="quiz" label="Export to LMS" :disable="diags.some((d) => d.level === 'error')" @click="exportQuiz">
           <q-tooltip max-width="320px">{{ diags.some((d) => d.level === 'error') ? 'Fix the errors below first: a quiz with errors is not exported.' : STEP_HELP.qti }}</q-tooltip>
+        </q-btn>
+      </template>
+      <template v-if="pdf">
+        <q-btn-dropdown v-if="pdf.exists" split unelevated no-caps icon="picture_as_pdf" :color="pdf.stale ? 'warning' : 'primary'"
+          :label="pdf.stale ? 'Download PDF (out of date)' : 'Download PDF'" :href="fileUrl(pdf.path, null, 'download=1')">
+          <q-tooltip v-if="pdf.stale">This document has changed since the PDF was made. Make it again first.</q-tooltip>
+          <q-list>
+            <q-item clickable v-close-popup @click="exportPdf">
+              <q-item-section avatar><q-icon name="picture_as_pdf" /></q-item-section>
+              <q-item-section>Make again</q-item-section>
+            </q-item>
+          </q-list>
+        </q-btn-dropdown>
+        <q-btn v-else outline no-caps icon="picture_as_pdf" label="Make PDF" @click="exportPdf">
+          <q-tooltip max-width="320px">{{ isCourseMap ? STEP_HELP.coursemap : STEP_HELP.docpdf }}</q-tooltip>
         </q-btn>
       </template>
       <q-btn outline no-caps icon="edit" label="Edit" :to="`/edit-doc/${path}`" />

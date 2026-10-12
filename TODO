@@ -1,4 +1,11 @@
-- Server-side upload and storage of configs, templates, css and image/video assets (and fonts).
-- Multiple projects (for MPV2)
 - Tidy main menu
-- add assignments functionality (import/ export / validation and PDF gen)
+- timeline / project time projection
+  - calculate back from a set deadline for a module delivery
+  - produce calendar that can be shared (can it create an ics that I can sync with outlook?)
+  - email reminders (and current progress)
+
+MVP2
+
+- multiple projects
+- ACL
+- multiple languages

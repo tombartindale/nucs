@@ -57,19 +57,23 @@ def module_documents(target: Target, override_path: Path | None = None, override
         if target.level == "unit":
             units = [target.rel.split("/")[1]]
         for u in units:
-            act = mdir / u / "activity.md"
-            act_text = override_text if override_path == act else None
-            if act.is_file() or act_text is not None:
-                out.extend(coursemap.validate_activity(act, f"{m}/{u}/activity.md", docs["activity_headings"], cm.outcomes,
-                                                       m, u, docs["activity_types"], text=act_text))
+            for name, lang in ((f"{u}/activity.md", "en"), (f"{u}/activity.zh.md", "zh")):
+                act = mdir / name
+                act_text = override_text if override_path == act else None
+                if act.is_file() or act_text is not None:
+                    out.extend(coursemap.validate_activity(act, f"{m}/{name}", docs["activity_headings"], cm.outcomes,
+                                                           m, u, docs["activity_types"], text=act_text, lang=lang,
+                                                           required_zh=docs["activity_headings_zh"]))
         if target.level in ("root", "module"):
             names = {a.name for a in mdir.glob("assignment-*.md")}
-            if override_path and override_path.parent == mdir and re.match(r"assignment-\d+\.md", override_path.name):
+            if override_path and override_path.parent == mdir and re.match(r"assignment-\d+(?:\.zh)?\.md", override_path.name):
                 names.add(override_path.name)
             for name in sorted(names):
                 a = mdir / name
                 a_text = override_text if override_path == a else None
-                out.extend(coursemap.validate_doc(a, f"{m}/{name}", docs["assignment_headings"], cm.outcomes, text=a_text))
+                lang = "zh" if name.endswith(".zh.md") else "en"
+                out.extend(coursemap.validate_doc(a, f"{m}/{name}", docs["assignment_headings"], cm.outcomes, text=a_text,
+                                                   lang=lang, required_zh=docs["assignment_headings_zh"]))
     return out
 
 

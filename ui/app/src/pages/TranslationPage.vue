@@ -62,6 +62,13 @@ const scopes = computed(() => Object.entries(beacon.status?.summary.modules || {
   .flatMap(([m, info]) => [m, ...info.units.map((u) => `${m}/${u}`)]));
 const ready = computed(() => (beacon.status?.results || [])
   .filter((r) => r.zh.next === 'translation_export' && (!scope.value || r.path.startsWith(scope.value))));
+// Assignment briefs and unit activities ride along in the same batch (bcn translation),
+// once they exist and have no outstanding validate error — mirrored from how translation.py
+// itself decides a document is ready to export.
+const readyDocs = computed(() => Object.values(beacon.status?.summary.modules || {})
+  .flatMap((info) => info.documents || [])
+  .filter((d) => /\/(assignment-\d+|activity)\.md$/.test(d.path) && d.exists && !d.errors
+    && (!scope.value || d.path.startsWith(scope.value))));
 const zips = computed(() => lists.value.exports.filter((x) => x.kind === 'zip'));
 
 const message = computed(() => {
@@ -87,8 +94,10 @@ const copy = () => navigator.clipboard.writeText(message.value).then(() => beaco
             <q-btn unelevated color="primary" no-caps label="Export batch" :disable="!scope || busy" :loading="busy" @click="doExport" />
           </q-card-section>
           <q-card-section class="text-caption text-grey-7 q-pt-none">
-            {{ plural(ready.length, 'topic') }} in {{ scope || 'the programme' }} ready to send.
-            A batch goes all or nothing: every topic in scope must have passed validate and subtitles, with its mis-transcriptions reviewed.
+            {{ plural(ready.length, 'topic') }}{{ readyDocs.length ? ` and ${plural(readyDocs.length, 'assessment document')}` : '' }}
+            in {{ scope || 'the programme' }} ready to send.
+            A batch goes all or nothing: everything in scope must have passed validate (and, for a topic, subtitles
+            too, with its mis-transcriptions reviewed).
           </q-card-section>
         </q-card>
         <q-card flat bordered>
@@ -122,7 +131,8 @@ const copy = () => navigator.clipboard.writeText(message.value).then(() => beaco
             </q-item>
           </q-list>
           <q-card-section v-else class="text-grey-7">Nothing returned yet.</q-card-section>
-          <q-card-section class="text-caption text-grey-7">Expected names: &lt;topic_id&gt;.zh.md and &lt;topic_id&gt;.zh.srt.</q-card-section>
+          <q-card-section class="text-caption text-grey-7">Expected names: &lt;topic_id&gt;.zh.md and &lt;topic_id&gt;.zh.srt, or
+            &lt;module&gt;-assignment-N.zh.md / &lt;module&gt;-&lt;unit&gt;-activity.zh.md for a returned assessment document.</q-card-section>
         </q-card>
         <q-card v-if="lastImport?.env" flat bordered>
           <q-card-section class="row items-center gap-sm">

@@ -77,6 +77,14 @@ def test_export_unit_scope_excludes_other_units_and_course_map(tree, capsys):
     assert names == {"KV7015-U01-T01.md", "KV7015-U01-activity.md", "manifest.json"}
 
 
+def test_export_includes_a_translated_activity(tree, capsys):
+    (tree / "KV7015" / "U01" / "activity.zh.md").write_text("# U01 活动\n\n## Task\n\n做吧。\n\n## Outcomes\n\nLO1\n")
+    code, env = bcn(capsys, "transfer", str(tree / "KV7015"), "--export")
+    assert code == 0, env["diagnostics"]
+    names = _names(tree / env["zip"])
+    assert "KV7015-U01-activity.zh.md" in names
+
+
 def test_export_nothing_in_scope(tree, capsys):
     (tree / "KV7015" / "U02").mkdir(parents=True)
     code, env = bcn(capsys, "transfer", str(tree / "KV7015" / "U02"), "--export")

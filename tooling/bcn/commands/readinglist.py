@@ -16,10 +16,9 @@ from __future__ import annotations
 import argparse
 
 from .. import fsutil
-from ..coursemap import load_course_map, split_citations
+from ..coursemap import load_course_map, module_title, split_citations
 from ..envelope import Diagnostic, Envelope, TopicResult
 from ..tree import Target
-from .status import _module_title
 
 HELP = "every unit's Reading paragraph from the module map, as one list"
 
@@ -62,7 +61,7 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
             env.results.append(r)
             continue
         cm = load_course_map(mdir)
-        title = _module_title(src)
+        title = module_title(src)
         text = _render(m, title, cm)
         fsutil.write_text(out, text)
         n = sum(len(split_citations(reading)) for reading in cm.readings.values())

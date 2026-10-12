@@ -35,6 +35,14 @@ def test_name_mapping():
     # that is PULL_ONLY below, a separate guard from the naming table.
     assert local_to_remote("KV7016", "U01/T01/edit/master.mp4") == "KV7016-U01-T01.mp4"
     assert remote_to_local("KV7016", "KV7016-U01-T01.mp4") == "U01/T01/edit/master.mp4"
+    # Assessment documents and their zh translation (bcn translation places these).
+    assert remote_to_local("KV7016", "KV7016-assignment-1.md") == "assignment-1.md"
+    assert remote_to_local("KV7016", "KV7016-assignment-1.zh.md") == "assignment-1.zh.md"
+    assert remote_to_local("KV7016", "assignment-1.zh.md") == "assignment-1.zh.md"  # module prefix is optional
+    assert remote_to_local("KV7016", "KV7016-U01-activity.md") == "U01/activity.md"
+    assert remote_to_local("KV7016", "KV7016-U01-activity.zh.md") == "U01/activity.zh.md"
+    assert local_to_remote("KV7016", "assignment-1.zh.md") == "KV7016-assignment-1.zh.md"
+    assert local_to_remote("KV7016", "U01/activity.zh.md") == "KV7016-U01-activity.zh.md"
 
 
 def test_media_is_pull_only():

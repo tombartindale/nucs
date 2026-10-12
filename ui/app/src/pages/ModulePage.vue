@@ -121,6 +121,22 @@ async function exportReadingList() {
   else beacon.toast('The reading list could not be made; see Jobs.', true);
 }
 
+// Assignment briefs and unit activities (quiz or task) — everything bcn docpdf prints,
+// i.e. every document except course-map.md/assets.md/reading-list.md.
+const assessments = computed(() => (m.value?.documents || [])
+  .filter((d) => /\/(assignment-\d+|activity)(?:\.zh)?\.md$/.test(d.path)));
+async function exportAssessmentPdfs() {
+  const n = assessments.value.length;
+  const ok = await confirm({
+    title: `Make PDFs for ${plural(n, 'assessment document')}?`,
+    lines: [
+      { text: `This runs bcn docpdf ${props.module}, writing one PDF per assignment brief and unit activity to ${props.module}/build/.`, strong: `bcn docpdf ${props.module}` },
+      'Documents whose PDF is already current are skipped.',
+    ],
+  });
+  if (ok) await beacon.runJob('docpdf', [props.module], {});
+}
+
 // The only module-wide document that's actually in use today; assets.md is listed by
 // status but unused. reading-list.md is no longer hand-authored either — it's generated
 // from the module map's own per-unit Reading paragraphs (bcn readinglist) rather than
@@ -200,6 +216,9 @@ async function sendReminder() {
         <StateChip v-if="m.cloud" kind="cloud" :label="`☁ ${m.cloud} cloud-only`" />
         <q-btn v-if="quizzes.length" outline dense no-caps icon="quiz" label="Export quizzes to LMS" @click="exportQuizzes">
           <q-tooltip max-width="320px">{{ STEP_HELP.qti }}</q-tooltip>
+        </q-btn>
+        <q-btn v-if="assessments.length" outline dense no-caps icon="picture_as_pdf" label="Export assessment PDFs" @click="exportAssessmentPdfs">
+          <q-tooltip max-width="320px">{{ STEP_HELP.docpdf }}</q-tooltip>
         </q-btn>
         <q-btn outline dense no-caps label="Run QA on module" @click="beacon.runJob('qa', [module], {})" />
         <template v-if="moduleMap">
