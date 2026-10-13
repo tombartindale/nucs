@@ -119,6 +119,9 @@ CODES: dict[str, tuple[str, str]] = {
     # --- edit ------------------------------------------------------------
     "EDIT_CONFLICT": ("error", "The file changed on disk while it was being edited; the edit was not saved."),
     "EDIT_SAVED": ("info", "Edited text was saved."),
+    # --- caption -----------------------------------------------------------
+    "CAPTION_SAVED": ("info", "A subtitle cue's text was corrected."),
+    "CAPTION_RANGE": ("error", "The requested cue index does not exist in this subtitle file."),
     # --- intake ----------------------------------------------------------
     "INTAKE_NO_TOPICS": ("error", "No topic front matter was found in the pasted text."),
     "INTAKE_NOT_IN_MAP": ("error", "The pasted topic is not in the course map."),

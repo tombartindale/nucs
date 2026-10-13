@@ -53,6 +53,7 @@ export function jobLabel(command: string, targets: string[], args: JobArgs): str
   if (args.lang === 'zh') what += ' (zh)';
   if (args.force) what += ' --force';
   if (command === 'cues' && args.set) what = `cues: set slide ${args.set}`;
+  if (command === 'caption') what = `caption: cue ${args.cue}`;
   if (command === 'review') what = `review: ${args.accept ? 'accept' : args.correct ? 'correct' : 'clear'}`;
   if (command === 'ack') what = args.clear ? 'withdraw acknowledgement' : `acknowledge ${String(args.fingerprint ?? '').split('|')[0]}`;
   if (command === 'sync') what = `${args.pull ? 'pull from OneDrive' : 'push to OneDrive'}${args.prefer ? ' (keep chosen version)' : ''}`;

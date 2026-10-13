@@ -217,7 +217,8 @@ onBeforeUnmount(stopSegment);
       <p class="text-grey-7">The partner translates from this SRT, so a mishearing here reaches Mandarin. Listen, then click whichever
         reading is actually correct — <strong>Script</strong> or <strong>SRT</strong> — to deliver that text; or type the exact words on the
         right if neither is right. Timings never change — only the delivered text. Run subtitles and package afterwards. A decision takes a
-        moment to save — the item moves to Reviewed below once it has.</p>
+        moment to save — the item moves to Reviewed below once it has.
+        <router-link v-if="props.topic" :to="`/caption/${props.topic}?lang=en`">Or edit captions directly in the player.</router-link></p>
       <q-card v-if="mt[0].rows.length" flat bordered class="q-mb-md">
         <q-card-section class="text-subtitle1 text-weight-medium q-pb-sm">{{ mt[0].title }} ({{ mt[0].rows.length }})</q-card-section>
         <q-list separator>

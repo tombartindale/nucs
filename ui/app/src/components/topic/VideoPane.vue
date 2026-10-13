@@ -128,6 +128,10 @@ onBeforeUnmount(() => {
         <q-tooltip max-width="320px">The editor's auto-captions may have misheard a name, an acronym or jargon. The partner translates from this SRT, so it reaches Mandarin if left uncorrected.</q-tooltip>
       </q-btn>
       <span v-else class="text-caption text-grey-7">Cue markers from the cue sheet</span>
+      <q-btn v-if="media?.subtitles.en || media?.subtitles.zh" flat dense no-caps size="sm" icon="subtitles" label="Edit captions"
+        :to="`/caption/${t.id}?lang=${subs === 'zh' ? 'zh' : 'en'}`">
+        <q-tooltip>Play the video with the subtitle text editable alongside it, for a final pass</q-tooltip>
+      </q-btn>
     </q-card-section>
     <MediaUpload />
     <q-card-section v-if="!media?.master" class="text-grey-7">No edited video yet (edit/master.mp4).</q-card-section>

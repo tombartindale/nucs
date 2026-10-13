@@ -16,7 +16,7 @@ from .envelope import Diagnostic, Envelope, Fail, emit
 from .tree import find_root, resolve
 
 COMMANDS = [
-    "validate", "render", "script", "bumpers", "cues", "subtitles", "compose", "status", "package", "qa",
+    "validate", "render", "script", "bumpers", "cues", "caption", "subtitles", "compose", "status", "package", "qa",
     "show", "diagnostics", "review", "ack", "edit", "docedit", "intake", "translation", "transfer", "qti", "coursemap",
     "docpdf", "readinglist", "sync", "schema", "codes", "doctor", "themecheck",
 ]
