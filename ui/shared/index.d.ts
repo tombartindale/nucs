@@ -209,26 +209,36 @@ export interface UnitTask {
 }
 export type MilestoneKind = 'briefs_done' | 'recorded' | 'translated' | 'packaged';
 /** One module-wide checkpoint: every topic reaching a given stage. dueDate is only
- *  projected for briefs_done/recorded (backward-chained from the delivery date);
- *  translated/packaged report current progress only, not a forecast. */
+ *  projected for briefs_done/recorded (backward-chained from each unit's own delivery
+ *  date); translated/packaged report current progress only, not a forecast. */
 export interface Milestone { kind: MilestoneKind; done: boolean; remaining: number; dueDate: string | null }
+/** One unit's own schedule: its agreed date (if set) and whether its own tasks fit
+ *  before it, computed independently of every other unit's date. */
+export interface UnitPlan {
+  unit: string; deliveryDate: string | null;
+  onTrack: boolean | null;   // null if this unit has no agreed date yet
+  daysBehind: number;        // 0 if on track or no date set
+}
 export interface ModulePlanComputed {
-  deliveryDate: string | null;
   topicsTotal: number; topicsRecorded: number; topicsRemaining: number; topicsNotDrafted: number;
-  onTrack: boolean | null;       // null if no delivery_date set
-  daysBehind: number;            // how far the earliest outstanding deadline has slipped past today; 0 if on track
+  onTrack: boolean | null;       // worst-unit-wins: null if no unit has a date set yet
+  daysBehind: number;            // the worst (largest) daysBehind across all units
+  units: UnitPlan[];             // one per unit, in course-map order
   milestones: Milestone[];       // always 4, in pipeline order — the producer's headline view
   tasks: UnitTask[];             // outstanding scripts/recording batches, one per unit, in course-map order
 }
 export interface ModulePlanResponse {
-  module: string; deliveryDate: string | null; ownerName: string; ownerEmail: string; icsUrl: string;
+  module: string; ownerName: string; ownerEmail: string; icsUrl: string;
   plan: ModulePlanComputed;
 }
-export interface ModulePlanRequest { deliveryDate?: string | null; ownerName?: string; ownerEmail?: string }
+export interface ModulePlanRequest { ownerName?: string; ownerEmail?: string }
+/** PUT /api/module/:name/plan/units/:unit — sets that one unit's own agreed date. */
+export interface UnitPlanRequest { deliveryDate: string | null }
 export interface ModulePlanRemindResponse { ok: true; sentTo: string }
-/** The producer's cross-module view (GET /api/plans): milestones and daysBehind only, no topic-level task detail. */
+/** The producer's cross-module view (GET /api/plans): milestones and the worst-unit-wins
+ *  on-track rollup only, no topic-level task detail. */
 export type PlansSummaryResponse = Record<string, {
-  deliveryDate: string | null; onTrack: boolean | null; daysBehind: number; milestones: Milestone[];
+  onTrack: boolean | null; daysBehind: number; units: UnitPlan[]; milestones: Milestone[];
 }>;
 
 export interface ErrorResponse { error: string }

@@ -149,15 +149,20 @@ const MILESTONE_LABEL: Record<string, string> = {
   briefs_done: 'Briefs done', recorded: 'Recorded', translated: 'Translated', packaged: 'Packaged',
 };
 const plan = ref<ModulePlanResponse | null>(null);
-const planForm = reactive({ deliveryDate: '', ownerName: '', ownerEmail: '' });
+const planForm = reactive({ ownerName: '', ownerEmail: '' });
 const planSaving = ref(false);
 const reminding = ref(false);
+// One date input per unit, keyed by unit code — each unit's delivery date is agreed and
+// saved independently of every other unit's (see planning.ts).
+const unitDateForm = reactive<Record<string, string>>({});
+const savingUnit = ref<string | null>(null);
 
 function syncPlanForm() {
   if (!plan.value) return;
-  planForm.deliveryDate = plan.value.deliveryDate ?? '';
   planForm.ownerName = plan.value.ownerName;
   planForm.ownerEmail = plan.value.ownerEmail;
+  for (const key of Object.keys(unitDateForm)) delete unitDateForm[key];
+  for (const u of plan.value.plan.units) unitDateForm[u.unit] = u.deliveryDate ?? '';
 }
 async function loadPlan() {
   plan.value = await api<ModulePlanResponse>(`/api/module/${props.module}/plan`);
@@ -171,7 +176,7 @@ async function savePlan() {
   try {
     plan.value = await api<ModulePlanResponse>(`/api/module/${props.module}/plan`, {
       method: 'PUT',
-      body: { deliveryDate: planForm.deliveryDate || null, ownerName: planForm.ownerName, ownerEmail: planForm.ownerEmail },
+      body: { ownerName: planForm.ownerName, ownerEmail: planForm.ownerEmail },
     });
     beacon.toast('Delivery plan saved.');
   } catch (e) {
@@ -179,6 +184,32 @@ async function savePlan() {
   } finally {
     planSaving.value = false;
   }
+}
+
+async function saveUnitDate(unit: string) {
+  savingUnit.value = unit;
+  try {
+    plan.value = await api<ModulePlanResponse>(`/api/module/${props.module}/plan/units/${unit}`, {
+      method: 'PUT',
+      body: { deliveryDate: unitDateForm[unit] || null },
+    });
+    syncPlanForm();
+    beacon.toast(`${unit} delivery date saved.`);
+  } catch (e) {
+    beacon.toast((e as Error).message, true);
+  } finally {
+    savingUnit.value = null;
+  }
+}
+
+// The browser's own calendar-picker glyph can't be reliably sized or vertically centred
+// to match a Quasar append icon (it's rendered deep in the UA's own shadow DOM, not ours
+// to lay out) — so it's hidden via CSS below, and this opens the same native picker from
+// a Quasar-rendered prepend icon instead, which Quasar lays out identically to the save
+// button on the other side.
+function openDatePicker(ev: MouseEvent) {
+  const input = (ev.currentTarget as HTMLElement).closest('.q-field')?.querySelector('input[type="date"]') as HTMLInputElement | null;
+  input?.showPicker?.();
 }
 
 const webcalUrl = computed(() => plan.value ? plan.value.icsUrl.replace(/^https?:\/\//, 'webcal://') : '');
@@ -271,7 +302,7 @@ async function sendReminder() {
           <q-item-section>
             <q-item-label>Delivery planning</q-item-label>
             <q-item-label caption>
-              {{ plan.deliveryDate ? `Delivery ${plan.deliveryDate}` : 'No delivery date set' }}
+              {{ plan.plan.units.some((u) => u.deliveryDate) ? plan.plan.units.filter((u) => u.deliveryDate).map((u) => `${u.unit} ${u.deliveryDate}`).join(', ') : 'No delivery dates agreed yet' }}
               <span v-if="plan.ownerName || plan.ownerEmail"> · {{ plan.ownerName }}{{ plan.ownerName && plan.ownerEmail ? ' · ' : '' }}{{ plan.ownerEmail }}</span>
             </q-item-label>
           </q-item-section>
@@ -281,8 +312,32 @@ async function sendReminder() {
           </q-item-section>
         </template>
         <q-card flat bordered>
+          <!-- Each unit's delivery date is agreed independently — production runs one unit
+               at a time, so there's no single module-wide date to infer the rest from. -->
+          <q-card-section>
+            <div class="row q-col-gutter-md">
+              <div v-for="u in plan.plan.units" :key="u.unit" class="col-12 col-sm-6 col-md-4">
+                <q-input v-model="unitDateForm[u.unit]" type="date" dense outlined class="unit-date-input"
+                  :label="`${u.unit}${m.unit_titles?.[u.unit] ? ' — ' + m.unit_titles[u.unit] : ''}`">
+                  <template v-slot:prepend>
+                    <q-icon name="event" size="20px" class="cursor-pointer" @click="openDatePicker" />
+                  </template>
+                  <template v-slot:append>
+                    <q-btn flat dense round size="sm" icon="save" color="primary"
+                      :loading="savingUnit === u.unit" @click="saveUnitDate(u.unit)">
+                      <q-tooltip>Save delivery date</q-tooltip>
+                    </q-btn>
+                  </template>
+                </q-input>
+                <div class="text-caption q-mt-xs" style="min-height: 18px"
+                  :class="u.onTrack === false ? 'text-negative' : 'text-positive'">
+                  {{ u.onTrack === null ? '' : (u.onTrack ? 'On track' : `${plural(u.daysBehind, 'day')} behind`) }}
+                </div>
+              </div>
+            </div>
+          </q-card-section>
+          <q-separator />
           <q-card-section class="row items-end gap-md">
-            <q-input v-model="planForm.deliveryDate" type="date" dense outlined label="Delivery date" style="max-width: 200px" />
             <q-input v-model="planForm.ownerName" dense outlined label="Responsible — name" style="max-width: 220px" />
             <q-input v-model="planForm.ownerEmail" dense outlined label="Responsible — email" style="max-width: 260px" />
             <q-btn color="primary" no-caps label="Save" :loading="planSaving" @click="savePlan" />
@@ -439,4 +494,10 @@ body.body--dark .planning-card :deep(.bg-green-1) { background: rgba(76, 175, 80
 .plan-tasks { width: 100%; border-collapse: collapse; }
 .plan-tasks th { text-align: left; font-weight: normal; color: var(--q-grey-7, #757575); font-size: 12px; padding: 4px 8px; }
 .plan-tasks td { padding: 4px 8px; border-top: 1px solid rgba(0, 0, 0, .06); }
+/* The browser's own calendar-picker glyph on a native <input type="date"> lives inside the
+   UA's own shadow DOM, not ours to lay out — it can't be made to line up with a Quasar
+   append icon reliably across browsers. Hidden entirely in favour of the prepend q-icon
+   above, which opens the same native picker (via showPicker()) but is laid out by Quasar
+   like every other icon in the app. */
+.unit-date-input :deep(input[type='date']::-webkit-calendar-picker-indicator) { display: none; }
 </style>

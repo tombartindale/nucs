@@ -16,7 +16,7 @@ import extractZip from 'extract-zip';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type {
   BcnDiagnosticsEnvelope, BcnDoceditEnvelope, BcnEditEnvelope, BcnReviewEnvelope, BcnStatusEnvelope, BcnSyncEnvelope, BcnThemecheckEnvelope,
-  BootResponse, JobArgs, ModulePlanRemindResponse, ModulePlanRequest, ModulePlanResponse, PlansSummaryResponse, ShowEnvelope, TranslationItem,
+  BootResponse, JobArgs, ModulePlanRemindResponse, ModulePlanRequest, ModulePlanResponse, PlansSummaryResponse, ShowEnvelope, TranslationItem, UnitPlanRequest,
 } from '@beacon/shared';
 import { jobLabel, type App } from './app.js';
 import { SESSION_COOKIE } from './auth.js';
@@ -341,23 +341,19 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
 
   async function planFor(module: string): Promise<ModulePlanResponse> {
     const row = await app.db.getPlan(module);
+    const unitDates = await app.db.getUnitPlans(module);
     const status = await app.status.get();
     const topics = status ? moduleTopicsFor(status, module) : [];
-    const plan = computeModulePlan(topics, row.delivery_date);
+    const plan = computeModulePlan(topics, unitDates);
     const icsUrl = `${app.auth.baseUrl}/api/module/${module}/plan/${row.ics_token}/calendar.ics`;
-    return { module, deliveryDate: row.delivery_date, ownerName: row.owner_name, ownerEmail: row.owner_email, icsUrl, plan };
+    return { module, ownerName: row.owner_name, ownerEmail: row.owner_email, icsUrl, plan };
   }
 
   f.get(`/api/module/:name(${MODULE})/plan`, async (req: Req) => planFor(req.params.name));
 
   f.put(`/api/module/:name(${MODULE})/plan`, async (req: Req) => {
     const data = await readJson(req) as ModulePlanRequest;
-    const fields: { delivery_date?: string | null; owner_name?: string; owner_email?: string } = {};
-    if ('deliveryDate' in data) {
-      const d = data.deliveryDate;
-      if (d !== null && d !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new BadRequest('deliveryDate must be YYYY-MM-DD or null.');
-      fields.delivery_date = d ?? null;
-    }
+    const fields: { owner_name?: string; owner_email?: string } = {};
     if ('ownerName' in data) fields.owner_name = String(data.ownerName ?? '');
     if ('ownerEmail' in data) {
       const email = String(data.ownerEmail ?? '');
@@ -365,6 +361,15 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
       fields.owner_email = email;
     }
     await app.db.upsertPlan(req.params.name, fields);
+    return planFor(req.params.name);
+  });
+
+  // Each unit's own agreed delivery date, set independently of every other unit's.
+  f.put(`/api/module/:name(${MODULE})/plan/units/:unit(^U\\d{2}$)`, async (req: Req) => {
+    const data = await readJson(req) as unknown as UnitPlanRequest;
+    const d = data.deliveryDate;
+    if (d !== null && d !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new BadRequest('deliveryDate must be YYYY-MM-DD or null.');
+    await app.db.upsertUnitPlan(req.params.name, req.params.unit, d ?? null);
     return planFor(req.params.name);
   });
 
@@ -380,9 +385,10 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
       return reply.code(404).send({ error: 'Not found.' });
     }
+    const unitDates = await app.db.getUnitPlans(module);
     const status = await app.status.get();
     const topics = status ? moduleTopicsFor(status, module) : [];
-    const plan = computeModulePlan(topics, row.delivery_date);
+    const plan = computeModulePlan(topics, unitDates);
     const events: IcsEvent[] = plan.tasks.filter((t) => t.deadline).map((t) => ({
       uid: `${module}-${t.unit}-${t.kind}@beacon-ui`,
       date: t.deadline as string,
@@ -391,7 +397,9 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
         ? `${plural(t.topics.length, 'script')} to write.`
         : `${plural(t.topics.length, 'topic')}, ~${fmtMinutes(t.estimatedMinutes)} total, in one session.`,
     }));
-    if (plan.deliveryDate) events.push({ uid: `${module}-delivery@beacon-ui`, date: plan.deliveryDate, summary: `Delivery: ${module}` });
+    for (const u of plan.units) {
+      if (u.deliveryDate) events.push({ uid: `${module}-${u.unit}-delivery@beacon-ui`, date: u.deliveryDate, summary: `Delivery: ${module} ${u.unit}` });
+    }
     const ics = buildIcs(module, events);
     reply.header('Content-Type', 'text/calendar; charset=utf-8');
     reply.header('Content-Disposition', `inline; filename="${module}-plan.ics"`);
@@ -400,13 +408,14 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
 
   f.post(`/api/module/:name(${MODULE})/plan/remind`, async (req: Req): Promise<ModulePlanRemindResponse> => {
     const module = req.params.name;
-    const { ownerName, ownerEmail, deliveryDate, plan } = await planFor(module);
+    const { ownerName, ownerEmail, plan } = await planFor(module);
     if (!ownerEmail) throw new BadRequest('Set an owner email before sending a reminder.');
     const upcoming = plan.tasks.filter((t) => t.deadline).slice(0, 5);
+    const dated = plan.units.filter((u) => u.deliveryDate);
     const lines = [
       `Hi ${ownerName || 'there'},`, '',
       `Progress on ${module}: ${plan.topicsRecorded}/${plan.topicsTotal} recorded, ${plan.topicsNotDrafted} not yet drafted.`,
-      deliveryDate ? `Delivery date: ${deliveryDate}.` : 'No delivery date set yet.', '',
+      dated.length ? `Delivery dates: ${dated.map((u) => `${u.unit} ${u.deliveryDate}`).join(', ')}.` : 'No delivery dates agreed yet.', '',
       ...(upcoming.length ? ['Upcoming:', ...upcoming.map((t) => `- ${t.deadline}: ${t.kind === 'scripts' ? `write ${plural(t.topics.length, 'script')} for` : 'record'} ${module} ${t.unit}`)] : []),
       '', `${app.auth.baseUrl}/#/module/${module}`,
     ];
@@ -415,13 +424,16 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   });
 
   f.get('/api/plans', async (): Promise<PlansSummaryResponse> => {
-    const rows = await app.db.allPlans();
+    const unitRows = await app.db.allUnitPlans();
+    const modules = [...new Set(unitRows.map((r) => r.module))];
     const status = await app.status.get();
     const out: PlansSummaryResponse = {};
-    for (const row of rows) {
-      const topics = status ? moduleTopicsFor(status, row.module) : [];
-      const plan = computeModulePlan(topics, row.delivery_date);
-      out[row.module] = { deliveryDate: row.delivery_date, onTrack: plan.onTrack, daysBehind: plan.daysBehind, milestones: plan.milestones };
+    for (const module of modules) {
+      const unitDates: Record<string, string | null> = {};
+      for (const r of unitRows) if (r.module === module) unitDates[r.unit] = r.delivery_date;
+      const topics = status ? moduleTopicsFor(status, module) : [];
+      const plan = computeModulePlan(topics, unitDates);
+      out[module] = { onTrack: plan.onTrack, daysBehind: plan.daysBehind, units: plan.units, milestones: plan.milestones };
     }
     return out;
   });

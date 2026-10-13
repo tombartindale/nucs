@@ -37,12 +37,17 @@ const milestoneChips = computed(() => {
   return out;
 });
 
-// The programme-wide view: every module with a delivery date, worst-behind first, so a
-// producer scanning across all modules sees what needs attention without opening each one.
+// The programme-wide view: every module with at least one unit's delivery date agreed,
+// worst-behind first (worst-unit-wins rollup — see planning.ts), so a producer scanning
+// across all modules sees what needs attention without opening each one.
 const scheduleRows = computed(() => Object.entries(plans.value)
-  .filter(([, p]) => p.deliveryDate !== null)
-  .map(([name, p]) => ({ name, deliveryDate: p.deliveryDate as string, onTrack: p.onTrack, daysBehind: p.daysBehind, next: milestoneChip(name) }))
-  .sort((a, b) => b.daysBehind - a.daysBehind || a.deliveryDate.localeCompare(b.deliveryDate)));
+  .filter(([, p]) => p.units.some((u) => u.deliveryDate !== null))
+  .map(([name, p]) => ({
+    name,
+    dates: p.units.filter((u) => u.deliveryDate !== null).map((u) => `${u.unit} ${u.deliveryDate}`).join(', '),
+    onTrack: p.onTrack, daysBehind: p.daysBehind, next: milestoneChip(name),
+  }))
+  .sort((a, b) => b.daysBehind - a.daysBehind || a.name.localeCompare(b.name)));
 
 const env = computed(() => beacon.status);
 const s = computed(() => env.value!.summary);
@@ -117,7 +122,7 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `28px repeat(${ladder.v
           <q-item v-for="r in scheduleRows" :key="r.name" clickable :to="`/module/${r.name}`">
             <q-item-section>
               <q-item-label class="text-weight-bold">{{ r.name }}</q-item-label>
-              <q-item-label caption>Delivery {{ r.deliveryDate }}{{ r.next ? ` · ${r.next.label}` : '' }}</q-item-label>
+              <q-item-label caption>Delivery {{ r.dates }}{{ r.next ? ` · ${r.next.label}` : '' }}</q-item-label>
             </q-item-section>
             <q-item-section side>
               <StateChip :kind="r.onTrack ? 'ok' : 'blocked'" :label="r.onTrack ? 'on track' : `${plural(r.daysBehind, 'day')} behind`" />

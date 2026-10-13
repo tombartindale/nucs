@@ -1,18 +1,17 @@
-// Backward scheduling for a module's delivery: given a delivery date and current pipeline
-// state (from bcn status), when does each unit's prep need to be ready, when does its
-// recording session need to happen, and when is each module-wide milestone due. Pure
-// functions only — no DB, no HTTP — so the math is directly unit-testable against fixture
-// data.
+// Backward scheduling for a module's delivery: each unit has its own agreed delivery date
+// (set by the producer, not inferred), and prep/recording for that unit is scheduled
+// backward from its own date alone — independently of every other unit's. Pure functions
+// only — no DB, no HTTP — so the math is directly unit-testable against fixture data.
 //
 // Production happens one unit at a time: every topic's script in a unit must be ready
 // before that unit's recording, and every topic in the unit is recorded together, in one
 // session, not individually. So the schedule is batched per unit, not per topic — a unit's
 // worth of scripts is one task, its recording is another, not N of each.
 //
-// Nothing here is persisted beyond the module's delivery date and owner (see db.ts). Every
-// task/milestone deadline is recomputed from current status on every request: consistent
-// with the rest of this UI, where the filesystem (via bcn status) is the only truth and
-// nothing pipeline-derived is cached into Postgres.
+// Nothing here is persisted beyond each unit's delivery date and the module's owner (see
+// db.ts). Every task/milestone deadline is recomputed from current status on every
+// request: consistent with the rest of this UI, where the filesystem (via bcn status) is
+// the only truth and nothing pipeline-derived is cached into Postgres.
 import type { StatusEnvelope } from '@beacon/shared';
 
 // Assumptions, not measured rates — surfaced here, not buried in the math:
@@ -68,20 +67,28 @@ export interface UnitTask {
   deadline: string | null;
 }
 
+/** One unit's own schedule: its agreed date (if set) and whether its own tasks fit
+ *  before it, computed independently of every other unit's date. */
+export interface UnitPlan {
+  unit: string; deliveryDate: string | null;
+  onTrack: boolean | null;   // null if this unit has no agreed date yet
+  daysBehind: number;        // 0 if on track or no date set
+}
+
 export interface Milestone {
   kind: 'briefs_done' | 'recorded' | 'translated' | 'packaged';
   done: boolean; remaining: number; dueDate: string | null;
 }
 
 export interface ModulePlanComputed {
-  deliveryDate: string | null;
   topicsTotal: number; topicsRecorded: number; topicsRemaining: number; topicsNotDrafted: number;
+  /** Worst-unit-wins: true only if every unit with an agreed date is itself on track; null
+   *  if no unit has a date set yet, so there's nothing to judge against. */
   onTrack: boolean | null;
-  /** How many days the schedule has already run past "doable": the earliest outstanding
-   *  task's deadline is this many days before today. 0 when on track or no delivery date. */
-  daysBehind: number;
+  daysBehind: number;        // the worst (largest) daysBehind across all units
+  units: UnitPlan[];         // one per unit, in course-map order
   milestones: Milestone[];
-  tasks: UnitTask[];
+  tasks: UnitTask[];         // every unit's outstanding tasks, concatenated in course-map order
 }
 
 /** Filters bcn status to one module's topics, in course-map order, mapped to the stage
@@ -107,7 +114,10 @@ export function moduleTopicsFor(status: StatusEnvelope, module: string): Planned
     });
 }
 
-export function computeModulePlan(topics: PlannedTopicInput[], deliveryDate: string | null): ModulePlanComputed {
+/** `unitDates` holds each unit's own agreed delivery date (or null/missing if not yet
+ *  agreed) — keyed by unit code, e.g. "U02". A unit with no date gets undated (null)
+ *  tasks, same as the module used to when it had no delivery date at all. */
+export function computeModulePlan(topics: PlannedTopicInput[], unitDates: Record<string, string | null>): ModulePlanComputed {
   // Group into units, preserving the order units first appear in course-map order.
   const unitOrder: string[] = [];
   const byUnit = new Map<string, PlannedTopicInput[]>();
@@ -116,46 +126,65 @@ export function computeModulePlan(topics: PlannedTopicInput[], deliveryDate: str
     byUnit.get(t.unit)!.push(t);
   }
 
-  // One scripts batch and one recording batch per unit, in that order — a unit's prep
-  // must finish before its own recording session, matching how production actually
-  // happens: one unit at a time, not topic by topic.
-  const tasks: Omit<UnitTask, 'deadline'>[] = [];
+  const allTasks: UnitTask[] = [];
+  const units: UnitPlan[] = [];
   for (const unit of unitOrder) {
     const unitTopics = byUnit.get(unit)!;
+    const deliveryDate = unitDates[unit] ?? null;
     const notDrafted = unitTopics.filter((t) => !t.drafted);
     const notRecorded = unitTopics.filter((t) => !t.recorded);
+
+    // One scripts batch and one recording batch for this unit, in that order — its prep
+    // must finish before its own recording session, matching how production actually
+    // happens: one unit at a time, not topic by topic.
+    const rawTasks: Omit<UnitTask, 'deadline'>[] = [];
     if (notDrafted.length) {
-      tasks.push({ unit, kind: 'scripts', topics: notDrafted.map((t) => t.topic), estimatedMinutes: notDrafted.length * BRIEF_MINUTES });
+      rawTasks.push({ unit, kind: 'scripts', topics: notDrafted.map((t) => t.topic), estimatedMinutes: notDrafted.length * BRIEF_MINUTES });
     }
     if (notRecorded.length) {
       const minutes = notRecorded.reduce((sum, t) => sum + (t.minutes ?? DEFAULT_RECORDING_MINUTES) * RECORDING_MULTIPLIER, 0);
-      tasks.push({ unit, kind: 'recording', topics: notRecorded.map((t) => t.topic), estimatedMinutes: minutes });
+      rawTasks.push({ unit, kind: 'recording', topics: notRecorded.map((t) => t.topic), estimatedMinutes: minutes });
     }
-  }
 
-  // Walk backwards from the delivery date: the last task's deadline sits closest to
-  // delivery, each earlier task's deadline is pushed back by its own cost. A recording
-  // task always costs exactly one day — the session happens on a single day however long
-  // it runs — while a scripts task costs its real proportional share of the daily hours
-  // budget. Fractional days accumulate across the whole walk (carried in `accrued`)
-  // rather than being rounded away per task, so a run of short scripts batches still
-  // separates onto distinct dates instead of collapsing onto the same one.
-  const dated: UnitTask[] = [];
-  if (deliveryDate) {
-    let cursor = deliveryDate;
-    let accrued = 0; // fractional days owed but not yet stepped off the calendar
-    for (let i = tasks.length - 1; i >= 0; i--) {
-      const cost = tasks[i].kind === 'recording' ? 1 : rawDaysFor(tasks[i].estimatedMinutes);
-      accrued += cost;
-      const wholeDays = Math.floor(accrued);
-      if (wholeDays > 0) {
-        cursor = minusDays(cursor, wholeDays);
-        accrued -= wholeDays;
+    // Walk this unit's own tasks backward from its own agreed date, independently of
+    // every other unit: each unit's date is now externally agreed, not inferred relative
+    // to the others, so there is no cross-unit chain any more — U01 and U05 are each
+    // scheduled purely against their own deadline. A recording task always costs exactly
+    // one day — the session happens on a single day however long it runs — while a
+    // scripts task costs its real proportional share of the daily hours budget.
+    // Fractional days accumulate across the walk rather than being rounded away per task,
+    // so a run of short scripts batches still separates onto distinct dates.
+    const dated: UnitTask[] = [];
+    if (deliveryDate) {
+      let cursor = deliveryDate;
+      let accrued = 0; // fractional days owed but not yet stepped off the calendar
+      for (let i = rawTasks.length - 1; i >= 0; i--) {
+        const cost = rawTasks[i].kind === 'recording' ? 1 : rawDaysFor(rawTasks[i].estimatedMinutes);
+        accrued += cost;
+        const wholeDays = Math.floor(accrued);
+        if (wholeDays > 0) {
+          cursor = minusDays(cursor, wholeDays);
+          accrued -= wholeDays;
+        }
+        dated[i] = { ...rawTasks[i], deadline: cursor };
       }
-      dated[i] = { ...tasks[i], deadline: cursor };
+    } else {
+      for (let i = 0; i < rawTasks.length; i++) dated[i] = { ...rawTasks[i], deadline: null };
     }
-  } else {
-    for (let i = 0; i < tasks.length; i++) dated[i] = { ...tasks[i], deadline: null };
+
+    // Every task's deadline is constructed backward from this unit's own deliveryDate, so
+    // it can never fall *after* it by construction — that can't be what "on track" means.
+    // What actually signals trouble is this unit's schedule running out of runway: its
+    // earliest outstanding task's deadline already being in the past relative to today.
+    const deadlines = dated.map((t) => t.deadline).filter((d): d is string => d !== null);
+    const earliestDeadline = deadlines.length ? deadlines.reduce((a, b) => (a < b ? a : b)) : null;
+    const onTrack = deliveryDate === null ? null : (earliestDeadline === null || earliestDeadline >= today());
+    const daysBehind = earliestDeadline !== null && earliestDeadline < today()
+      ? Math.round((Date.parse(`${today()}T00:00:00Z`) - Date.parse(`${earliestDeadline}T00:00:00Z`)) / 86_400_000)
+      : 0;
+
+    units.push({ unit, deliveryDate, onTrack, daysBehind });
+    allTasks.push(...dated);
   }
 
   const topicsNotDrafted = topics.filter((t) => !t.drafted).length;
@@ -165,33 +194,25 @@ export function computeModulePlan(topics: PlannedTopicInput[], deliveryDate: str
   const topicsNotPackaged = topics.filter((t) => !t.packaged).length;
 
   const latestDeadline = (kind: UnitTask['kind']): string | null => {
-    const ds = dated.filter((t) => t.kind === kind).map((t) => t.deadline).filter((d): d is string => d !== null);
+    const ds = allTasks.filter((t) => t.kind === kind).map((t) => t.deadline).filter((d): d is string => d !== null);
     return ds.length ? ds.reduce((a, b) => (a > b ? a : b)) : null;
   };
-  const briefsDueDate = latestDeadline('scripts');
-  const recordedDueDate = latestDeadline('recording');
 
   const milestones: Milestone[] = [
-    { kind: 'briefs_done', done: topicsNotDrafted === 0, remaining: topicsNotDrafted, dueDate: briefsDueDate },
-    { kind: 'recorded', done: topicsRemaining === 0, remaining: topicsRemaining, dueDate: recordedDueDate },
+    { kind: 'briefs_done', done: topicsNotDrafted === 0, remaining: topicsNotDrafted, dueDate: latestDeadline('scripts') },
+    { kind: 'recorded', done: topicsRemaining === 0, remaining: topicsRemaining, dueDate: latestDeadline('recording') },
     { kind: 'translated', done: topicsNotTranslated === 0, remaining: topicsNotTranslated, dueDate: null },
     { kind: 'packaged', done: topicsNotPackaged === 0, remaining: topicsNotPackaged, dueDate: null },
   ];
 
-  // Every task's deadline is constructed backward from deliveryDate, so it can never fall
-  // *after* delivery by construction — that can't be what "on track" means. What actually
-  // signals trouble is the schedule running out of runway: the earliest outstanding task's
-  // deadline already being in the past relative to today, i.e. there is more outstanding
-  // work than there is time left before delivery.
-  const deadlines = dated.map((t) => t.deadline).filter((d): d is string => d !== null);
-  const earliestDeadline = deadlines.length ? deadlines.reduce((a, b) => (a < b ? a : b)) : null;
-  const onTrack = deliveryDate === null ? null : (earliestDeadline === null || earliestDeadline >= today());
-  const daysBehind = earliestDeadline !== null && earliestDeadline < today()
-    ? Math.round((Date.parse(`${today()}T00:00:00Z`) - Date.parse(`${earliestDeadline}T00:00:00Z`)) / 86_400_000)
-    : 0;
+  // Worst-unit-wins: the module is on track only if every unit with an agreed date is
+  // itself on track; null if no unit has a date set at all, so there's nothing to judge.
+  const datedUnits = units.filter((u) => u.deliveryDate !== null);
+  const onTrack = datedUnits.length === 0 ? null : datedUnits.every((u) => u.onTrack !== false);
+  const daysBehind = units.reduce((worst, u) => Math.max(worst, u.daysBehind), 0);
 
   return {
-    deliveryDate, topicsTotal: topics.length, topicsRecorded, topicsRemaining, topicsNotDrafted,
-    onTrack, daysBehind, milestones, tasks: dated,
+    topicsTotal: topics.length, topicsRecorded, topicsRemaining, topicsNotDrafted,
+    onTrack, daysBehind, units, milestones, tasks: allTasks,
   };
 }
