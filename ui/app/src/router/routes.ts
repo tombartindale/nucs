@@ -34,7 +34,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'transfer', component: () => import('@/pages/TransferPage.vue'), meta: { nav: 'transfer' } },
       { path: 'settings', component: () => import('@/pages/SettingsPage.vue'), meta: { nav: 'settings' } },
       { path: 'theme', redirect: '/admin/theme' },
-      { path: 'admin/:tab(theme|backups)?', component: () => import('@/pages/AdminPage.vue'), meta: { nav: 'admin' },
+      { path: 'admin/:tab(theme)?', component: () => import('@/pages/AdminPage.vue'), meta: { nav: 'admin' },
         props: (r: R) => ({ tab: r.params.tab || 'programme' }) },
     ],
   },
