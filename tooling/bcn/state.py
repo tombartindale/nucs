@@ -18,7 +18,7 @@ from typing import Any
 from . import coursemap, fsutil, reviewfile
 from .config import Config, load, load_theme, resolve_theme_name
 from .envelope import Diagnostic, Fail
-from .tree import Topic, scan_topic
+from .tree import DEFAULT_LAYOUT, Topic, scan_topic
 
 STAGES = {
     "en": ["planned", "drafted", "validated", "rendered", "recorded", "cued", "packaged"],
@@ -481,6 +481,18 @@ class TopicState:
             s = self.steps.get((step, lang))
             return (not s.fresh) if s and s.exists else None
 
+        # Every layout beside the default (which keeps its own unsuffixed build/composed.mp4 /
+        # build/draft.mp4 rows below) — not shown unless a compose run actually selected it
+        # (add()'s rows are hidden by the UI when they don't exist, same as bumpers/scripts).
+        extra_layouts = [name for name in self.ctx.cfg["compose"]["layouts"] if name != DEFAULT_LAYOUT]
+
+        def layout_videos(lang: str) -> None:
+            for name in extra_layouts:
+                cp = t.composed(lang, name)
+                add(str(cp.relative_to(t.dir)), cp, lang, stale_of("compose", lang), kind="composed")
+                dp = t.draft(lang, name)
+                add(str(dp.relative_to(t.dir)), dp, lang, stale_of("compose", lang), kind="draft")
+
         add("topic.md", t.src("en"), "en", kind="source")
         add("edit/master.mp4", t.video, "en", kind="source")
         add("edit/master.srt", t.srt("en"), "en", kind="source")
@@ -504,6 +516,7 @@ class TopicState:
         add("build/composed.mp4", t.composed("en"), "en", stale_of("compose", "en"), kind="composed")
         add(f"build/subtitles/{t.id}.en.delivery.srt", t.composed_srt("en"), "en", stale_of("compose", "en"), kind="composed_subtitles")
         add("build/draft.mp4", t.draft("en"), "en", stale_of("compose", "en"), kind="draft")
+        layout_videos("en")
         add("out/manifest.json", t.manifest("en"), "en", stale_of("package", "en"), kind="package")
         add("translation.json", t.translation_file, "zh", kind="source")
         add("topic.zh.md", t.src("zh"), "zh", kind="source")
@@ -517,6 +530,7 @@ class TopicState:
         add("build/composed.zh.mp4", t.composed("zh"), "zh", stale_of("compose", "zh"), kind="composed")
         add(f"build/subtitles/{t.id}.zh.delivery.srt", t.composed_srt("zh"), "zh", stale_of("compose", "zh"), kind="composed_subtitles")
         add("build/draft.zh.mp4", t.draft("zh"), "zh", stale_of("compose", "zh"), kind="draft")
+        layout_videos("zh")
         bumpers("zh")
         add("out/manifest.zh.json", t.manifest("zh"), "zh", stale_of("package", "zh"), kind="package")
         return rows
