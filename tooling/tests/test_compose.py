@@ -237,6 +237,13 @@ def test_compose_multiple_layouts_in_one_run(tree, capsys):
     assert (vert.width, vert.height) == (vs["width"], vs["height"])
     assert vert.height > vert.width, "vertical_stacked must be portrait"
 
+    # Every selected layout's file shows up in status, not just the default's — this is what
+    # the UI's Artefacts table (and its "Verify files" check) reads from.
+    _, env = bcn(capsys, "status", str(t.dir))
+    rows = {a["key"]: a for a in env["results"][0]["artifacts"]}
+    assert rows["build/composed.vertical_stacked.mp4"]["exists"] is True
+    assert rows["build/composed.vertical_inset.mp4"]["exists"] is False  # configured, never composed
+
     # One sidecar, shared by both layouts' delivery.
     assert t.composed_srt("en").is_file()
     assert not (t.build / "subtitles" / f"{t.id}.en.vertical_stacked.delivery.srt").exists()
