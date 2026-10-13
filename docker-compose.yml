@@ -63,6 +63,13 @@ services:
     restart: unless-stopped
     deploy:
       replicas: 2
+      resources:
+        limits:
+          # ffmpeg threads to use every core it can get; capping each worker replica keeps
+          # both from oversubscribing the host's 2 vCPUs and starving postgres/redis/ssh
+          # (both replicas combined can take at most 1.5 of 2 cores).
+          cpus: "0.75"
+          memory: 768M
 
   postgres:
     image: postgres:17-alpine
