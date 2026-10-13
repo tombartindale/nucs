@@ -36,7 +36,8 @@ const FLOW: Record<'en' | 'zh', Item[]> = {
 };
 const WAIT_HELP: Record<string, string> = {
   recording: 'The editor delivers edit/master.mp4 and its subtitles. Upload them in the Video pane; nothing to run here.',
-  translation: 'The English SRT and slides go to the translator from the Translation page, and the returned files are imported there. '
+  translation: 'The English SRT and slides go to the translator from the Translation page. The returned files come back either there, '
+    + 'or dropped straight into the Slides pane above if the translator sent them loose under the wrong names. '
     + 'A topic can be sent once its English subtitles step is done, so any corrected mishearings reach the translator.',
 };
 

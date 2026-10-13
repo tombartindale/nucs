@@ -3,11 +3,14 @@
 // beside English at the same index: the fastest way to see Chinese text overflowing a box
 // that English fitted.
 import { computed, inject, ref } from 'vue';
-import type { RenderFlag } from '@beacon/shared';
-import { fileUrl } from '@/api';
+import type { JobSummary, RenderFlag } from '@beacon/shared';
+import { api, fileUrl } from '@/api';
+import { confirm } from '@/composables/confirm';
+import { useBeacon } from '@/stores/beacon';
 import SlideLightbox from './SlideLightbox.vue';
 import { TOPIC } from './context';
 
+const beacon = useBeacon();
 const t = inject(TOPIC)!;
 const render = computed(() => t.show.value?.render);
 const en = computed(() => render.value?.en?.slides || []);
@@ -15,6 +18,32 @@ const zh = computed(() => render.value?.zh?.slides || []);
 const n = computed(() => Math.max(en.value.length, zh.value.length));
 const open = ref<number | null>(null);
 const safeArea = ref(false);
+
+// The translated slides, however the translator actually named the file — this always
+// writes it to topic.zh.md (the Mandarin SRT has its own drop target, in the Video pane).
+const placing = ref(false);
+const slidesPresent = computed(() => !!t.show.value?.zh);
+
+async function placeSlides(file: File | null) {
+  if (!file) return;
+  const replacing = slidesPresent.value;
+  if (replacing && !(await confirm({
+    title: `Replace the Mandarin slides for ${t.id}?`,
+    lines: [`This replaces topic.zh.md with ${file.name}.`],
+    ok: 'Replace', danger: true,
+  }))) return;
+  placing.value = true;
+  try {
+    const text = await file.text();
+    const job = await api<JobSummary>(`/api/topic/${t.id}/save`, { body: { text, lang: 'zh' } });
+    beacon.trackJob(job);
+    const result = await beacon.awaitJob(job.id);
+    await t.reload();
+    if (result.state === 'done') beacon.toast(`Mandarin slides placed for ${t.id}.`);
+    else beacon.toast('The Mandarin slides could not be placed; see Jobs.', true);
+  } catch (e) { beacon.toast((e as Error).message, true); }
+  placing.value = false;
+}
 
 function thumb(lang: 'en' | 'zh', i: number) {
   const src = render.value?.[lang]?.slides?.[i];
@@ -40,6 +69,15 @@ const bumpers = computed(() => ({ intro: bumper('intro'), outro: bumper('outro')
 
 <template>
   <q-card flat bordered>
+    <q-card-section class="q-pb-sm">
+      <q-file :model-value="null" dense outlined clearable accept=".md" :disable="placing"
+        :label="slidesPresent ? 'Replace Mandarin slides' : 'Upload Mandarin slides'"
+        :hint="slidesPresent ? 'Present: topic.zh.md' : 'Goes to topic.zh.md'"
+        aria-label="Upload Mandarin slides" @update:model-value="placeSlides">
+        <template #prepend><q-icon name="translate" /></template>
+      </q-file>
+    </q-card-section>
+    <q-separator />
     <q-card-section class="row items-center q-pb-sm">
       <div class="text-subtitle1 text-weight-medium">Slides</div>
       <q-space />

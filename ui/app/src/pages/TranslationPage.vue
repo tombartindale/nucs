@@ -10,6 +10,10 @@ import { fmtAgo, fmtBytes, plural } from '@/format';
 import { useBeacon } from '@/stores/beacon';
 
 type Env = BcnTranslationEnvelope & { return_to_translator?: Array<{ topic: string; message: string }> };
+// A loose file the translator sent back one at a time, under a name that doesn't match
+// <topic_id>.zh.md / .zh.srt — staged here so its real destination can be picked before
+// it's written to disk, instead of being silently ignored by bcn translation --import.
+interface PendingFile { id: number; file: File; topic: string | null; kind: 'md' | 'srt'; custom: boolean; customName: string }
 const beacon = useBeacon();
 const scope = ref('');
 const lists = shallowRef<TranslationListResponse>({ exports: [], returned: [] });
@@ -17,6 +21,9 @@ const lastImport = shallowRef<{ item: TranslationItem; env: Env | undefined } | 
 const busy = ref(false);
 const over = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
+const pending = ref<PendingFile[]>([]);
+const pendingBusy = ref(false);
+let nextPendingId = 0;
 
 async function refresh() {
   try { lists.value = await api<TranslationListResponse>('/api/translation'); } catch (e) { beacon.toast((e as Error).message, true); }
@@ -45,7 +52,48 @@ async function upload(file: File | undefined) {
   } catch (e) { beacon.toast((e as Error).message, true); }
   void refresh();
 }
-function onDrop(e: DragEvent) { over.value = false; void upload(e.dataTransfer?.files[0]); }
+// A .zip still goes straight in, same as before. Anything else is a loose file with a
+// name bcn translation --import won't recognise, so it's staged for renaming instead.
+function addFiles(files: Iterable<File>) {
+  for (const f of files) {
+    if (f.name.toLowerCase().endsWith('.zip')) { void upload(f); continue; }
+    pending.value.push({
+      id: nextPendingId++, file: f, topic: null,
+      kind: f.name.toLowerCase().endsWith('.srt') ? 'srt' : 'md',
+      custom: false, customName: f.name,
+    });
+  }
+}
+function onDrop(e: DragEvent) { over.value = false; if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files); }
+function onFileInput(e: Event) {
+  const input = e.target as HTMLInputElement;
+  if (input.files?.length) addFiles(input.files);
+  input.value = '';
+}
+function removePending(id: number) { pending.value = pending.value.filter((p) => p.id !== id); }
+function targetName(p: PendingFile): string | null {
+  return p.custom ? (p.customName.trim() || null) : (p.topic ? `${p.topic}.zh.${p.kind}` : null);
+}
+const topicOptions = computed(() => [...(beacon.status?.results || [])]
+  .map((r) => ({ label: r.title ? `${r.topic} — ${r.title}` : r.topic, value: r.topic }))
+  .sort((a, b) => a.value.localeCompare(b.value)));
+const pendingReady = computed(() => pending.value.length > 0 && pending.value.every((p) => !!targetName(p)));
+async function uploadPending() {
+  if (!pendingReady.value) return;
+  const batch = `manual-${Date.now()}`;
+  pendingBusy.value = true;
+  try {
+    for (const p of pending.value) {
+      const name = targetName(p);
+      if (!name) continue;
+      await api(`/api/translation/upload?name=${encodeURIComponent(name)}&batch=${encodeURIComponent(batch)}`, { raw: await p.file.arrayBuffer() });
+    }
+    beacon.toast(`Uploaded ${plural(pending.value.length, 'file')}`);
+    pending.value = [];
+  } catch (e) { beacon.toast((e as Error).message, true); }
+  pendingBusy.value = false;
+  void refresh();
+}
 
 async function doImport(item: TranslationItem) {
   busy.value = true;
@@ -119,8 +167,35 @@ const copy = () => navigator.clipboard.writeText(message.value).then(() => beaco
             <div :class="['dropzone q-pa-lg text-center rounded-borders cursor-pointer', { 'bg-blue-1 text-black': over }]"
               style="border: 2px dashed var(--line)" @click="fileInput?.click()" @dragover.prevent="over = true" @dragleave="over = false" @drop.prevent="onDrop">
               <q-icon name="upload_file" size="md" class="q-mb-sm" /><br>
-              Drop the returned .zip here, or click to choose. Or put a folder in translation/returned/.
-              <input ref="fileInput" type="file" accept=".zip" class="hidden" @change="upload(($event.target as HTMLInputElement).files?.[0])">
+              Drop the returned .zip here, or individual .md/.srt files if the translator sent them loose
+              (you'll pick the right topic for each before they're saved) — or click to choose, several at once.
+              Or put a folder in translation/returned/.
+              <input ref="fileInput" type="file" multiple accept=".zip,.md,.srt" class="hidden" @change="onFileInput">
+            </div>
+          </q-card-section>
+          <q-card-section v-if="pending.length" class="q-gutter-y-sm">
+            <div class="text-caption text-grey-7">
+              These don't match &lt;topic_id&gt;.zh.md / .zh.srt, so pick the topic (and script or subtitles) each one is,
+              or type the exact destination name, before uploading.
+            </div>
+            <div v-for="p in pending" :key="p.id" class="row items-center q-col-gutter-sm q-mb-xs">
+              <div class="col-3 text-caption text-mono ellipsis" :title="p.file.name">{{ p.file.name }}</div>
+              <template v-if="!p.custom">
+                <q-select v-model="p.topic" dense outlined emit-value map-options :options="topicOptions"
+                  label="Topic" class="col-5" style="min-width: 160px" />
+                <q-btn-toggle v-model="p.kind" dense no-caps unelevated
+                  :options="[{ label: '.zh.md', value: 'md' }, { label: '.zh.srt', value: 'srt' }]" class="col-auto" />
+              </template>
+              <q-input v-else v-model="p.customName" dense outlined label="Exact destination filename" class="col-8" />
+              <q-space />
+              <q-btn flat dense round size="sm" :icon="p.custom ? 'list' : 'edit'" @click="p.custom = !p.custom"
+                :title="p.custom ? 'Pick a topic instead' : 'Type the exact filename instead'" />
+              <q-btn flat dense round size="sm" icon="close" @click="removePending(p.id)" title="Remove" />
+            </div>
+            <div class="row items-center gap-sm">
+              <q-btn unelevated color="primary" no-caps label="Upload files" :disable="!pendingReady || pendingBusy"
+                :loading="pendingBusy" @click="uploadPending" />
+              <q-btn flat no-caps label="Clear" :disable="pendingBusy" @click="pending = []" />
             </div>
           </q-card-section>
           <q-list v-if="lists.returned.length" separator>

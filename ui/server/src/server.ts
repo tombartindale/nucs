@@ -544,13 +544,17 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
 
   f.post('/api/translation/upload', async (req: Req, reply) => {
     const name = (req.query.name ?? 'returned.zip').replace(/[^A-Za-z0-9._-]/g, '_');
-    if (!name.toLowerCase().endsWith('.zip')) throw new BadRequest('Upload a .zip file.');
+    // A loose file (a mis-named .md/.srt the translator sent individually) is renamed by the
+    // browser first, then uploaded into a shared batch subfolder so several of them land
+    // together as one importable folder. Without a batch, only a .zip is accepted, as before.
+    const batch = req.query.batch ? req.query.batch.replace(/[^A-Za-z0-9._-]/g, '_') : null;
+    if (!batch && !name.toLowerCase().endsWith('.zip')) throw new BadRequest('Upload a .zip file.');
     const n = Number(req.headers['content-length'] || 0);
     if (!(n > 0) || n > UPLOAD_MAX) throw new BadRequest('Upload is empty or too large.');
-    const d = join(app.root, 'translation', 'returned');
+    const d = batch ? join(app.root, 'translation', 'returned', batch) : join(app.root, 'translation', 'returned');
     mkdirSync(d, { recursive: true });
     let dest = join(d, name);
-    if (existsSync(dest)) dest = join(d, `${basename(name, extname(name))}-${Math.floor(Date.now() / 1000)}.zip`);
+    if (existsSync(dest)) dest = join(d, `${basename(name, extname(name))}-${Math.floor(Date.now() / 1000)}${extname(name)}`);
     const tmp = join(d, `.${basename(dest)}.partial`);
     await pipeline(req.body as IncomingMessage, createWriteStream(tmp));
     renameSync(tmp, dest);
