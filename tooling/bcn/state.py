@@ -46,6 +46,22 @@ def _iso(t: float | None) -> str | None:
     return _dt.datetime.fromtimestamp(t, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def translation_export_reasons(en_steps: dict[str, dict[str, Any]], srt_exists: bool, unreviewed: int) -> list[str]:
+    """The three-part gate for whether the English side is ready to hand to a translator.
+    Shared by TopicState._mandarin's `next` and `bcn translation --export`'s accept/reject
+    check, so the two can never again disagree about what "ready" means."""
+    reasons = []
+    validate = en_steps.get("validate", {})
+    if not validate.get("ok") or not validate.get("fresh"):
+        reasons.append("the English has not passed validate")
+    subs = en_steps.get("subtitles", {})
+    if not (subs.get("ok") and subs.get("fresh")) or not srt_exists:
+        reasons.append("the English SRT has not been through bcn subtitles")
+    if unreviewed:
+        reasons.append(f"{unreviewed} suspected mis-transcriptions are unreviewed; the translator would inherit them")
+    return reasons
+
+
 @dataclass
 class FileInfo:
     path: Path
@@ -202,8 +218,8 @@ class TopicState:
             self.pngs[lang] = t.slide_pngs(lang)
 
         en = self._english(src, video, srt, prog, review, mt is not None)
-        zh = self._mandarin(src, zsrc, srt, zsrt, prog, xl, en)
         unreviewed = self._unreviewed()
+        zh = self._mandarin(src, zsrc, srt, zsrt, prog, xl, en, unreviewed)
         return {
             "topic": t.id,
             "ok": True,
@@ -308,7 +324,7 @@ class TopicState:
 
     # -- Mandarin -------------------------------------------------------------------
     def _mandarin(self, src: FileInfo, zsrc: FileInfo, srt: FileInfo, zsrt: FileInfo, prog: FileInfo,
-                  xl: FileInfo, en: LangState) -> LangState:
+                  xl: FileInfo, en: LangState, unreviewed: int) -> LangState:
         t = self.t
         st = LangState("zh", "not_sent", 0)
         record = fsutil.read_json(t.translation_file) if xl.exists else None
@@ -350,16 +366,17 @@ class TopicState:
         self._tree_blockers(st, [zsrc, zsrt] if returned else [])
         st.blocked = bool(st.blockers)
 
+        reasons = translation_export_reasons(en.steps, t.subtitle_out("en", "srt").is_file(), unreviewed)
         if not returned:
             if exported:
                 st.next = "await_translation"
-            elif en.stage_index >= STAGES["en"].index("recorded") and en.steps.get("validate", {}).get("ok"):
+            elif en.stage_index >= STAGES["en"].index("recorded") and not reasons:
                 st.next = "translation_export"
             else:
                 st.next = None  # not ready to send
         else:
             st.next = None
-            if not fresh["returned"]:
+            if not fresh["returned"] and not reasons:
                 st.next = "translation_export"
             else:
                 for name, s in (("validate", validate), ("subtitles", subtitles), ("render", render),

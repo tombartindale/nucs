@@ -35,7 +35,7 @@ from ..config import load
 from ..envelope import Diagnostic, Envelope, Fail, TopicResult, sha256_file, utcnow
 from ..markdown import parse
 from ..runner import run_topics
-from ..state import TopicState, module_context
+from ..state import TopicState, module_context, translation_export_reasons
 from ..sync import local_to_remote, remote_to_local
 from ..tree import Target, Topic, is_noise, topic_from_id
 from . import subtitles as subtitles_cmd
@@ -84,14 +84,7 @@ def _export(env: Envelope, target: Target) -> None:
         env.results.append(r)
         st = TopicState(t, module_context(t.root, t.module)).compute()
         en = st["en"]
-        reasons = []
-        if not en["steps"].get("validate", {}).get("ok") or not en["steps"].get("validate", {}).get("fresh"):
-            reasons.append("the English has not passed validate")
-        subs = en["steps"].get("subtitles", {})
-        if not (subs.get("ok") and subs.get("fresh")) or not t.subtitle_out("en", "srt").is_file():
-            reasons.append("the English SRT has not been through bcn subtitles")
-        if st["unreviewed_mistranscriptions"]:
-            reasons.append(f"{st['unreviewed_mistranscriptions']} suspected mis-transcriptions are unreviewed; the translator would inherit them")
+        reasons = translation_export_reasons(en["steps"], t.subtitle_out("en", "srt").is_file(), st["unreviewed_mistranscriptions"])
         if reasons:
             r.ok = False
             r.diagnostics.append(Diagnostic("XL_NOT_READY", f"{t.id} is not ready to export: {'; '.join(reasons)}.", topic=t.id, lang="zh"))
