@@ -19,7 +19,6 @@ const router = useRouter();
 const f = reactive({ level: 'warn', lang: '', code: '' });
 const env = shallowRef<DiagnosticsResponse | null>(null);
 const error = ref<string | null>(null);
-const corrections = reactive<Record<string, string>>({});  // mis-transcription id -> corrected text being typed
 
 // Topic and module are the same idea (narrow to part of the programme) at two granularities,
 // so they share one query-driven scope: at most one is set, it lives in the URL (shareable,
@@ -88,23 +87,6 @@ const mt = computed(() => {
     { title: 'Reviewed', rows: items.filter((d) => d.data?.review), empty: '' },
   ];
 });
-async function review(d: Diagnostic, args: Record<string, string | boolean>) {
-  try {
-    const job = await beacon.runJob('review', [topicPath(d.topic!)], { item: d.data!.id!, ...args });
-    const result = await beacon.awaitJob(job.id);
-    if (result.state === 'done') await load();
-    else beacon.toast('That decision did not save; see Jobs.', true);
-  } catch { /* beacon.runJob already toasted the submit failure */ }
-}
-function correct(d: Diagnostic) {
-  const text = (corrections[d.data!.id!] ?? d.data!.srt ?? '').trim();
-  if (text) void review(d, { correct: text });
-}
-function useScript(d: Diagnostic) {
-  const text = (d.data!.script ?? '').trim();
-  if (text) void review(d, { correct: text });
-}
-
 // Play a mis-transcription in place, instead of sending the reviewer to the full TopicPage
 // (which loads the whole editor just to seek a video): a hidden <audio> element reused across
 // rows, fed the topic's master video file (an <audio> element plays just its audio track fine),
@@ -213,12 +195,21 @@ onBeforeUnmount(stopSegment);
       </q-card>
     </template>
 
+    <template v-else-if="props.topic">
+      <!-- Scoped to one topic: the Caption Editor already shows every flagged cue in context,
+           with actions alongside it, so there's nothing left for a second page to do here. -->
+      <q-banner class="bg-primary text-white" rounded>
+        Mis-transcriptions are reviewed in the Caption Editor now — every flagged cue shows up there, in context, with its own
+        “Use script”, “Accept as-is” and “Undo” actions.
+        <template #action>
+          <q-btn unelevated color="white" text-color="primary" no-caps label="Open Caption Editor" :to="`/caption/${props.topic}?lang=en`" />
+        </template>
+      </q-banner>
+    </template>
+
     <template v-else>
-      <p class="text-grey-7">The partner translates from this SRT, so a mishearing here reaches Mandarin. Listen, then click whichever
-        reading is actually correct — <strong>Script</strong> or <strong>SRT</strong> — to deliver that text; or type the exact words on the
-        right if neither is right. Timings never change — only the delivered text. Run subtitles and package afterwards. A decision takes a
-        moment to save — the item moves to Reviewed below once it has.
-        <router-link v-if="props.topic" :to="`/caption/${props.topic}?lang=en`">Or edit captions directly in the player.</router-link></p>
+      <p class="text-grey-7">The partner translates from this SRT, so a mishearing here reaches Mandarin. Scan script against SRT below
+        (or listen), then open a topic's Caption Editor to decide and fix it — that's where the actual edit happens.</p>
       <q-card v-if="mt[0].rows.length" flat bordered class="q-mb-md">
         <q-card-section class="text-subtitle1 text-weight-medium q-pb-sm">{{ mt[0].title }} ({{ mt[0].rows.length }})</q-card-section>
         <q-list separator>
@@ -226,35 +217,28 @@ onBeforeUnmount(stopSegment);
             <q-item-section style="max-width: 190px" />
             <q-item-section class="mt-col">Script (approved)</q-item-section>
             <q-item-section class="mt-col">SRT (captioned)</q-item-section>
-            <q-item-section side style="width: 300px" />
             <q-item-section side style="width: 104px" />
+            <q-item-section side style="width: 160px" />
           </q-item>
           <q-item v-for="d in mt[0].rows" :key="d.data!.id">
             <q-item-section style="max-width: 190px">
               <router-link :to="`/topic/${d.topic}`">{{ d.topic }}</router-link>
               <q-item-label caption>slide {{ d.data!.slide }} · cue {{ d.data!.cue ?? '—' }}</q-item-label>
             </q-item-section>
-            <q-item-section class="mt-col pick" @click="useScript(d)">
+            <q-item-section class="mt-col">
               <q-item-label>{{ d.data!.script }}</q-item-label>
-              <q-tooltip>Click to deliver this as the subtitle</q-tooltip>
             </q-item-section>
-            <q-item-section class="mt-col pick" @click="review(d, { accept: true })">
+            <q-item-section class="mt-col">
               <q-item-label class="text-warning">{{ d.data!.srt }}</q-item-label>
-              <q-tooltip>Click to deliver this as the subtitle</q-tooltip>
-            </q-item-section>
-            <q-item-section side style="width: 300px">
-              <div class="row items-center gap-sm no-wrap">
-                <q-input :model-value="corrections[d.data!.id!] ?? d.data!.srt" dense outlined class="col" aria-label="Corrected subtitle text"
-                  @update:model-value="(v) => (corrections[d.data!.id!] = String(v ?? ''))" />
-                <q-btn unelevated dense color="primary" no-caps label="Correct" class="correct-btn" @click="correct(d)">
-                  <q-tooltip>Deliver the subtitle as this typed text</q-tooltip>
-                </q-btn>
-              </div>
             </q-item-section>
             <q-item-section side style="width: 104px">
               <q-btn v-if="d.data!.time !== null && d.data!.time !== undefined" flat dense no-caps color="primary"
                 :icon="nowPlaying === d.data!.id ? 'stop' : 'play_arrow'" :label="nowPlaying === d.data!.id ? 'Stop' : fmtTime(d.data!.time)"
                 @click="playSegment(d)" />
+            </q-item-section>
+            <q-item-section side style="width: 160px">
+              <q-btn unelevated dense no-caps color="primary" icon="edit_note" label="Review"
+                :to="`/caption/${d.topic}?lang=en${d.data!.time !== null && d.data!.time !== undefined ? `&t=${d.data!.time}` : ''}`" />
             </q-item-section>
           </q-item>
         </q-list>
@@ -268,8 +252,7 @@ onBeforeUnmount(stopSegment);
               <q-item-section style="max-width: 190px" />
               <q-item-section class="mt-col">Script (approved)</q-item-section>
               <q-item-section class="mt-col">SRT (captioned)</q-item-section>
-              <q-item-section side style="width: 340px" />
-              <q-item-section side style="width: 104px" />
+              <q-item-section side style="width: 260px" />
             </q-item>
             <q-item v-for="d in mt[1].rows" :key="d.data!.id" class="text-grey-6">
               <q-item-section style="max-width: 190px">
@@ -282,17 +265,11 @@ onBeforeUnmount(stopSegment);
               <q-item-section class="mt-col">
                 <q-item-label>{{ d.data!.srt }}</q-item-label>
               </q-item-section>
-              <q-item-section side style="width: 340px">
+              <q-item-section side style="width: 260px">
                 <div class="row items-center gap-sm">
                   <StateChip kind="ok" :label="d.data!.review!.decision === 'accept' ? 'kept SRT' : `corrected to “${d.data!.review!.text}”`" />
                   <span class="text-caption">{{ d.data!.review!.by || '' }}</span>
-                  <q-btn flat dense size="sm" no-caps label="Undo" @click="review(d, { clear: true })" />
                 </div>
-              </q-item-section>
-              <q-item-section side style="width: 104px">
-                <q-btn v-if="d.data!.time !== null && d.data!.time !== undefined" flat dense no-caps color="primary"
-                  :icon="nowPlaying === d.data!.id ? 'stop' : 'play_arrow'" :label="nowPlaying === d.data!.id ? 'Stop' : fmtTime(d.data!.time)"
-                  @click="playSegment(d)" />
               </q-item-section>
             </q-item>
           </q-list>
@@ -311,16 +288,5 @@ onBeforeUnmount(stopSegment);
 .mt-col {
   flex: 1 1 0%;
   min-width: 0;
-}
-.pick {
-  cursor: pointer;
-  border-radius: 4px;
-  transition: background-color 0.15s;
-}
-.pick:hover {
-  background-color: rgba(255, 255, 255, 0.08);
-}
-.correct-btn {
-  height: 40px;
 }
 </style>

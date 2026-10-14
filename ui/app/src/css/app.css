@@ -85,6 +85,9 @@ body.body--dark a:not(.q-btn):not(.q-item):not(.q-tab):not(.cell) { color: var(-
 .stepflow .step.failed { border-color: var(--q-negative); }
 .stepflow .step.optional { border-style: dashed; }
 .stepflow .step.wait { cursor: default; border-style: dotted; }
+.stepflow .step.wait.link { cursor: pointer; text-decoration: none; color: inherit; }
+.stepflow .step.wait.link:hover { border-color: var(--q-primary); }
+.stepflow .step.wait.warn { border-color: var(--q-warning); }
 .stepflow .step.disabled { border-style: dotted; opacity: .5; }
 .stepflow .arrow { opacity: .45; flex: none; }
 

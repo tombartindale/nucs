@@ -59,11 +59,16 @@ def unset_override(t: Topic, slide: int) -> None:
     save(t, data)
 
 
-def decide(t: Topic, item: dict[str, Any], decision: str, text: str | None, who: str) -> None:
+def decide(t: Topic, item: dict[str, Any], decision: str, text: str | None, who: str, *, applied: bool = False) -> None:
     data = load(t)
     data["transcripts"][item["id"]] = {
         "decision": decision,
         "text": text if decision == "correct" else None,
+        # True when TEXT is already live in the SRT (written there directly, not through this
+        # decision) - apply_corrections must never regex-substitute it in again, since the old
+        # "heard" span it would search for is a short, common fragment that can easily recur by
+        # coincidence in unrelated later text, corrupting it under the guise of a stale "fix".
+        "applied": applied if decision == "correct" else False,
         "script": item.get("script"),
         "srt": item.get("srt"),
         "cue": item.get("cue"),

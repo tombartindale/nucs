@@ -11,7 +11,7 @@ import { TOPIC } from './context';
 
 type Item =
   | { kind: 'step'; name: string; optional?: boolean }
-  | { kind: 'wait'; name: string; label: string; icon: string }
+  | { kind: 'wait'; name: string; label: string; icon: string; to?: (id: string) => string }
   | { kind: 'bumpers' };
 
 // The order bcn works through (tooling/bcn/state.py). The waits are what a person does
@@ -24,6 +24,8 @@ const FLOW: Record<'en' | 'zh', Item[]> = {
     { kind: 'step', name: 'validate' }, { kind: 'step', name: 'render' },
     { kind: 'wait', name: 'recording', label: 'Recording', icon: 'videocam' },
     { kind: 'step', name: 'cues' }, { kind: 'step', name: 'subtitles' },
+    { kind: 'wait', name: 'translation_ready', label: 'Ready for translation', icon: 'translate',
+      to: (id) => `/caption/${id}?lang=en` },
     { kind: 'bumpers' },
     { kind: 'step', name: 'compose', optional: true }, { kind: 'step', name: 'package' },
   ],
@@ -39,6 +41,8 @@ const WAIT_HELP: Record<string, string> = {
   translation: 'The English SRT and slides go to the translator from the Translation page. The returned files come back either there, '
     + 'or dropped straight into the Slides pane above if the translator sent them loose under the wrong names. '
     + 'A topic can be sent once its English subtitles step is done, so any corrected mishearings reach the translator.',
+  translation_ready: 'Whether the English subtitles are fit to hand to a translator: validated, through bcn subtitles, and with '
+    + 'every suspected mis-transcription reviewed. Click to open the Caption Editor and fix what is outstanding.',
 };
 
 const LANGS = ['en', 'zh'] as const;
@@ -67,6 +71,19 @@ function view(item: Item, lang: 'en' | 'zh') {
   const s = stateOf(lang);
   const next = s?.next ?? null;
   if (item.kind === 'wait') {
+    if (item.name === 'translation_ready') {
+      const subs = t.status.value?.en?.steps?.subtitles;
+      const unreviewed = t.status.value?.unreviewed_mistranscriptions ?? 0;
+      const approved = t.status.value?.zh?.next === 'translation_export';
+      const status = !subs?.ok || !subs?.fresh ? 'todo' : approved ? 'done' : 'warn';
+      const ICON = { done: 'check_circle', warn: 'rate_review', todo: 'radio_button_unchecked' } as const;
+      const COLOR = { done: 'positive', warn: 'warning', todo: 'grey-6' } as const;
+      const CAP = { done: 'ready to send',
+        warn: unreviewed ? `${unreviewed} mis-transcription${unreviewed > 1 ? 's' : ''} to review` : 'needs another look',
+        todo: 'after English subtitles' };
+      return { cls: ['wait', status], icon: ICON[status], color: COLOR[status], cap: CAP[status],
+        clickable: status !== 'todo', tip: WAIT_HELP.translation_ready };
+    }
     const current = item.name === 'recording' ? next === 'await_recording'
       : next === 'translation_export' || next === 'await_translation';
     const reached = !!s && (item.name === 'recording'
@@ -139,7 +156,7 @@ function measure() {
     const r = el.getBoundingClientRect();
     return { l: r.left - box.left, r: r.right - box.left, t: r.top - box.top, b: r.bottom - box.top };
   };
-  const subs = at('en-subtitles'), pkg = at('en-package');
+  const subs = at('en-translation_ready'), pkg = at('en-package');
   const first = at('zh-translation'), last = at('zh-package');
   size.value = { w: w.scrollWidth, h: w.scrollHeight };
   if (!subs || !pkg || !first || !last) { links.value = []; return; }
@@ -202,7 +219,13 @@ async function bumpers(lang: 'en' | 'zh') {
             </div>
             <template v-for="({ item, v }, i) in r.items" :key="r.lang + (item.kind === 'bumpers' ? 'bumpers' : item.name)">
               <q-icon v-if="i > 0" name="arrow_forward" size="18px" class="arrow" />
-              <div v-if="item.kind === 'wait'" :class="['step', ...v.cls]" :data-step="`${r.lang}-${item.name}`">
+              <router-link v-if="item.kind === 'wait' && item.to && v.clickable" :to="item.to(t.id)"
+                :class="['step', 'wait', 'link', v.cls[1]]" :data-step="`${r.lang}-${item.name}`">
+                <div class="name"><q-icon :name="v.icon" :color="v.color" size="16px" />{{ item.label }}</div>
+                <div class="cap">{{ v.cap }}</div>
+                <q-tooltip max-width="320px">{{ v.tip }}</q-tooltip>
+              </router-link>
+              <div v-else-if="item.kind === 'wait'" :class="['step', ...v.cls]" :data-step="`${r.lang}-${item.name}`">
                 <div class="name"><q-icon :name="v.icon" :color="v.color" size="16px" />{{ item.label }}</div>
                 <div class="cap">{{ v.cap }}</div>
                 <q-tooltip max-width="320px">{{ v.tip }}</q-tooltip>

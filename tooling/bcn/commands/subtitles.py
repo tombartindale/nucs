@@ -59,6 +59,13 @@ def apply_corrections(t: Topic, cues: list[srt.Cue], r: TopicResult) -> int:
     for dec in decisions.values():
         if dec.get("decision") != "correct" or not dec.get("text") or not dec.get("srt") or not dec.get("cue"):
             continue
+        if dec.get("applied"):
+            # Already written directly into the SRT when the decision was made (the Caption
+            # Editor does this) - there is nothing left to substitute. Skip entirely rather than
+            # searching for the old "heard" span: it's often a short, common fragment ("test",
+            # "model") that can resurface by coincidence in later, unrelated text, and regex-
+            # substituting the whole decision text in over it would corrupt an already-correct line.
+            continue
         heard = dec["srt"]
         pattern = r"\s+".join(re.escape(w) for w in heard.split())
         done = False

@@ -42,7 +42,7 @@ const routes: RouteRecordRaw[] = [
   { path: `/prompt/:id(${TOPIC})`, component: () => import('@/pages/PrompterPage.vue'), props: true },
   // So is the caption editor: a repeated, focused final-pass tool, same shape as the teleprompter.
   { path: `/caption/:id(${TOPIC})`, component: () => import('@/pages/CaptionEditorPage.vue'),
-    props: (r: R) => ({ id: r.params.id, lang: r.query.lang === 'zh' ? 'zh' : 'en' }) },
+    props: (r: R) => ({ id: r.params.id, lang: r.query.lang === 'zh' ? 'zh' : 'en', startAt: num(r.query.t) }) },
   { path: '/:rest(.*)*', redirect: '/' },
 ];
 

@@ -23,6 +23,9 @@ def add_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--accept", action="store_true", help="the SRT reading is fine as it is")
     g.add_argument("--correct", metavar="TEXT", help="the SRT should read TEXT here")
     g.add_argument("--clear", action="store_true", help="remove a previous decision")
+    p.add_argument("--applied", action="store_true",
+                   help="with --correct: TEXT is already live in the SRT (e.g. written directly by the Caption "
+                        "Editor) - record it, but never let bcn subtitles try to substitute it in again")
     p.add_argument("--by", default=None, help="who made the decision (default: login name)")
 
 
@@ -48,7 +51,8 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
                 data["transcripts"].pop(args.item, None)
                 reviewfile.save(t, data)
             else:
-                reviewfile.decide(t, item, "accept" if args.accept else "correct", args.correct, args.by or getpass.getuser())
+                reviewfile.decide(t, item, "accept" if args.accept else "correct", args.correct, args.by or getpass.getuser(),
+                                  applied=args.applied)
         decisions = reviewfile.load(t)["transcripts"]
         r.extra["items"] = [{**d, "review": decisions.get(d["id"])} for d in items]
         r.extra["unreviewed"] = sum(1 for d in items if d["id"] not in decisions)

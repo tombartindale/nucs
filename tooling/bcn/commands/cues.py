@@ -170,6 +170,31 @@ def cues_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: a
         else:
             r.diagnostics.append(Diagnostic("CUE_INSERTION", f"Slide {dv.slide}: SRT has \"{dv.srt[:80]}\", which is not in the script.",
                                             topic=t.id, file="edit/master.srt", slide=dv.slide, line=line, data=dv.to_json()))
+    # A decision's id is a hash of the (script, srt) pair it was made against, so an edit that
+    # changes the cue's text - even one that settles the divergence for good - makes the id stop
+    # recurring here. Without this, a human's review simply vanishes the moment it succeeds well
+    # enough to stop being flagged, which looks like the system forgot the cue was ever reviewed.
+    # Surface the most recent such decision per cue as its own reviewed (info-level) diagnostic,
+    # synthesised from what review.json itself recorded, so a completed review stays visible.
+    live_mt_ids = {dv.id for dv in al.divergences if dv.kind == "mistranscription"}
+    orphaned_by_cue: dict[int, tuple[str, dict]] = {}
+    for div_id, dec in decisions.items():
+        cue_num = dec.get("cue")
+        if div_id in live_mt_ids or not cue_num or not 1 <= cue_num <= len(cues):
+            continue
+        prev = orphaned_by_cue.get(cue_num)
+        if prev is None or dec.get("at", "") > prev[1].get("at", ""):
+            orphaned_by_cue[cue_num] = (div_id, dec)
+    for cue_num, (div_id, dec) in sorted(orphaned_by_cue.items()):
+        cue_idx = cue_num - 1
+        slide = next((b.slide for b in reversed(al.boundaries) if b.cue is not None and b.cue <= cue_num), 1)
+        r.diagnostics.append(Diagnostic(
+            "CUE_MISTRANSCRIPTION",
+            f"Slide {slide}: reviewed - {dec['decision']}" + (f", corrected to \"{dec['text']}\"." if dec.get("text") else " as heard."),
+            level="info", topic=t.id, file="edit/master.srt", slide=slide, line=cues[cue_idx].line,
+            hint=f"Reviewed: {dec['decision']}. The cue has since changed enough that this no longer matches live analysis - shown from review.json.",
+            data={"id": div_id, "kind": "mistranscription", "slide": slide, "script": dec.get("script"), "srt": dec.get("srt"),
+                  "cue": cue_num, "time": cues[cue_idx].start, "script_tokens": 0, "srt_tokens": 0, "review": dec}))
     # A reviewed mistranscription is a human-adjudicated cue, not an unresolved divergence - whether
     # the decision was to keep the SRT or correct it, someone has confirmed what it should read. So it
     # no longer counts toward CUE_HEAVY_DIVERGENCE, which exists to catch systemic problems (wrong SRT,
