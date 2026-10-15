@@ -29,6 +29,10 @@ export const VALUE_ARGS: Record<string, RegExp> = {
   correct: /^[^\x00-\x1f]{1,200}$/,
   cue: /^\d{1,4}$/,
   caption_text: /^[^\x00-\x08\x0b\x0c\x0e-\x1f]{1,500}$/,  // allows \t \n \r, excludes other control chars
+  // A JSON object of {"cue": "text", ...} for a bulk caption edit — bcn caption itself parses
+  // and validates the JSON and every cue number/text; this just bounds its size and excludes
+  // the same raw control characters caption_text does.
+  cues_json: /^[^\x00-\x08\x0b\x0c\x0e-\x1f]{1,100000}$/,
   from: /^.{1,1024}$/,      // server-provided paths only, never from the browser
   import: /^.{1,1024}$/,    // checked to be inside the root before use
   assets: /^.{1,1024}$/,    // server-provided path only, same as `from`
@@ -45,7 +49,7 @@ export const VALUE_ARGS: Record<string, RegExp> = {
   doc: /^[A-Za-z0-9/_.-]{1,100}$/,
 };
 // The order value arguments are passed to bcn in. Shared with the worker's argv builder.
-export const VALUE_ORDER = ['lang', 'theme', 'set', 'unset', 'item', 'correct', 'cue', 'caption_text', 'from', 'assets', 'by', 'prefer', 'fingerprint', 'note', 'expect_sha', 'doc'];
+export const VALUE_ORDER = ['lang', 'theme', 'set', 'unset', 'item', 'correct', 'cue', 'caption_text', 'cues_json', 'from', 'assets', 'by', 'prefer', 'fingerprint', 'note', 'expect_sha', 'doc'];
 export const PIPELINE = new Set(['validate', 'render', 'script', 'bumpers', 'cues', 'subtitles', 'compose', 'package', 'qa']);
 
 /** Two targets overlap when one contains the other ('.' is the whole programme). */
