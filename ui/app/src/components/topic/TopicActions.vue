@@ -74,11 +74,17 @@ function view(item: Item, lang: 'en' | 'zh') {
     if (item.name === 'translation_ready') {
       const subs = t.status.value?.en?.steps?.subtitles;
       const unreviewed = t.status.value?.unreviewed_mistranscriptions ?? 0;
-      const approved = t.status.value?.zh?.next === 'translation_export';
+      const zh = t.status.value?.zh;
+      // Once the topic has left 'not_sent', the export gate already did its job at send time -
+      // zh.next now tracks Mandarin's own post-return pipeline (validate/subtitles/render/...),
+      // which never again equals 'translation_export', so that check alone would leave this tile
+      // permanently stuck on "needs another look" for every topic whose translation came back.
+      const sent = !!zh && zh.stage !== 'not_sent';
+      const approved = zh?.next === 'translation_export' || sent;
       const status = !subs?.ok || !subs?.fresh ? 'todo' : approved ? 'done' : 'warn';
       const ICON = { done: 'check_circle', warn: 'rate_review', todo: 'radio_button_unchecked' } as const;
       const COLOR = { done: 'positive', warn: 'warning', todo: 'grey-6' } as const;
-      const CAP = { done: 'ready to send',
+      const CAP = { done: sent ? 'sent' : 'ready to send',
         warn: unreviewed ? `${unreviewed} mis-transcription${unreviewed > 1 ? 's' : ''} to review` : 'needs another look',
         todo: 'after English subtitles' };
       return { cls: ['wait', status], icon: ICON[status], color: COLOR[status], cap: CAP[status],
