@@ -23,6 +23,9 @@ def add_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--accept", action="store_true", help="the SRT reading is fine as it is")
     g.add_argument("--correct", metavar="TEXT", help="the SRT should read TEXT here")
     g.add_argument("--clear", action="store_true", help="remove a previous decision")
+    g.add_argument("--clear-all", dest="clear_all", action="store_true",
+                   help="remove every recorded decision for this topic, as if review.json's transcripts "
+                        "had never been written - run bcn cues --force afterwards to see it reflected")
     p.add_argument("--applied", action="store_true",
                    help="with --correct: TEXT is already live in the SRT (e.g. written directly by the Caption "
                         "Editor) - record it, but never let bcn subtitles try to substitute it in again")
@@ -31,6 +34,10 @@ def add_args(p: argparse.ArgumentParser) -> None:
 
 def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
     deciding = args.accept or args.correct is not None or args.clear
+    if args.clear_all and target.level != "topic":
+        raise Fail("USAGE", "--clear-all needs a single topic directory.")
+    if args.clear_all and args.item:
+        raise Fail("USAGE", "--clear-all clears every decision; it doesn't take --item.")
     if deciding and (target.level != "topic" or not args.item):
         raise Fail("USAGE", "Deciding needs a single topic directory and --item.")
     if args.item and not deciding:
@@ -46,7 +53,12 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
         items = [d for d in report.get("divergences", [])
                  if d.get("kind") in ("mistranscription", "paraphrase", "cut", "insertion")
                  and not (d.get("kind") == "cut" and d.get("spans_boundary"))]
-        if deciding and args.clear:
+        if args.clear_all:
+            data = reviewfile.load(t)
+            r.extra["cleared"] = len(data["transcripts"])
+            data["transcripts"] = {}
+            reviewfile.save(t, data)
+        elif deciding and args.clear:
             # Clearing only needs the id to already be a key in review.json - not a live match in
             # cues-report.json. A decision's id changes once the cue moves on (a new correction, or
             # cues.py's own hash scheme changing), so by the time someone wants to undo an old
