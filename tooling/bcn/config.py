@@ -114,10 +114,13 @@ DEFAULTS: dict[str, Any] = {
         # slides vs. presenter. side_by_side and inset keep the presenter within a 16:9
         # frame (side_by_side: presenter fills the share of the right the theme's
         # safe_area.right keeps clear; inset: presenter is a small box over full-frame
-        # slides). stacked and full_bleed_inset are for a vertical (portrait) frame instead:
-        # stacked splits the frame into a presenter band and a slide band; full_bleed_inset
-        # is inset's mirror image, presenter filling the frame with the slide as the small
-        # box. inset_scale/inset_position/inset_margin apply to inset and full_bleed_inset;
+        # slides). stacked, full_bleed_inset and full_bleed_text are for a vertical
+        # (portrait) frame instead: stacked splits the frame into a presenter band and a
+        # slide band; full_bleed_inset is inset's mirror image, presenter filling the frame
+        # with the slide as the small box; full_bleed_text is full_bleed_inset's box
+        # replaced by the slide's own text (heading/bullets, no image, no background panel)
+        # centred over the presenter, for when the slide image itself isn't wanted at all.
+        # inset_scale/inset_position/inset_margin apply to inset and full_bleed_inset;
         # split_ratio (the presenter's share of the frame height) applies to stacked only —
         # every entry carries the same fields regardless, so none of them needs special-casing
         # in programme.toml.
@@ -138,6 +141,12 @@ DEFAULTS: dict[str, Any] = {
                 "arrangement": "full_bleed_inset",
                 "width": 1080, "height": 1920,
                 "inset_scale": 0.38, "inset_position": "top-right", "inset_margin": 24,
+                "split_ratio": 0.5,
+            },
+            "vertical_text": {
+                "arrangement": "full_bleed_text",
+                "width": 1080, "height": 1920,
+                "inset_scale": 0.3, "inset_position": "top-right", "inset_margin": 16,
                 "split_ratio": 0.5,
             },
         },

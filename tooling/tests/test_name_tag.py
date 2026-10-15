@@ -73,6 +73,20 @@ def test_filter_graph_fades_tag_after_logo(tree):
     assert "[tag]" not in plain and "[comp]" in plain
 
 
+def test_full_bleed_text_hides_until_tag_is_gone(tree):
+    """full_bleed_text's slide text would otherwise land right where the name tag does, early
+    on: it must stay invisible until the tag's own hold ends, then fade in over the tag's own
+    fade duration — not simply be drawn underneath or alongside it."""
+    es = EncodeSpec(1080, 1920, 25, "", "h264", "aac", 18, "slow", ("8M", "192k"))
+    c = {**load(tree)["compose"]["layouts"]["vertical_text"], "arrangement": "full_bleed_text"}
+    tag = NameTag("3:v", 100, 100, 1.0, 5.0, 0.5)
+    g = filter_graph(c, es, 60.0, None, "Helvetica", 16, None, tag=tag)
+    assert "[1:v]format=rgba,fps=25,fade=t=in:st=6.000:d=0.500:alpha=1[textov]" in g
+
+    plain = filter_graph(c, es, 60.0, None, "Helvetica", 16, None)
+    assert "[1:v]format=rgba,fps=25[textov]" in plain  # no speaker named: shown from the start
+
+
 def _region_luma(video, t: float, box) -> float:
     x, y, w, h = box
     out = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(t), "-i", str(video), "-frames:v", "1", "-vf",
