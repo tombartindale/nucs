@@ -16,6 +16,7 @@ from ..tree import Target
 from . import validate as validate_cmd
 
 HELP = "every outstanding diagnostic beneath the path"
+REVIEWABLE_CODES = ("CUE_MISTRANSCRIPTION", "CUE_PARAPHRASE", "CUE_CUT", "CUE_INSERTION")
 
 
 def add_args(p: argparse.ArgumentParser) -> None:
@@ -57,7 +58,7 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
                 d = dict(d)
                 d.setdefault("topic", t.id)
                 d["lang"] = d.get("lang") or lang
-                if d.get("code") == "CUE_MISTRANSCRIPTION" and d.get("data"):
+                if d.get("code") in REVIEWABLE_CODES and d.get("data") and d["data"].get("id") and not d["data"].get("spans_boundary"):
                     dec = decisions.get(d["data"].get("id"))
                     d["data"] = {**d["data"], "review": dec}
                     d["level"] = "info" if dec else "warn"

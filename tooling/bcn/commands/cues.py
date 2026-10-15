@@ -16,6 +16,19 @@ from ..runner import require_input, require_step, run_topics, try_skip
 from ..tree import Target, Topic
 
 HELP = "match script to SRT, emit the slide cue sheet"
+# Divergence kinds a person can review (keep the SRT as it is, or correct it). A cut that spans a
+# slide break is not one of them: it is about where a boundary goes, and has its own --set workflow.
+REVIEWABLE = ("cut", "mistranscription", "paraphrase", "insertion")
+
+
+def _review_level(dec: dict | None) -> str:
+    # Unreviewed is "warn" for every kind, not the code's default: a cut or an insertion is
+    # exactly the thing a reviewer must look at, and "info" is filtered out of the default views.
+    return "info" if dec else "warn"
+
+
+def _review_hint(dec: dict | None, unreviewed: str) -> str:
+    return f"Reviewed: {dec['decision']}." if dec else unreviewed
 
 
 def add_args(p: argparse.ArgumentParser) -> None:
@@ -153,30 +166,38 @@ def cues_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: a
                                             hint="A human needs to place that boundary. Watch the draft and use --set.",
                                             data=dv.to_json()))
         elif dv.kind == "cut":
+            dec = decisions.get(dv.id)
             r.diagnostics.append(Diagnostic("CUE_CUT", f"Slide {dv.slide}: \"{dv.script[:80]}\" is not in the SRT.",
-                                            topic=t.id, file="edit/master.srt", slide=dv.slide, line=line, data=dv.to_json()))
+                                            level=_review_level(dec), topic=t.id, file="edit/master.srt", slide=dv.slide, line=line,
+                                            hint=_review_hint(dec, "Check the recording: was this cut on purpose, or did the SRT drop it?"),
+                                            data={**dv.to_json(), "review": dec}))
         elif dv.kind == "mistranscription":
             dec = decisions.get(dv.id)
             r.diagnostics.append(Diagnostic("CUE_MISTRANSCRIPTION", f"Slide {dv.slide}: SRT reads \"{dv.srt}\" where the script reads \"{dv.script}\".",
-                                            level="info" if dec else "warn",
+                                            level=_review_level(dec),
                                             topic=t.id, file="edit/master.srt", slide=dv.slide, line=line,
-                                            hint="The partner translates from this SRT. Accept or correct it in review." if not dec else f"Reviewed: {dec['decision']}.",
+                                            hint=_review_hint(dec, "The partner translates from this SRT. Accept or correct it in review."),
                                             data={**dv.to_json(), "review": dec}))
         elif dv.kind == "paraphrase":
-            r.diagnostics.append(Diagnostic("CUE_PARAPHRASE", f"Slide {dv.slide}: presenter said \"{dv.srt[:80]}\" instead of \"{dv.script[:80]}\".",
-                                            topic=t.id, file="edit/master.srt", slide=dv.slide, line=line,
-                                            hint="The approved script is what was signed off; the producer should know.",
-                                            data=dv.to_json()))
+            dec = decisions.get(dv.id)
+            r.diagnostics.append(Diagnostic("CUE_PARAPHRASE", f"Slide {dv.slide}: SRT reads \"{dv.srt[:80]}\" where the script reads \"{dv.script[:80]}\".",
+                                            level=_review_level(dec), topic=t.id, file="edit/master.srt", slide=dv.slide, line=line,
+                                            hint=_review_hint(dec, "Either the presenter went off script, or the captions mangled a different wording. "
+                                                                   "Check the recording before changing the SRT."),
+                                            data={**dv.to_json(), "review": dec}))
         else:
+            dec = decisions.get(dv.id)
             r.diagnostics.append(Diagnostic("CUE_INSERTION", f"Slide {dv.slide}: SRT has \"{dv.srt[:80]}\", which is not in the script.",
-                                            topic=t.id, file="edit/master.srt", slide=dv.slide, line=line, data=dv.to_json()))
+                                            level=_review_level(dec), topic=t.id, file="edit/master.srt", slide=dv.slide, line=line,
+                                            hint=_review_hint(dec, "Words in the recording that the script does not have (a retake, an aside, a captioning artefact)."),
+                                            data={**dv.to_json(), "review": dec}))
     # A decision's id is a hash of the (script, srt) pair it was made against, so an edit that
     # changes the cue's text - even one that settles the divergence for good - makes the id stop
     # recurring here. Without this, a human's review simply vanishes the moment it succeeds well
     # enough to stop being flagged, which looks like the system forgot the cue was ever reviewed.
     # Surface the most recent such decision per cue as its own reviewed (info-level) diagnostic,
     # synthesised from what review.json itself recorded, so a completed review stays visible.
-    live_mt_ids = {dv.id for dv in al.divergences if dv.kind == "mistranscription"}
+    live_mt_ids = {dv.id for dv in al.divergences}
     orphaned_by_cue: dict[int, tuple[str, dict]] = {}
     for div_id, dec in decisions.items():
         cue_num = dec.get("cue")
@@ -199,7 +220,7 @@ def cues_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: a
     # the decision was to keep the SRT or correct it, someone has confirmed what it should read. So it
     # no longer counts toward CUE_HEAVY_DIVERGENCE, which exists to catch systemic problems (wrong SRT,
     # wrong topic, a recording that needs redoing), not the backlog of one-at-a-time transcription fixes.
-    reviewed_tokens = sum(dv.script_tokens for dv in al.divergences if dv.kind == "mistranscription" and dv.id in decisions)
+    reviewed_tokens = sum(dv.script_tokens for dv in al.divergences if dv.id in decisions)
     total_tokens = al.script_tokens or 1
     reviewed_ratio = round(max(0, al.diff_script - reviewed_tokens) / total_tokens, 4)
     if reviewed_ratio > c["max_divergence"]:
@@ -242,6 +263,8 @@ def cues_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: a
         "divergence_ratio": reviewed_ratio,
         "mistranscriptions": sum(1 for d in al.divergences if d.kind == "mistranscription"),
         "unreviewed": sum(1 for d in al.divergences if d.kind == "mistranscription" and d.id not in decisions),
+        "unreviewed_other": sum(1 for d in al.divergences if d.kind in REVIEWABLE and d.kind != "mistranscription"
+                                and d.id not in decisions and not (d.kind == "cut" and d.spans_boundary)),
         "manual": sorted(ov),
     })
     r.extra["overrides"] = {str(k): v for k, v in sorted(ov.items())}

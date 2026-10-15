@@ -123,6 +123,24 @@ def test_cues_end_to_end(tree, capsys):
     out = (t / "build/subtitles/KV7015-U01-T01.en.srt").read_text()
     assert "lumber" not in out and "number 1 for slide 3" in out
 
+    # A reworded passage and a dropped sentence are reviewable too, not just mishearings: flagged
+    # as warnings until a decision exists, then info with the decision attached.
+    srt_text = (t / "edit/master.srt").read_text().replace("sentence number 1 for slide 3", "sentence number 1 for slide 3")
+    assert "sentence number 1 for slide 4" in srt_text
+    (t / "edit/master.srt").write_text(srt_text.replace("sentence number 1 for slide 4", "a completely different remark about things", 1))
+    for f in ("edit/master.mp4", "edit/master.srt"):
+        age(t / f, 10)
+    for f in ("build/cues.json", "build/cues-report.json", "build/KV7015-U01-T01.cues.csv"):
+        age(t / f, 20)
+    code, env = bcn(capsys, "cues", str(t))
+    other = [d for d in env["diagnostics"] if d["code"] in ("CUE_PARAPHRASE", "CUE_CUT", "CUE_INSERTION") and d["data"].get("review") is None]
+    assert other and all(d["level"] == "warn" for d in other), env["diagnostics"]
+    code, env = bcn(capsys, "review", str(t), "--item", other[0]["data"]["id"], "--accept", "--by", "test")
+    assert code == 0, env["diagnostics"]
+    code, env = bcn(capsys, "cues", str(t), "--force")
+    done = [d for d in env["diagnostics"] if d["data"].get("id") == other[0]["data"]["id"]]
+    assert done and done[0]["level"] == "info" and done[0]["data"]["review"]["decision"] == "accept"
+
 
 def test_schema_and_codes(capsys):
     code, env = bcn(capsys, "schema", "status")

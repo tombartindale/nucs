@@ -1,4 +1,4 @@
-"""bcn review: list suspected mis-transcriptions, and record accept or correct.
+"""bcn review: list script/SRT divergences (mishearings, paraphrases, cuts, insertions), and record accept or correct.
 
 Decisions are written to the topic's review.json, which is content and
 survives build/ being deleted. A correction is applied to the delivered subtitle
@@ -14,7 +14,7 @@ from .. import fsutil, reviewfile
 from ..envelope import Envelope, Fail, TopicResult
 from ..tree import Target
 
-HELP = "list suspected mis-transcriptions, or accept/correct one"
+HELP = "list script/SRT divergences, or accept/correct one"
 
 
 def add_args(p: argparse.ArgumentParser) -> None:
@@ -40,7 +40,12 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
     for t in target.topics:
         r = TopicResult(t.id, t.rel)
         report = fsutil.read_json(t.cues_report) or {}
-        items = [d for d in report.get("divergences", []) if d.get("kind") == "mistranscription"]
+        # Every kind of divergence can be reviewed, not just mishearings: a paraphrase, a cut or an
+        # insertion is as much "what should this cue read" as a mistranscription is. A cut that spans
+        # a slide break is the exception - that is a boundary to place (bcn cues --set), not a cue to edit.
+        items = [d for d in report.get("divergences", [])
+                 if d.get("kind") in ("mistranscription", "paraphrase", "cut", "insertion")
+                 and not (d.get("kind") == "cut" and d.get("spans_boundary"))]
         if deciding and args.clear:
             # Clearing only needs the id to already be a key in review.json - not a live match in
             # cues-report.json. A decision's id changes once the cue moves on (a new correction, or
@@ -57,7 +62,7 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
         elif deciding:
             item = next((d for d in items if d["id"] == args.item), None)
             if item is None:
-                raise Fail("REVIEW_UNKNOWN_ITEM", f"No suspected mis-transcription '{args.item}' in {t.rel}/build/cues-report.json.",
+                raise Fail("REVIEW_UNKNOWN_ITEM", f"No reviewable divergence '{args.item}' in {t.rel}/build/cues-report.json.",
                            topic=t.id, hint="Run bcn cues first, or list the items with bcn review.")
             reviewfile.decide(t, item, "accept" if args.accept else "correct", args.correct, args.by or getpass.getuser(),
                               applied=args.applied)

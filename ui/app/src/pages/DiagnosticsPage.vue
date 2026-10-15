@@ -46,7 +46,12 @@ onBeforeUnmount(() => clearTimeout(timer));
 const outstanding = computed(() => env.value?.outstanding || []);
 const moduleOptions = computed(() => [{ label: 'all modules', value: '' }, ...Object.keys(beacon.status?.summary.modules || {}).sort().map((m) => ({ label: m, value: m }))]);
 const codeOptions = computed(() => [{ label: 'all codes', value: '' }, ...[...new Set(outstanding.value.map((d) => d.code))].sort().map((c) => ({ label: c, value: c }))]);
-const mtOpen = computed(() => outstanding.value.filter((d) => d.code === 'CUE_MISTRANSCRIPTION' && !d.data?.review).length);
+// Every script-vs-SRT divergence is reviewed the same way (keep the SRT, or correct it), not just
+// mishearings: a paraphrase, a cut or an insertion is as much "what should this cue read".
+const REVIEW_CODES = ['CUE_MISTRANSCRIPTION', 'CUE_PARAPHRASE', 'CUE_CUT', 'CUE_INSERTION'];
+const isReviewable = (d: Diagnostic) => REVIEW_CODES.includes(d.code) && !!d.data?.id && !d.data?.spans_boundary;
+const KIND_LABEL: Record<string, string> = { mistranscription: 'mis-heard', paraphrase: 'reworded', cut: 'missing from SRT', insertion: 'extra in SRT' };
+const mtOpen = computed(() => outstanding.value.filter((d) => isReviewable(d) && !d.data?.review).length);
 const tab = computed({
   get: () => props.tab,
   set: (v: string) => go({ tab: v }),
@@ -58,7 +63,7 @@ const groups = computed(() => {
     inScope(d) &&
     (!f.lang || d.lang === f.lang) &&
     (!f.code || d.code === f.code) &&
-    (d.code !== 'CUE_MISTRANSCRIPTION' || d.level !== 'info'));
+    (!isReviewable(d) || d.level !== 'info'));
   const byCode = new Map<string, Diagnostic[]>();
   for (const d of list) {
     if (!byCode.has(d.code)) byCode.set(d.code, []);
@@ -81,7 +86,7 @@ function rerun(g: (typeof groups.value)[number]) {
 }
 
 const mt = computed(() => {
-  const items = outstanding.value.filter((d) => d.code === 'CUE_MISTRANSCRIPTION' && inScope(d));
+  const items = outstanding.value.filter((d) => isReviewable(d) && inScope(d));
   return [
     { title: 'To review', rows: items.filter((d) => !d.data?.review), empty: 'All reviewed.' },
     { title: 'Reviewed', rows: items.filter((d) => d.data?.review), empty: '' },
@@ -199,7 +204,7 @@ onBeforeUnmount(stopSegment);
       <!-- Scoped to one topic: the Caption Editor already shows every flagged cue in context,
            with actions alongside it, so there's nothing left for a second page to do here. -->
       <q-banner class="bg-primary text-white" rounded>
-        Mis-transcriptions are reviewed in the Caption Editor now — every flagged cue shows up there, in context, with its own
+        Mis-transcriptions, rewordings, cuts and insertions are reviewed in the Caption Editor — every flagged cue shows up there, in context, with its own
         “Use script”, “Accept as-is” and “Undo” actions.
         <template #action>
           <q-btn unelevated color="white" text-color="primary" no-caps label="Open Caption Editor" :to="`/caption/${props.topic}?lang=en`" />
@@ -223,7 +228,7 @@ onBeforeUnmount(stopSegment);
           <q-item v-for="d in mt[0].rows" :key="d.data!.id">
             <q-item-section style="max-width: 190px">
               <router-link :to="`/topic/${d.topic}`">{{ d.topic }}</router-link>
-              <q-item-label caption>slide {{ d.data!.slide }} · cue {{ d.data!.cue ?? '—' }}</q-item-label>
+              <q-item-label caption>slide {{ d.data!.slide }} · cue {{ d.data!.cue ?? '—' }} · {{ KIND_LABEL[String(d.data!.kind)] ?? d.data!.kind }}</q-item-label>
             </q-item-section>
             <q-item-section class="mt-col">
               <q-item-label>{{ d.data!.script }}</q-item-label>
@@ -243,7 +248,7 @@ onBeforeUnmount(stopSegment);
           </q-item>
         </q-list>
       </q-card>
-      <q-card v-if="!mt[0].rows.length && !mt[1].rows.length" flat bordered><q-card-section class="text-grey-7">No suspected mis-transcriptions.</q-card-section></q-card>
+      <q-card v-if="!mt[0].rows.length && !mt[1].rows.length" flat bordered><q-card-section class="text-grey-7">Nothing differs between script and SRT.</q-card-section></q-card>
       <q-card v-if="!mt[0].rows.length && mt[1].rows.length" flat bordered class="q-mb-md"><q-card-section class="text-grey-7">All reviewed.</q-card-section></q-card>
       <q-card v-if="mt[1].rows.length" flat bordered>
         <q-expansion-item :label="`Reviewed (${mt[1].rows.length})`" header-class="text-subtitle1 text-weight-medium">
@@ -257,7 +262,7 @@ onBeforeUnmount(stopSegment);
             <q-item v-for="d in mt[1].rows" :key="d.data!.id" class="text-grey-6">
               <q-item-section style="max-width: 190px">
                 <router-link :to="`/topic/${d.topic}`">{{ d.topic }}</router-link>
-                <q-item-label caption>slide {{ d.data!.slide }} · cue {{ d.data!.cue ?? '—' }}</q-item-label>
+                <q-item-label caption>slide {{ d.data!.slide }} · cue {{ d.data!.cue ?? '—' }} · {{ KIND_LABEL[String(d.data!.kind)] ?? d.data!.kind }}</q-item-label>
               </q-item-section>
               <q-item-section class="mt-col">
                 <q-item-label>{{ d.data!.script }}</q-item-label>
