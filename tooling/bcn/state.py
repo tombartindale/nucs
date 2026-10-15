@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import coursemap, fsutil, reviewfile
+from . import coursemap, fsutil, reviewfile, storage
 from .config import Config, load, load_theme, resolve_theme_name
 from .envelope import Diagnostic, Fail
 from .tree import DEFAULT_LAYOUT, Topic, scan_topic
@@ -75,6 +75,10 @@ class FileInfo:
         try:
             st = p.stat()
         except OSError:
+            ptr = storage.read_pointer(p)
+            m = fsutil.mtime(p) if ptr else None
+            if ptr and m is not None:
+                return cls(p, True, m, storage.size(p), "local")  # in the bucket: nothing to hydrate
             return cls(p, False)
         return cls(p, True, st.st_mtime, st.st_size, fsutil.hydration(p, st))
 

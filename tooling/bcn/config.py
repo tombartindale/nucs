@@ -160,6 +160,15 @@ DEFAULTS: dict[str, Any] = {
         # Where finished delivery packages go, inside each remote module folder.
         "delivery_dir": "delivery",
     },
+    "storage": {
+        # Object storage for large media (master video and compose outputs). Empty bucket
+        # means everything stays on local disk. The S3_MEDIA_BUCKET, S3_MEDIA_PREFIX and
+        # S3_MEDIA_REGION environment variables override these, so a deployment can
+        # configure it without editing programme.toml.
+        "bucket": "",
+        "prefix": "media",
+        "region": "",
+    },
     "qa": {
         "unit_minutes_min": 85,
         "unit_minutes_max": 110,

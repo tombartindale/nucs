@@ -46,10 +46,15 @@ def hydration(path: Path, st: os.stat_result | None = None) -> str:
 
 
 def mtime(path: Path) -> float | None:
+    """mtime of the file, else of its object-storage pointer (see storage.py): media that
+    lives in the bucket is as fresh as the pointer written when it was last replaced."""
     try:
         return path.stat().st_mtime
     except OSError:
-        return None
+        try:
+            return path.with_name(path.name + ".s3.json").stat().st_mtime
+        except OSError:
+            return None
 
 
 def newest(paths: list[Path]) -> float | None:

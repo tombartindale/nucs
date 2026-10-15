@@ -31,6 +31,11 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      # Video lives in this bucket (see deploy/media/setup-bucket.sh); the api hands the browser
+      # presigned URLs to upload and play it. Blank keeps video on the programme volume.
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-}
+      S3_MEDIA_PREFIX: ${S3_MEDIA_PREFIX:-media}
+      S3_MEDIA_REGION: ${S3_MEDIA_REGION:-}
     volumes:
       - programme-root:/data/programme
       - ui-state:/data/ui-state
@@ -49,8 +54,18 @@ services:
       DATABASE_URL: postgres://beacon:${POSTGRES_PASSWORD:-beacon}@postgres:5432/beacon
       REDIS_URL: redis://redis:6379
       BCN: /app/tooling/.venv/bin/bcn
+      # Video is fetched from the bucket into BCN_SCRATCH for the length of one job (compose) and
+      # deleted afterwards. Credentials are the same AWS_* the api uses.
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-}
+      S3_MEDIA_PREFIX: ${S3_MEDIA_PREFIX:-media}
+      S3_MEDIA_REGION: ${S3_MEDIA_REGION:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      BCN_SCRATCH: /data/scratch
     volumes:
       - programme-root:/data/programme
+      - media-scratch:/data/scratch
       # api writes pasted/edited/uploaded text here (its dataDir) before enqueueing a job
       # with an absolute path to it — the worker that actually runs the job needs the same
       # volume at the same path, or intake/edit jobs fail with FS_MISSING.
@@ -126,6 +141,7 @@ services:
 volumes:
   programme-root:
   ui-state:
+  media-scratch:   # worker scratch for videos fetched from S3 during a job; always emptied afterwards
   postgres-data:
   redis-data:
   caddy-data:

@@ -15,7 +15,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from .. import fsutil, srt, tools
+from .. import fsutil, srt, storage, tools
 from ..config import Theme, load_theme, resolve_theme_name
 from ..coursemap import module_title
 from ..envelope import Diagnostic, Envelope, Fail, TopicResult, sha256_file
@@ -45,6 +45,25 @@ def verify_topic(t: Topic, data: dict[str, Any], r: TopicResult, theme: Theme | 
         p = t.root / a["path"]
         rel = str(p.relative_to(t.dir))
         ok = True
+        if p.suffix == ".mp4" and not p.exists() and (ptr := storage.read_pointer(p)):
+            # In the bucket: confirm the object is still there at the recorded size and is an MP4.
+            try:
+                store = storage.remote(t.root)
+                head = store.head(p) if store else None
+                if head is None:
+                    bad("FS_MISSING", rel, f"{rel} is recorded as in the bucket but the object is missing.")
+                    ok = False
+                elif int(head["ContentLength"]) != int(ptr["size"]):
+                    bad("FS_CORRUPT", rel, f"{rel} in the bucket is {head['ContentLength']} bytes; expected {ptr['size']}.")
+                    ok = False
+                elif store.read_range(ptr["key"], 4, 7) != b"ftyp":
+                    bad("FS_CORRUPT", rel, f"{rel} in the bucket has no ftyp box; it is not an MP4.")
+                    ok = False
+            except Fail as f:
+                bad("FS_CORRUPT", rel, f.diagnostic.message)
+                ok = False
+            a["verified"] = ok
+            continue
         try:
             if p.stat().st_size == 0:
                 bad("FS_EMPTY", rel, f"{rel} is empty.")

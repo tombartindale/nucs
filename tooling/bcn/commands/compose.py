@@ -19,15 +19,16 @@ own bumpers from bcn bumpers are used when current, else the files named in [bum
 from __future__ import annotations
 
 import argparse
+import contextlib
 import html
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import cuesheet, fsutil, srt, tools
+from .. import cuesheet, fsutil, srt, storage, tools
 from ..config import Config, Theme, load_theme, resolve_theme_name
 from ..coursemap import load_course_map, speaker_for
-from ..envelope import Diagnostic, Envelope, Fail, TopicResult
+from ..envelope import Artifact, Diagnostic, Envelope, Fail, TopicResult, sha256_file
 from ..markdown import parse
 from ..media import ffmpeg, loudness, probe
 from ..progress import TopicProgress, run as run_proc
@@ -316,6 +317,12 @@ def _shift_srt(subs: Path, offset: float) -> str:
 
 
 def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: argparse.Namespace) -> None:
+    with contextlib.ExitStack() as stack:
+        _compose(t, r, tp, cfg, args, stack)
+
+
+def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: argparse.Namespace,
+             stack: contextlib.ExitStack) -> None:
     lang = args.lang
     c = cfg["compose"]
     draft = args.draft
@@ -400,7 +407,10 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
                      and any(layout["arrangement"] == "side_by_side" for layout in layouts.values()))
     tl = tools.require(cfg, "ffmpeg", "ffprobe", *(["chrome"] if (want_logo_any or speaker) else []))
     times = cuesheet.read(t.cues_csv, n, t.cues_csv.name)
-    info = probe(tl, t.video, "edit/master.mp4")
+    # The master may live in the bucket: bring it down for this job only. The scratch copy is
+    # removed when `stack` unwinds in compose_topic, whether this succeeds or fails.
+    video = stack.enter_context(storage.workspace(t.root, [t.video], t.build))[t.video]
+    info = probe(tl, video, "edit/master.mp4")
     duration = info.duration
     if times[-1] >= duration:
         raise Fail("CUE_SHEET_INVALID", "The last slide starts after the video ends.", file=t.cues_csv.name)
@@ -409,7 +419,7 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
                                         topic=t.id, lang=lang, file=f"{t.module}/course-map.md",
                                         hint="Add a line like '**Speaker.** Dr Jane Smith, Associate Professor' above the first "
                                              "unit (or inside a unit, for that unit only)."))
-    body_lufs = loudness(tl, t.video) if bumpers else None
+    body_lufs = loudness(tl, video) if bumpers else None
 
     sub_font = theme.subtitle_font(lang)
     wm_font = next((f for f in FONT_CANDIDATES if Path(f).is_file()), None)
@@ -484,7 +494,7 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
             graph = filter_graph(layout, es, duration, "subs.srt" if burn_in else None, sub_font, c["subtitle_font_size"],
                                  wm_font, theme.fonts_dir, theme.safe_right, logo_input, tag)
             report(0, "encoding")
-            ffmpeg(tl, ["-i", str(t.video), "-f", "concat", "-safe", "0", "-i", f"slides-{name}.ffconcat", *logo_args, *tag_args,
+            ffmpeg(tl, ["-i", str(video), "-f", "concat", "-safe", "0", "-i", f"slides-{name}.ffconcat", *logo_args, *tag_args,
                         "-filter_complex", graph, "-map", "[v]", "-map", "0:a?", "-t", f"{duration:.3f}",
                         *_encode_args(es), str(body)],
                    duration=duration, on_pct=lambda pct: report(pct / 100 * share, "encoding"), cwd=str(work))
@@ -516,9 +526,18 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
                 body = joined
 
             out = t.draft(lang, name) if draft else t.composed(lang, name)
-            with fsutil.atomic_path(out) as tmp:
-                shutil.move(str(body), tmp)
-            r.artifacts.append(Envelope.artifact_for(t.root, out, "draft" if draft else "composed"))
+            kind = "draft" if draft else "composed"
+            if storage.remote(t.root) is not None:
+                # The bucket is the home of the finished video; hash it here, where the bytes are,
+                # then upload and leave a pointer in the tree. `body` is consumed by the upload.
+                sha = sha256_file(body)
+                r.artifacts.append(Artifact(str(out.relative_to(t.root)), kind, body.stat().st_size, sha))
+                tp.update(98, f"uploading {out.name}")
+                storage.publish(t.root, body, out, dur=probe(tl, body, out.name).duration, sha256=sha)
+            else:
+                with fsutil.atomic_path(out) as tmp:
+                    shutil.move(str(body), tmp)
+                r.artifacts.append(Envelope.artifact_for(t.root, out, kind))
             layout_results.append({"name": name, "arrangement": layout["arrangement"], "resolution": [_even(es.width), _even(es.height)]})
 
         if sidecar:

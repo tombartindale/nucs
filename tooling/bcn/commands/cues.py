@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import types
 
-from .. import fsutil, reviewfile, srt, tools
+from .. import fsutil, reviewfile, srt, storage, tools
 from ..align import align
 from ..config import Config
 from ..envelope import Diagnostic, Envelope, Fail, TopicResult, sha256_file, utcnow
@@ -91,7 +92,14 @@ def cues_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: a
     tl = tools.require(cfg, "ffprobe")
     tp.update(5, "reading SRT and video")
     cues = srt.parse_file(srt_path, "edit/master.srt")
-    info = probe(tl, video, "edit/master.mp4")
+    cached = None if video.is_file() else storage.duration(video)
+    if cached is not None:
+        info = types.SimpleNamespace(duration=cached)
+    elif video.is_file():
+        info = probe(tl, video, "edit/master.mp4")
+    else:  # in the bucket with no cached duration (a pointer written by hand): fetch and probe
+        with storage.workspace(t.root, [video], t.build) as local:
+            info = probe(tl, local[video], "edit/master.mp4")
     if info.duration <= 0:
         raise Fail("FS_CORRUPT", "edit/master.mp4 reports no duration.", file="edit/master.mp4")
     pair = pair_checks(t, cues, info.duration, cfg)
