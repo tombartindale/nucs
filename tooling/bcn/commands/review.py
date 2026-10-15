@@ -41,18 +41,26 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
         r = TopicResult(t.id, t.rel)
         report = fsutil.read_json(t.cues_report) or {}
         items = [d for d in report.get("divergences", []) if d.get("kind") == "mistranscription"]
-        if deciding:
+        if deciding and args.clear:
+            # Clearing only needs the id to already be a key in review.json - not a live match in
+            # cues-report.json. A decision's id changes once the cue moves on (a new correction, or
+            # cues.py's own hash scheme changing), so by the time someone wants to undo an old
+            # decision it is very often already "orphaned" (shown via cues.py's synthesised diagnostic,
+            # not among the live divergences) - requiring a live match here would make Undo silently
+            # impossible for exactly the decisions most likely to need undoing.
+            data = reviewfile.load(t)
+            if args.item not in data["transcripts"]:
+                raise Fail("REVIEW_UNKNOWN_ITEM", f"No decision recorded for '{args.item}' in {t.rel}/review.json.",
+                           topic=t.id, hint="There is nothing to undo.")
+            data["transcripts"].pop(args.item, None)
+            reviewfile.save(t, data)
+        elif deciding:
             item = next((d for d in items if d["id"] == args.item), None)
             if item is None:
                 raise Fail("REVIEW_UNKNOWN_ITEM", f"No suspected mis-transcription '{args.item}' in {t.rel}/build/cues-report.json.",
                            topic=t.id, hint="Run bcn cues first, or list the items with bcn review.")
-            if args.clear:
-                data = reviewfile.load(t)
-                data["transcripts"].pop(args.item, None)
-                reviewfile.save(t, data)
-            else:
-                reviewfile.decide(t, item, "accept" if args.accept else "correct", args.correct, args.by or getpass.getuser(),
-                                  applied=args.applied)
+            reviewfile.decide(t, item, "accept" if args.accept else "correct", args.correct, args.by or getpass.getuser(),
+                              applied=args.applied)
         decisions = reviewfile.load(t)["transcripts"]
         r.extra["items"] = [{**d, "review": decisions.get(d["id"])} for d in items]
         r.extra["unreviewed"] = sum(1 for d in items if d["id"] not in decisions)

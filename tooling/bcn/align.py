@@ -72,8 +72,14 @@ class Alignment:
     narration: list[str] = field(default_factory=list)
 
 
-def _div_id(kind: str, a: list[str], b: list[str]) -> str:
-    h = hashlib.sha1(f"{kind}|{' '.join(a)}|{' '.join(b)}".encode()).hexdigest()[:10]
+def _div_id(kind: str, a: list[str], b: list[str], cue: int | None) -> str:
+    # cue is part of the hash so that two different occurrences of the same short mishearing
+    # (e.g. "system"/"systems" recurring at two different cues) get different ids. Without it,
+    # correcting one would mark both reviewed and leave the other's own review vanished behind
+    # it - an id collision, not a disambiguation by position, since this is a hash over content
+    # alone otherwise. A cue's own text changing already changes (a, b) and so the id anyway;
+    # this only adds the information needed to tell two cues with identical wording apart.
+    h = hashlib.sha1(f"{kind}|{cue}|{' '.join(a)}|{' '.join(b)}".encode()).hexdigest()[:10]
     return f"{kind[:2]}-{h}"
 
 
@@ -188,7 +194,7 @@ def align(narration: list[str], cues: list[Cue], *, window: int = 8, mis_max_tok
         cue_idx = r_cue[j1] if j1 < len(r_cue) else (r_cue[j1 - 1] if j1 > 0 and r_cue else None)
         sim = round(sounds_alike(a, b), 2) if a and b else None
         divs.append(Divergence(
-            id=_div_id(kind, a, b),
+            id=_div_id(kind, a, b, cue_idx),
             kind=kind,
             slide=slide_of(i1),
             script=surface_span(s_surface, s_owner, i1, i2) if la else "",
