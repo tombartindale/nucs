@@ -173,28 +173,34 @@ async function save(overrideText?: string) {
       { lang: props.lang, cue: cueIdx + 1, caption_text: text });
     const result = await beacon.awaitJob(job.id);
     if (result.state !== 'done') { beacon.toast('That edit did not save; see Jobs.', true); return; }
+    const captionDoneAt = Date.now();   // anchors the FS_UNSTABLE wait below to the real write time
     draftText.value = text;
     dirty.value = false;
     // Record the decision now, while the pre-edit id is still in cues-report.json (bcn review
-    // looks it up there). Wait a moment for it to persist to review.json before cues reruns and
-    // regenerates that report — a saved cue's text is itself the review decision, so this always
-    // leaves a record, whether or not the new wording still diverges from the script afterwards.
+    // looks it up there), before cues reruns and regenerates that report — a saved cue's text is
+    // itself the review decision, so this always leaves a record, whether or not the new wording
+    // still diverges from the script afterwards. Submission (not completion) is awaited: the
+    // backend's per-topic overlap lock already serialises this ahead of the cues job below (same
+    // target, lower job id => dequeued first), so there is nothing left for this await to protect.
     if (flaggedBefore) {
       try {
         // applied: true - the text above is already live in edit/master.srt (bcn caption just
         // wrote it directly), so bcn subtitles must never try to regex-substitute this decision
         // in again; the old "heard" span is often a short, common fragment that could otherwise
         // resurface by coincidence in later, unrelated text and corrupt it.
-        const rj = await beacon.runJob('review', [topicPath(props.id)],
+        await beacon.runJob('review', [topicPath(props.id)],
           { item: flaggedBefore.data!.id!, correct: text.replace(/\s+/g, ' ').trim().slice(0, 200), applied: true });
-        await beacon.awaitJob(rj.id);
       } catch { /* beacon.runJob already toasted; the text edit itself still saved */ }
     }
     // Both cues and subtitles refuse to read edit/master.srt within 2s of it changing
     // (FS_UNSTABLE, tooling/bcn/runner.py's require_input(..., stable=True)) - it's built for
     // a slow cloud sync still propagating the write, but it applies just as much to our own
-    // save landing milliseconds earlier, so wait past that window before rebuilding.
-    await new Promise((r) => setTimeout(r, 2500));
+    // save landing milliseconds earlier, so wait past that window before rebuilding. Anchored to
+    // when the write actually finished (not blindly from here) so time already spent above - the
+    // review submission, SSE round trips - counts toward the wait instead of stacking on top of it.
+    const STABLE_BUFFER_MS = 2500;
+    const remaining = Math.max(0, STABLE_BUFFER_MS - (Date.now() - captionDoneAt));
+    if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
     // subtitles --lang en requires cues to be fresh first; zh's own freshness check already
     // covers the edited file directly, so it needs no cues rebuild (tooling/bcn/commands/subtitles.py).
     if (props.lang === 'en') {

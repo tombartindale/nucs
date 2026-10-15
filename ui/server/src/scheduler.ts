@@ -42,7 +42,8 @@ interface RunningJob {
 export class Scheduler {
   readonly workerId = randomUUID();
   private running = new Map<number, RunningJob>();
-  private wakeRequested = false;
+  private wakePending = false;
+  private wakeWaiters: Array<() => void> = [];
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private stopped = false;
 
@@ -50,7 +51,7 @@ export class Scheduler {
     private prefs: () => Promise<Prefs>) {}
 
   start(): void {
-    this.bus.subscribe((ev) => { if (ev.type === 'job-wake') this.wakeRequested = true; });
+    this.bus.subscribe((ev) => { if (ev.type === 'job-wake') this.wake(); });
     void this.heartbeat();
     this.heartbeatTimer = setInterval(() => void this.heartbeat(), HEARTBEAT_MS);
     void this.reapAbandoned();
@@ -89,17 +90,37 @@ export class Scheduler {
 
   private async loop(): Promise<void> {
     while (!this.stopped) {
-      this.wakeRequested = false;
       try {
         await this.tick();
       } catch (e) {
         // A single bad tick (e.g. a transient DB hiccup) must not kill the worker process.
         process.stderr.write(`scheduler: tick failed: ${(e as Error).message}\n`);
       }
-      await sleep(POLL_MS);
-      // A wake signal during the sleep is still honoured on the very next loop iteration,
-      // since wakeRequested just makes the wait feel shorter in the common case.
+      await this.sleepOrWake(POLL_MS);
     }
+  }
+
+  /** Like sleep(ms), but a `job-wake` arriving during (or just before) the wait resolves it
+   *  immediately, so a freshly queued job doesn't sit idle for up to POLL_MS before an idle
+   *  worker even looks at it. POLL_MS remains the fallback for a missed wake (e.g. a Redis
+   *  hiccup) - a wake is a latency optimisation, not a replacement for the periodic tick. */
+  private wake(): void {
+    this.wakePending = true;
+    const waiters = this.wakeWaiters;
+    this.wakeWaiters = [];
+    for (const w of waiters) w();
+  }
+
+  private sleepOrWake(ms: number): Promise<void> {
+    if (this.wakePending) { this.wakePending = false; return Promise.resolve(); }
+    return new Promise((resolve) => {
+      const onWake = () => { clearTimeout(timer); resolve(); };
+      const timer = setTimeout(() => {
+        this.wakeWaiters = this.wakeWaiters.filter((w) => w !== onWake);
+        resolve();
+      }, ms);
+      this.wakeWaiters.push(onWake);
+    });
   }
 
   private async tick(): Promise<void> {
