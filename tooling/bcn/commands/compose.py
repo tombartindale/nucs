@@ -430,7 +430,7 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
             slice_lo, slice_hi = idx / len(layouts), (idx + 1) / len(layouts)
 
             def report(frac: float, label: str) -> None:
-                tp.update(min(99, round((slice_lo + frac * (slice_hi - slice_lo)) * 100)), f"{label} {name}")
+                tp.update(min(99.0, (slice_lo + frac * (slice_hi - slice_lo)) * 100), f"{label} {name}")
 
             # Slide track on the body's own timeline: cues.csv is correct as written here.
             lines = ["ffconcat version 1.0"]

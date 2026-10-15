@@ -103,7 +103,7 @@ watch(() => [...open].map((id) => beacon.jobs.get(id)?.state), () => {
             <div class="row items-center gap-sm no-wrap">
               <span class="text-caption" style="width: 40px">Topic</span>
               <q-linear-progress :value="(v.p.topic_pct || 0) / 100" size="10px" rounded color="secondary" class="col" />
-              <span class="text-caption" style="width: 40px">{{ v.p.topic_pct !== null && v.p.topic_pct !== undefined ? `${Math.round(v.p.topic_pct)}%` : '' }}</span>
+              <span class="text-caption" style="width: 48px">{{ v.p.topic_pct !== null && v.p.topic_pct !== undefined ? `${v.p.topic_pct.toFixed(1)}%` : '' }}</span>
             </div>
             <div class="text-caption text-grey-7">{{ v.progress }}</div>
           </div>
