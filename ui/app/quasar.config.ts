@@ -50,7 +50,8 @@ export default defineConfig(() => ({
         info: '#5a6b7b',
         warning: '#c77700',
       },
-      notify: { position: 'bottom-right', timeout: 3500 },
+      // 'bottom-right' used to cover the Caption Editor's subtitle list in that corner.
+      notify: { position: 'top', timeout: 3500 },
     },
     plugins: ['Notify', 'Dialog'],
   },

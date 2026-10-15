@@ -167,6 +167,10 @@ async function save(overrideText?: string) {
   // stops matching anything bcn cues finds — capture it now, before that happens, so the review
   // decision below still has a valid --item to record against.
   const flaggedBefore = activeDivergence.value && !activeDivergence.value.data!.review ? activeDivergence.value : null;
+  // Otherwise the playhead keeps advancing through the whole save/rebuild chain, cuechange swaps
+  // in whatever cue it reaches next (dirty is already false by then), and the Save button sits
+  // disabled while the box appears to change out from under the edit that's still in flight.
+  video.value?.pause();
   saving.value = true;
   try {
     const job = await beacon.runJob('caption', [topicPath(props.id)],
