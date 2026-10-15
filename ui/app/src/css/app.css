@@ -186,9 +186,7 @@ body.captioning { background: #111; overflow: hidden; }
 .prompter-divider { font-size: .38em; color: #d9a441; border-top: 1px solid #333; padding-top: .4em; margin: 1.1em 0 .5em; letter-spacing: .04em; }
 .prompter-end { font-size: .4em; opacity: .4; text-align: center; margin-top: 2em; }
 .prompter-eyeline { position: fixed; left: 0; right: 0; top: 33vh; display: flex; justify-content: space-between; pointer-events: none; color: #d9a441; font-size: 22px; padding: 0 12px; transform: translateY(-50%); }
-.prompter-countdown { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 30vh; color: #d9a441; background: rgba(0, 0, 0, .6); pointer-events: none; }
-.prompter-bar { position: fixed; left: 0; right: 0; bottom: 0; transition: opacity .4s; }
-.prompter-bar.faded { opacity: 0; }
+.prompter-bar { position: fixed; left: 0; right: 0; bottom: 0; }
 
 /* -- programme: stage ladder (English on top, Mandarin branching after subtitles) --------------- */
 .ladder { display: grid; column-gap: 4px; row-gap: 6px; align-items: center; width: 100%; }
