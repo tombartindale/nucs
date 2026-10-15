@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import fsutil
+from . import fsutil, storage
 from .envelope import sha256_file, utcnow
 from .tree import MODULE_RE, conflict_of, is_noise
 
@@ -122,6 +122,9 @@ class Side:
         try:
             st = p.stat()
         except OSError:
+            ptr = storage.read_pointer(p) if p.suffix == ".mp4" else None
+            if ptr:  # video that lives in the bucket: the pointer stands in for it
+                return cls(p, True, int(ptr["size"]), fsutil.mtime(p), False, ptr.get("sha256"))
             return cls(p)
         return cls(p, True, st.st_size, st.st_mtime, fsutil.hydration(p, st) == "cloud")
 

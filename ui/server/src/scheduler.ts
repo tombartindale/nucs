@@ -213,6 +213,7 @@ export class Scheduler {
     const resolved = command === 'docedit' ? target.split('/')[0] : target;
     const path = resolved !== '.' ? join(this.root, resolved) : this.root;
     const argv = [command, path];
+    if (command === 'media' && args.action) argv.push(String(args.action));  // bcn media <path> <action>
     for (const k of VALUE_ORDER) {
       if (k in args && args[k] !== null && args[k] !== '') argv.push(`--${k.replace(/_/g, '-')}`, String(args[k]));
     }

@@ -24,6 +24,7 @@ import { Backups } from './backups.js';
 import { BadRequest, BcnError, Forbidden } from './errors.js';
 import { buildIcs, type IcsEvent } from './ics.js';
 import { mimeType, withCharset } from './mime.js';
+import { MediaStore } from './media-store.js';
 import { computeModulePlan, moduleTopicsFor } from './planning.js';
 import { now, pyJson, sha256, stamp } from './util.js';
 
@@ -621,6 +622,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   // named for the topic here, so the import's own naming rules always match it. It then goes
   // through bcn transfer --import like any other handover file: same scope check, same
   // refusal to overwrite, and the diff protection that a re-cut needs to opt out of with replace.
+  const media = new MediaStore();
   const MEDIA_KINDS: Record<string, { suffix: string; ext: string }> = {
     master: { suffix: '', ext: 'mp4' }, en: { suffix: '', ext: 'srt' }, zh: { suffix: '.zh', ext: 'srt' },
   };
@@ -638,6 +640,37 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     if (req.query.replace === '1') args.replace = true;
     const job = await app.jobs.submit('transfer', [app.targetRel(id)], args, `media ${basename(file)} · ${id}`, await app.operator());
     return reply.code(202).send(job);
+  });
+
+  // Direct-to-S3 upload of a topic's master video. The browser PUTs each part to a presigned URL,
+  // so the video never passes through this server; `complete` then queues `bcn media adopt`,
+  // which checks the object and moves it into place (refusing to replace a master without
+  // `replace`). 501 tells the browser object storage is off and to use the streaming route above.
+  f.post(`/api/topic/:id(${TOPIC})/media/init`, async (req: Req, reply) => {
+    if (!media.enabled) return reply.code(501).send({ error: 'Direct upload is not enabled.' });
+    const data = await readJson(req);
+    const bytes = Number(data.bytes);
+    if (!(bytes > 0) || bytes > TRANSFER_UPLOAD_MAX) throw new BadRequest('Upload is empty or too large.');
+    return media.startUpload('master.mp4', bytes);
+  });
+  f.post(`/api/topic/:id(${TOPIC})/media/complete`, async (req: Req, reply) => {
+    if (!media.enabled) return reply.code(501).send({ error: 'Direct upload is not enabled.' });
+    const data = await readJson(req);
+    const key = String(data.key ?? ''), uploadId = String(data.upload_id ?? '');
+    const parts = Array.isArray(data.parts) ? data.parts as { n: number; etag: string }[] : [];
+    if (!uploadId || !parts.every((p) => Number.isInteger(p.n) && p.n > 0 && typeof p.etag === 'string' && p.etag)) throw new BadRequest('Bad upload parts.');
+    await media.completeUpload(key, uploadId, parts);
+    const id = req.params.id;
+    const args: JobArgs = { action: 'adopt', upload_key: key };
+    if (data.replace) args.replace = true;
+    const job = await app.jobs.submit('media', [app.targetRel(id)], args, `media master.mp4 · ${id}`, await app.operator());
+    return reply.code(202).send(job);
+  });
+  f.post(`/api/topic/:id(${TOPIC})/media/abort`, async (req: Req, reply) => {
+    if (!media.enabled) return reply.code(501).send({ error: 'Direct upload is not enabled.' });
+    const data = await readJson(req);
+    await media.abortUpload(String(data.key ?? ''), String(data.upload_id ?? ''));
+    return reply.code(204).send();
   });
 
   // -- backups (admin only) ------------------------------------------------------------------
@@ -834,8 +867,18 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   f.get('/files/*', async (req: Req, reply) => {
     const rawPath = (req.raw.url || '').split('?')[0];
     const p = app.safePath(rawPath.slice('/files/'.length));
-    if (!existsSync(p) || !statSync(p).isFile()) return reply.code(404).send({ error: 'No such file.' });
     const q = req.query;
+    if (!existsSync(p) && extname(p).toLowerCase() === '.mp4') {
+      // Video that lives in object storage: bcn leaves a pointer file where it would be.
+      // Send the browser to a short-lived presigned URL; S3 then serves the Range requests.
+      const ptr = MediaStore.readPointer(`${p}.s3.json`);
+      if (ptr) {
+        if (!media.enabled) return reply.code(503).send({ error: 'This video is in object storage, which is not configured on this server.' });
+        const name = q.download ? (q.download === '1' ? basename(p) : String(q.download)) : undefined;
+        return reply.header('Cache-Control', 'private, no-store').redirect(await media.presignGet(ptr.key, { filename: name }), 302);
+      }
+    }
+    if (!existsSync(p) || !statSync(p).isFile()) return reply.code(404).send({ error: 'No such file.' });
     const ext = extname(p).toLowerCase();
     if (ext === '.srt' && q.format === 'vtt') {
       const text = (await readFile(p)).toString('utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n');

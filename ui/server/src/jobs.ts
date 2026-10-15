@@ -18,7 +18,7 @@ export const STALL_MS = 10_000;
 
 // What the browser may ask for. Anything else is refused.
 export const COMMANDS = new Set(['validate', 'render', 'script', 'bumpers', 'cues', 'caption', 'subtitles', 'compose', 'package', 'qa',
-  'review', 'intake', 'translation', 'transfer', 'sync', 'ack', 'edit', 'docedit', 'qti', 'coursemap', 'docpdf', 'readinglist']);
+  'review', 'intake', 'translation', 'transfer', 'sync', 'ack', 'edit', 'docedit', 'qti', 'coursemap', 'docpdf', 'readinglist', 'media']);
 export const FLAG_ARGS = ['force', 'no_bumpers', 'draft', 'dump_narration', 'accept', 'clear', 'applied', 'dry_run', 'export', 'pull', 'push', 'media', 'slides', 'nested', 'full', 'init', 'replace'];
 export const VALUE_ARGS: Record<string, RegExp> = {
   lang: /^(en|zh)$/,
@@ -43,9 +43,12 @@ export const VALUE_ARGS: Record<string, RegExp> = {
   // assignment-3.md) — bcn docedit is the actual authority on which of these are editable;
   // this just keeps the characters sane before it gets there.
   doc: /^[A-Za-z0-9/_.-]{1,100}$/,
+  // bcn media: only the browser-upload hand-off is offered to the UI (migrate and gc are CLI/admin operations).
+  action: /^adopt$/,
+  upload_key: /^[A-Za-z0-9_\/.-]{1,300}$/,  // an S3 staging key this server issued; bcn re-checks the prefix
 };
 // The order value arguments are passed to bcn in. Shared with the worker's argv builder.
-export const VALUE_ORDER = ['lang', 'theme', 'set', 'unset', 'item', 'correct', 'cue', 'caption_text', 'from', 'assets', 'by', 'prefer', 'fingerprint', 'note', 'expect_sha', 'doc'];
+export const VALUE_ORDER = ['lang', 'theme', 'set', 'unset', 'item', 'correct', 'cue', 'caption_text', 'from', 'assets', 'by', 'prefer', 'fingerprint', 'note', 'expect_sha', 'doc', 'upload_key'];
 export const PIPELINE = new Set(['validate', 'render', 'script', 'bumpers', 'cues', 'subtitles', 'compose', 'package', 'qa']);
 
 /** Two targets overlap when one contains the other ('.' is the whole programme). */

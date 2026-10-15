@@ -5,6 +5,7 @@
 import { computed, inject, onBeforeUnmount, onMounted, reactive } from 'vue';
 import { onBeforeRouteLeave } from 'vue-router';
 import type { JobSummary } from '@beacon/shared';
+import { api, ApiError } from '@/api';
 import { confirm } from '@/composables/confirm';
 import { useBeacon } from '@/stores/beacon';
 import { TOPIC } from './context';
@@ -24,7 +25,7 @@ const busy = reactive<Partial<Record<Kind, boolean>>>({});
 const sent = reactive<Partial<Record<Kind, number>>>({});
 // Tracked so a confirmed navigate-away (see onBeforeRouteLeave below) can abort the
 // transfer outright, rather than leaving it running against a component that's gone.
-const inFlight: Partial<Record<Kind, XMLHttpRequest>> = {};
+const inFlight: Partial<Record<Kind, { abort(): void }>> = {};
 const anyBusy = computed(() => Object.values(busy).some(Boolean));
 
 // fetch() cannot report upload progress, so the file is sent with XMLHttpRequest, which can.
@@ -49,6 +50,79 @@ function sendFile<T>(url: string, file: File, kind: Kind, onProgress: (fraction:
     xhr.onabort = () => reject(new Error('Upload cancelled.'));
     xhr.send(file);
   });
+}
+
+// Video goes straight to S3 in parts (the server hands out presigned URLs and never sees the
+// bytes), then the server is told to check it and put it in place. Returns null when the server
+// has no object storage (501), so the caller falls back to the streaming route above.
+interface UploadPlan { key: string; upload_id: string; part_bytes: number; parts: Array<{ n: number; url: string }> }
+const PART_RETRIES = 4;
+const PART_CONCURRENCY = 3;
+
+function putPart(url: string, blob: Blob, active: Set<XMLHttpRequest>, onBytes: (loaded: number) => void): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    active.add(xhr);
+    xhr.open('PUT', url);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onBytes(e.loaded); };
+    xhr.onload = () => {
+      active.delete(xhr);
+      const etag = xhr.getResponseHeader('ETag');
+      if (xhr.status >= 200 && xhr.status < 300 && etag) { resolve(etag); return; }
+      reject(new Error(xhr.status >= 200 && xhr.status < 300
+        ? 'The storage bucket did not expose the upload receipt (check its CORS settings).' : `Storage refused the upload (${xhr.status}).`));
+    };
+    xhr.onerror = () => { active.delete(xhr); reject(new Error('The upload failed: the connection was lost.')); };
+    xhr.onabort = () => { active.delete(xhr); reject(new Error('Upload cancelled.')); };
+    xhr.send(blob);
+  });
+}
+
+async function uploadDirect(file: File, replace: boolean, onProgress: (fraction: number) => void): Promise<JobSummary | null> {
+  let plan: UploadPlan;
+  try {
+    plan = await api<UploadPlan>(`/api/topic/${t.id}/media/init`, { body: { bytes: file.size } });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 501) return null;
+    throw e;
+  }
+  const active = new Set<XMLHttpRequest>();
+  let cancelled = false;
+  inFlight.master = { abort() { cancelled = true; for (const x of active) x.abort(); } };
+  const done = new Array<number>(plan.parts.length).fill(0);   // bytes confirmed or in flight, per part
+  const etags: Array<{ n: number; etag: string }> = [];
+  const report = () => onProgress(done.reduce((a, b) => a + b, 0) / file.size);
+  const queue = [...plan.parts];
+  const worker = async () => {
+    for (let part = queue.shift(); part && !cancelled; part = queue.shift()) {
+      const blob = file.slice((part.n - 1) * plan.part_bytes, part.n * plan.part_bytes);
+      for (let attempt = 1; ; attempt++) {
+        try {
+          const etag = await putPart(part.url, blob, active, (loaded) => { done[part.n - 1] = loaded; report(); });
+          done[part.n - 1] = blob.size;
+          report();
+          etags.push({ n: part.n, etag });
+          break;
+        } catch (e) {
+          done[part.n - 1] = 0;
+          if (cancelled || attempt >= PART_RETRIES) throw e;
+          await new Promise((r) => setTimeout(r, 1000 * attempt));
+        }
+      }
+    }
+  };
+  try {
+    await Promise.all(Array.from({ length: Math.min(PART_CONCURRENCY, plan.parts.length) }, worker));
+    if (cancelled) throw new Error('Upload cancelled.');
+    return await api<JobSummary>(`/api/topic/${t.id}/media/complete`, {
+      body: { key: plan.key, upload_id: plan.upload_id, parts: etags, replace },
+    });
+  } catch (e) {
+    for (const x of active) x.abort();
+    // Free the parts already stored, or the bucket keeps (and bills) them until its lifecycle rule runs.
+    await api(`/api/topic/${t.id}/media/abort`, { body: { key: plan.key, upload_id: plan.upload_id } }).catch(() => undefined);
+    throw e;
+  }
 }
 
 // Full browser navigation (close tab, refresh, type a new URL) can't be cancelled from
@@ -98,7 +172,9 @@ async function upload(kind: Kind, file: File | null) {
   sent[kind] = 0;
   try {
     const query = `kind=${kind}${replacing ? '&replace=1' : ''}`;
-    const job = await sendFile<JobSummary>(`/api/topic/${t.id}/media?${query}`, file, kind, (fraction) => { sent[kind] = fraction; });
+    const onProgress = (fraction: number) => { sent[kind] = fraction; };
+    const job = (kind === 'master' ? await uploadDirect(file, replacing, onProgress) : null)
+      ?? await sendFile<JobSummary>(`/api/topic/${t.id}/media?${query}`, file, kind, onProgress);
     delete sent[kind];
     beacon.trackJob(job);
     const result = await beacon.awaitJob(job.id);

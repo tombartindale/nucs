@@ -16,9 +16,10 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import tempfile
 from pathlib import Path
 
-from .. import fsutil, progress
+from .. import fsutil, progress, storage
 from .. import sync as S
 from ..config import load
 from ..envelope import Cancelled, Diagnostic, Envelope, Fail, TopicResult
@@ -63,9 +64,18 @@ def prepare(args: argparse.Namespace) -> None:
         f"remote = \"{remote_toml}\"\n", encoding="utf-8")
 
 
-def _copy(pair: S.Pair, direction: str) -> str:
+def _copy(pair: S.Pair, direction: str, root: Path) -> str:
     src, dst = (pair.remote.path, pair.local.path) if direction == "pull" else (pair.local.path, pair.remote.path)
     # Reading a cloud-only source is what downloads it; that is the point of pulling.
+    store = storage.remote(root) if (direction == "pull" and dst.suffix == ".mp4") else None
+    if store is not None:
+        # A pulled video goes to the bucket, never to local disk beyond a scratch copy.
+        with tempfile.TemporaryDirectory(prefix=".sync-media-", dir=storage.scratch_base(dst.parent)) as d:
+            tmp = Path(d) / dst.name
+            shutil.copyfile(src, tmp)
+            digest = S.sha256_file(tmp)
+            store.put(tmp, dst, sha256=digest)
+        return digest
     with fsutil.atomic_path(dst) as tmp:
         shutil.copyfile(src, tmp)
     # copyfile leaves the new file with the current time as its mtime: the pipeline must
@@ -122,7 +132,7 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
                         continue
                     tp.update(10, "downloading" if src.cloud else "copying")
                     try:
-                        sha = _copy(p, direction)
+                        sha = _copy(p, direction, target.root)
                     except Cancelled:
                         env.cancelled = True
                         break

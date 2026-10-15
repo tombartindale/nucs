@@ -20,9 +20,9 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from .. import cuesheet, fsutil, srt, tools
+from .. import cuesheet, fsutil, srt, storage, tools
 from ..config import Config
-from ..envelope import Diagnostic, Envelope, Fail, TopicResult, sha256_file, utcnow
+from ..envelope import Artifact, Diagnostic, Envelope, Fail, TopicResult, sha256_file, utcnow
 from ..markdown import parse
 from ..media import probe
 from ..progress import TopicProgress
@@ -37,7 +37,48 @@ def add_args(p: argparse.ArgumentParser) -> None:
 
 
 def _file_entry(p: Path) -> dict:
+    """A manifest row. A delivered video that lives in the bucket is described by its pointer
+    (named as the mp4, which is what consumers look for) rather than hashed from disk."""
+    if p.name.endswith(storage.POINTER_SUFFIX):
+        p = p.with_name(p.name[:-len(storage.POINTER_SUFFIX)])
+    if not p.is_file() and (ptr := storage.read_pointer(p)):
+        return {"name": p.name, "bytes": ptr["size"], "sha256": ptr.get("sha256"), "remote": True}
     return {"name": p.name, "bytes": p.stat().st_size, "sha256": sha256_file(p)}
+
+
+def _artifact(root: Path, p: Path, kind: str) -> Artifact:
+    if not p.is_file() and (ptr := storage.read_pointer(p)):
+        return Artifact(str(p.relative_to(root)), kind, ptr["size"], ptr.get("sha256") or "")
+    return Envelope.artifact_for(root, p, kind)
+
+
+def _duration(tl, t: Topic, composed: Path, rel: str) -> float:
+    cached = None if composed.is_file() else storage.duration(composed)
+    if cached is not None:
+        return cached
+    with storage.workspace(t.root, [composed], t.build) as local:
+        return probe(tl, local[composed], rel).duration
+
+
+def _deliver_video(t: Topic, src: Path, staged: Path, final: Path | None = None) -> None:
+    """Put a composed video into the delivery folder. A real file is copied; one that lives in
+    the bucket is copied server-side (no download) and only its pointer is written here.
+    `staged` is where it is built; `final` is where it will end up (differs for package_en,
+    which swaps a staging folder in whole)."""
+    final = final or staged
+    in_place = final == staged  # package_zh writes into the live out/; package_en into staging
+    if src.is_file():
+        if in_place:
+            storage.pointer_path(final).unlink(missing_ok=True)
+        with fsutil.atomic_path(staged) as tmp:
+            shutil.copyfile(src, tmp)
+        return
+    store = storage.remote(t.root)
+    if store is None:
+        raise Fail("FS_MISSING", f"{src.name} is not on disk and no object storage is configured.", file=str(src))
+    if in_place:
+        final.unlink(missing_ok=True)
+    store.copy(src, final, pointer_at=staged)
 
 
 def _deliver_subtitles(sidecar: Path, dest_srt: Path, fmt: str) -> list[Path]:
@@ -90,7 +131,7 @@ def package_en(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
     # file or the shared sidecar, which compose always finishes writing last, after every
     # layout's video — checking against those would call every layout "stale" by definition).
     extra_names = [name for name in cfg["compose"]["layouts"] if name != DEFAULT_LAYOUT]
-    extra_composed = {name: t.composed("en", name) for name in extra_names if t.composed("en", name).is_file()}
+    extra_composed = {name: t.composed("en", name) for name in extra_names if storage.present(t.composed("en", name))}
     source_inputs = [src, t.video, t.srt("en"), t.cues_csv, *pngs, *bumpers, t.root / "programme.toml"]
 
     inputs = [*source_inputs, composed, sidecar, *extra_composed.values()]
@@ -98,11 +139,11 @@ def package_en(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
         return
 
     tl = tools.require(cfg, "ffprobe")
-    info = probe(tl, composed, "build/composed.mp4")
+    duration = _duration(tl, t, composed, "build/composed.mp4")
     staging = Path(tempfile.mkdtemp(prefix=".out.partial-", dir=t.dir))
     try:
         tp.update(5, "copying video")
-        shutil.copyfile(composed, staging / f"{t.id}.mp4")
+        _deliver_video(t, composed, staging / f"{t.id}.mp4", t.out / f"{t.id}.mp4")
         default_cfg = cfg["compose"]["layouts"][DEFAULT_LAYOUT]
         delivered_layouts = [{"name": DEFAULT_LAYOUT, "video": f"{t.id}.mp4",
                               "width": default_cfg["width"], "height": default_cfg["height"]}]
@@ -114,7 +155,7 @@ def package_en(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
                                                 hint=f"Run bcn compose --layout {name} again."))
                 continue
             dest_name = f"{t.id}.{name}.mp4"
-            shutil.copyfile(extra_path, staging / dest_name)
+            _deliver_video(t, extra_path, staging / dest_name, t.out / dest_name)
             layout_cfg = cfg["compose"]["layouts"][name]
             delivered_layouts.append({"name": name, "video": dest_name, "width": layout_cfg["width"], "height": layout_cfg["height"]})
         tp.update(70, "copying subtitles")
@@ -134,16 +175,19 @@ def package_en(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
             for f in zh.get("files", []):
                 if (t.out / f["name"]).is_file() and not (staging / f["name"]).exists():
                     shutil.copyfile(t.out / f["name"], staging / f["name"])
+                elif f.get("remote") and storage.read_pointer(t.out / f["name"]):
+                    # Already in the bucket under its final key: carry the pointer across.
+                    shutil.copyfile(storage.pointer_path(t.out / f["name"]), storage.pointer_path(staging / f["name"]))
             shutil.copyfile(t.manifest("zh"), staging / "manifest.zh.json")
 
         files = sorted((x for x in staging.iterdir() if x.is_file() and not x.name.startswith("manifest")),
-                       key=lambda x: x.name)
+                       key=lambda x: x.name.removesuffix(storage.POINTER_SUFFIX))
         en_files = [f for f in files if not _is_zh(f.name, t)]
         manifest = {
             "topic_id": t.id,
             "lang": "en",
             "slide_count": n,
-            "duration": round(info.duration, 3),
+            "duration": round(duration, 3),
             "built": utcnow(),
             "theme": render.get("results", [{}])[0].get("theme"),
             "marp_cli": render.get("results", [{}])[0].get("marp_cli"),
@@ -169,13 +213,14 @@ def package_en(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
         raise
 
     for f in [t.manifest("en")] + [t.out / e["name"] for e in manifest["files"]]:
-        r.artifacts.append(Envelope.artifact_for(t.root, f, "package"))
-    r.extra.update({"slides": n, "duration": round(info.duration, 3), "files": len(manifest["files"]) + 1,
+        r.artifacts.append(_artifact(t.root, f, "package"))
+    r.extra.update({"slides": n, "duration": round(duration, 3), "files": len(manifest["files"]) + 1,
                     "body_offset": manifest["body_offset"]})
     tp.update(100, "done")
 
 
 def _is_zh(name: str, t: Topic) -> bool:
+    name = name.removesuffix(storage.POINTER_SUFFIX)
     return name.startswith(f"{t.id}-zh-") or name.endswith((".zh.srt", ".zh.vtt", ".zh.md", ".zh.mp4"))
 
 
@@ -213,7 +258,7 @@ def package_zh(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
     bumpers = _bumpers(t, "zh")
 
     extra_names = [name for name in cfg["compose"]["layouts"] if name != DEFAULT_LAYOUT]
-    extra_composed = {name: t.composed("zh", name) for name in extra_names if t.composed("zh", name).is_file()}
+    extra_composed = {name: t.composed("zh", name) for name in extra_names if storage.present(t.composed("zh", name))}
     source_inputs = [src, t.srt("zh"), *pngs, *bumpers, t.manifest("en")]
 
     inputs = [*source_inputs, composed, sidecar, *extra_composed.values()]
@@ -221,11 +266,10 @@ def package_zh(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
         return
 
     tl = tools.require(cfg, "ffprobe")
-    info = probe(tl, composed, "build/composed.zh.mp4")
+    duration = _duration(tl, t, composed, "build/composed.zh.mp4")
     written = []
     dest_video = t.out / f"{t.id}.zh.mp4"
-    with fsutil.atomic_path(dest_video) as tmp:
-        shutil.copyfile(composed, tmp)
+    _deliver_video(t, composed, dest_video)
     written.append(dest_video)
     default_cfg = cfg["compose"]["layouts"][DEFAULT_LAYOUT]
     delivered_layouts = [{"name": DEFAULT_LAYOUT, "video": dest_video.name,
@@ -238,8 +282,7 @@ def package_zh(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
                                             hint=f"Run bcn compose --lang zh --layout {name} again."))
             continue
         dest = t.out / f"{t.id}.{name}.zh.mp4"
-        with fsutil.atomic_path(dest) as tmp:
-            shutil.copyfile(extra_path, tmp)
+        _deliver_video(t, extra_path, dest)
         written.append(dest)
         layout_cfg = cfg["compose"]["layouts"][name]
         delivered_layouts.append({"name": name, "video": dest.name, "width": layout_cfg["width"], "height": layout_cfg["height"]})
@@ -265,7 +308,7 @@ def package_zh(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
         "topic_id": t.id,
         "lang": "zh",
         "slide_count": n,
-        "duration": round(info.duration, 3),
+        "duration": round(duration, 3),
         "built": utcnow(),
         "body_offset": compose_result.get("body_offset", 0.0),
         "bumpers_composited": compose_result.get("bumpers", []),
@@ -277,7 +320,7 @@ def package_zh(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
     }
     fsutil.write_json(t.manifest("zh"), manifest)
     for f in [t.manifest("zh"), *written]:
-        r.artifacts.append(Envelope.artifact_for(t.root, f, "package"))
+        r.artifacts.append(_artifact(t.root, f, "package"))
     r.extra.update({"slides": n, "files": len(written) + 1})
 
 

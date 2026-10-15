@@ -257,6 +257,16 @@ bcn sync working_area --push               # local script edits, review decision
 - Jobs run `bcn` as subprocesses: up to two at once, never two on the same topic. Progress is bcn's NDJSON relayed as-is over SSE. Cancel sends SIGINT. Jobs that were running when the backend stopped are marked interrupted.
 - To run it permanently, see [scripts/com.beacon.ui.plist](scripts/com.beacon.ui.plist) (launchd).
 
+## Video in object storage
+
+On a server the video does not live on the programme volume. With `S3_MEDIA_BUCKET` set (or `[storage] bucket` in `programme.toml`), master video and the composed, draft and delivered mp4s live in S3 under `<prefix>/<path from the programme root>`, for example `media/KV7015/U01/T01/edit/master.mp4`. In the tree each one is replaced by a small pointer file, `master.mp4.s3.json`, holding its key, size, sha256 and duration. Status, cues and QA read the pointer, so they need no download. Its mtime is the file's freshness stamp, so nothing is rebuilt just because a file moved.
+
+- **Upload and playback** go straight between the browser and S3 (presigned multipart upload, presigned GET). Uploads are staged under `<prefix>/_incoming/` and `bcn media <topic> adopt` checks and moves them into place; replacing an existing master still needs confirmation.
+- **Compose** downloads the master to a scratch directory (`BCN_SCRATCH`, default `<topic>/build/`) for that one job, uploads its outputs, and deletes the scratch copy even if the job fails. `package` copies composed videos into `out/` inside S3 without downloading anything.
+- **One-time setup:** `deploy/media/setup-bucket.sh` (versioning, CORS for browser uploads, lifecycle for abandoned uploads).
+- **Moving existing video over:** `bcn media <programme root> migrate` lists what it would upload; add `--apply` to upload and `--delete` to remove each local file once its upload verifies. `bcn media <programme root> gc --apply` removes abandoned upload and scratch directories that are costing disk.
+- With no bucket configured, nothing changes: video stays on local disk.
+
 ## Open decisions
 
 These are placeholders in config until someone confirms them:

@@ -10,7 +10,7 @@ import argparse
 from collections import defaultdict
 from pathlib import Path
 
-from .. import coursemap, fsutil, reviewfile, srt, tools
+from .. import coursemap, fsutil, reviewfile, srt, storage, tools
 from ..config import Config, load
 from ..envelope import Diagnostic, Envelope, Fail, TopicResult, format_human
 from ..markdown import IMAGE_RE
@@ -38,6 +38,9 @@ class Durations:
         m = fsutil.read_json(t.manifest("en"))
         if m and m.get("duration") and fsutil.is_fresh([t.manifest("en")], [t.video]):
             return float(m["duration"])
+        cached = None if t.video.is_file() else storage.duration(t.video)
+        if cached is not None:
+            return cached
         if not t.video.is_file() or fsutil.hydration(t.video) == "cloud":
             return None
         if self.tl is None:
@@ -60,7 +63,7 @@ def topic_checks(t: Topic, r: TopicResult, cfg: Config, durations: Durations, as
             d("QA_ASSET_OUTSTANDING", f"Asset request '{a.asset}' is {a.status}.", file=f"{t.module}/assets.md", line=a.line)
 
     duration = None
-    if t.video.is_file():
+    if storage.present(t.video):
         needs = {
             "slides": t.slide_pngs("en"),
             "subtitles": [t.subtitle_out("en", "srt")],
