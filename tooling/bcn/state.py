@@ -496,7 +496,7 @@ class TopicState:
             src = fsutil.mtime(t.src(lang)) or 0
             for kind, p in (("bumper_card", t.bumper_card("intro", lang)), ("bumper_card", t.bumper_card("outro", lang)),
                             ("bumper", t.bumper("intro", lang)), ("bumper", t.bumper("outro", lang))):
-                add(str(p.relative_to(t.dir)), p, lang, (fsutil.mtime(p) or 0) < src if p.is_file() else None, kind=kind)
+                add(str(p.relative_to(t.dir)), p, lang, (fsutil.mtime(p) or 0) < src if storage.present(p) else None, kind=kind)
 
         def stale_of(step: str, lang: str) -> bool | None:
             s = self.steps.get((step, lang))

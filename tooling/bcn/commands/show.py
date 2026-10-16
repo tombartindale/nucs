@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-from .. import cuesheet, fsutil, reviewfile
+from .. import cuesheet, fsutil, reviewfile, storage
 from ..config import load, load_theme, resolve_theme_name
 from ..envelope import Envelope, Fail, TopicResult
 from ..markdown import parse, to_html
@@ -71,7 +71,8 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
     t = target.topics[0]
     cfg = load(t.root, t.module_dir)
     r = TopicResult(t.id, t.rel)
-    rel = lambda p: str(p.relative_to(t.root)) if p.is_file() else None  # noqa: E731
+    # A video that lives in the bucket is a pointer, not a file, but it is still the topic's video.
+    rel = lambda p: str(p.relative_to(t.root)) if storage.present(p) else None  # noqa: E731
 
     data: dict[str, Any] = {"en": _slides(t, "en", args.asset_prefix, cfg), "zh": _slides(t, "zh", args.asset_prefix, cfg)}
 

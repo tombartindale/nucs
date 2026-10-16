@@ -232,3 +232,19 @@ def test_status_verify_checks_remote_object(tree, capsys, s3):
     code, env = bcn(capsys, "status", str(t.dir), "--verify")
     codes = [d["code"] for d in env["diagnostics"]] + [d["code"] for r in env["results"] for d in r.get("diagnostics", [])]
     assert "FS_MISSING" in codes
+
+
+def test_show_and_status_still_see_a_migrated_video(tree, capsys, s3):
+    """Regression: show reported no video once the master became a pointer, so the UI said none existed."""
+    t = Topic(tree, "KV7015", "U01", "T01")
+    make_video(t.video, 1)
+    code, env = bcn(capsys, "show", str(t.dir))
+    assert env["results"][0]["media"]["master"] == "KV7015/U01/T01/edit/master.mp4"
+    bcn(capsys, "media", str(t.dir), "migrate", "--apply", "--delete")
+    assert not t.video.exists()
+    code, env = bcn(capsys, "show", str(t.dir))
+    assert env["results"][0]["media"]["master"] == "KV7015/U01/T01/edit/master.mp4"
+    code, env = bcn(capsys, "status", str(t.dir))
+    arts = env["results"][0]["artifacts"]
+    master = next(a for a in arts if a["key"] == "edit/master.mp4")
+    assert master["exists"] is True and master["bytes"] > 0
