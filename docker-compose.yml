@@ -77,14 +77,17 @@ services:
         condition: service_healthy
     restart: unless-stopped
     deploy:
-      replicas: 2
+      # One worker, not two. On a 2 GB / 2 vCPU host a full-quality compose (x264 "slow" at
+      # delivery resolution, plus bumpers) needs well over the 768M each of two replicas was
+      # allowed, and two of them cannot both fit anyway: ffmpeg was OOM-killed (exit -9) a few
+      # percent in. Jobs queue behind each other instead of competing for RAM. On a bigger host
+      # raise replicas, but keep replicas x memory well under physical RAM, leaving about 1 GB
+      # for postgres, redis, the api and the OS. The CPU cap keeps ffmpeg from starving them.
+      replicas: 1
       resources:
         limits:
-          # ffmpeg threads to use every core it can get; capping each worker replica keeps
-          # both from oversubscribing the host's 2 vCPUs and starving postgres/redis/ssh
-          # (both replicas combined can take at most 1.5 of 2 cores).
-          cpus: "0.75"
-          memory: 768M
+          cpus: "1.5"
+          memory: 1280M
 
   postgres:
     image: postgres:17-alpine
