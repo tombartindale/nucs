@@ -50,7 +50,7 @@ WORKDIR /app
 COPY tooling/pyproject.toml tooling/pyproject.toml
 COPY tooling/bcn tooling/bcn
 RUN python3 -m venv tooling/.venv \
-    && tooling/.venv/bin/pip install --no-cache-dir -q -e tooling
+    && tooling/.venv/bin/pip install --no-cache-dir -q -e "tooling[s3]"
 
 COPY tooling/node/package.json tooling/node/package-lock.json tooling/node/
 RUN cd tooling/node && npm ci --no-audit --no-fund

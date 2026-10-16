@@ -7,7 +7,7 @@ import traceback
 from pathlib import Path
 from typing import Callable
 
-from . import fsutil, progress
+from . import fsutil, progress, storage
 from .config import Config, load
 from .envelope import Cancelled, Diagnostic, Envelope, Fail, TopicResult
 from .progress import Progress, TopicProgress
@@ -28,6 +28,8 @@ PRODUCER = {
 def require_input(t: Topic, path: Path, lang: str | None = None, step_hint: str | None = None,
                   stable: bool = False) -> None:
     rel = str(path.relative_to(t.dir))
+    if not path.exists() and storage.read_pointer(path) is not None:
+        return  # in the bucket: the job that needs the bytes downloads them (storage.workspace)
     if not path.exists():
         hint = step_hint or PRODUCER.get(rel)
         raise Fail("FS_MISSING", f"{rel} does not exist.", topic=t.id, lang=lang, file=rel,

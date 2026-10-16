@@ -4,14 +4,14 @@
 //
 // Keys: Space play/pause · ↑/↓ speed · +/− text size · ←/→ or PageUp/PageDown previous/next
 // slide (what most presentation clickers send) · Home back to the top · M mirror · F full screen
-// · Esc leave.
+// · Esc leave. The control bar stays put.
 import { onBeforeUnmount, onMounted, reactive, ref, shallowRef } from 'vue';
 import { useRouter } from 'vue-router';
 import type { ShowScript, TopicResponse } from '@beacon/shared';
 import { api } from '@/api';
 
 const PREFS_KEY = 'beacon-prompter';
-const DEFAULTS = { speed: 5, size: 56, width: 70, mirror: false, countdown: true };
+const DEFAULTS = { speed: 5, size: 56, width: 70, mirror: false };
 
 const props = defineProps<{ id: string }>();
 const router = useRouter();
@@ -36,15 +36,11 @@ const error = ref<string | null>(null);
 const stage = ref<HTMLDivElement | null>(null);
 const textEl = ref<HTMLDivElement | null>(null);
 const playing = ref(false);
-const countdown = ref<number | null>(null);
-const faded = ref(false);
 const statusLine = ref('');
 let pos = 0;              // scroll position in px, fractional
 let last = 0;
 let elapsed = 0;          // ms spent playing
 let raf = 0;
-let countdownTimer: ReturnType<typeof setInterval> | undefined;
-let hideTimer: ReturnType<typeof setTimeout> | undefined;
 
 // Pixels per second scale with the text, so a speed setting feels the same at any size.
 // Speed 5 at the default size and width is roughly 145 words a minute.
@@ -63,11 +59,10 @@ function goToSlide(i: number) {
   const k = Math.max(0, Math.min(ds.length - 1, i));
   pos = Math.max(0, ds[k].offsetTop - eyeY());
   stage.value.scrollTop = pos;
-  wake();
 }
 
 function tick(now: number) {
-  const dt = last ? (now - last) / 1000 : 0;
+  const dt = last ? Math.min((now - last) / 1000, 0.1) : 0;   // a stalled frame must not leap
   last = now;
   const st = stage.value;
   if (st && playing.value) {
@@ -83,39 +78,19 @@ function tick(now: number) {
 }
 
 function setPlaying(on: boolean) {
-  clearInterval(countdownTimer);
-  countdown.value = null;
-  if (on && prefs.countdown && (stage.value?.scrollTop || 0) < 5) {
-    countdown.value = 3;
-    countdownTimer = setInterval(() => {
-      if (countdown.value! > 1) { countdown.value! -= 1; return; }
-      clearInterval(countdownTimer);
-      countdown.value = null;
-      playing.value = true; last = 0; wake();
-    }, 800);
-    return;
-  }
   playing.value = on;
   last = 0;
-  wake();
 }
 
 // Keep manual scrolling (trackpad, wheel) and auto-scroll in step.
 function onScroll() { if (stage.value && Math.abs(stage.value.scrollTop - pos) > 2) pos = stage.value.scrollTop; }
-
-// Controls fade while playing and come back on any mouse movement.
-function wake() {
-  faded.value = false;
-  clearTimeout(hideTimer);
-  if (playing.value) hideTimer = setTimeout(() => { faded.value = true; }, 2500);
-}
 
 function change(key: 'speed' | 'size' | 'width', delta: number) {
   const limits = { speed: [1, 30], size: [24, 140], width: [40, 95] }[key];
   prefs[key] = Math.max(limits[0], Math.min(limits[1], prefs[key] + delta));
   savePrefs();
 }
-function toggle(key: 'mirror' | 'countdown') { prefs[key] = !prefs[key]; savePrefs(); }
+function toggleMirror() { prefs.mirror = !prefs.mirror; savePrefs(); }
 function toggleFullscreen() {
   if (document.fullscreenElement) void document.exitFullscreen?.();
   else void document.documentElement.requestFullscreen?.().catch(() => {});
@@ -135,18 +110,16 @@ function onKey(e: KeyboardEvent) {
   else if (k === '+' || k === '=') change('size', 4);
   else if (k === '-' || k === '_') change('size', -4);
   else if (k === 'Home') { pos = 0; if (stage.value) stage.value.scrollTop = 0; elapsed = 0; }
-  else if (k === 'm' || k === 'M') toggle('mirror');
+  else if (k === 'm' || k === 'M') toggleMirror();
   else if (k === 'f' || k === 'F') toggleFullscreen();
   else if (k === 'Escape' && !document.fullscreenElement) leave();
   else return;
   e.preventDefault();
-  wake();
 }
 
 onMounted(async () => {
   document.body.classList.add('prompting');
   document.addEventListener('keydown', onKey);
-  document.addEventListener('mousemove', wake);
   try {
     const data = await api<TopicResponse>(`/api/topic/${props.id}`);
     script.value = data.show.results?.[0]?.en ?? null;
@@ -160,10 +133,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf);
-  clearInterval(countdownTimer);
-  clearTimeout(hideTimer);
   document.removeEventListener('keydown', onKey);
-  document.removeEventListener('mousemove', wake);
   document.body.classList.remove('prompting');
   if (document.fullscreenElement) void document.exitFullscreen?.();
 });
@@ -187,8 +157,8 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <div class="prompter-eyeline"><span>▶</span><span>◀</span></div>
-    <div v-if="countdown !== null" class="prompter-countdown">{{ countdown }}</div>
-    <div :class="['prompter-bar', { faded }]">
+    <!-- Hand focus back to the stage after any bar click, or Space re-presses the focused button on key-up. -->
+    <div class="prompter-bar" @click="stage?.focus()">
       <q-toolbar class="bg-grey-10 text-grey-4 q-gutter-sm" style="flex-wrap: wrap">
         <q-btn :color="playing ? 'amber-8' : 'grey-8'" unelevated no-caps :icon="playing ? 'pause' : 'play_arrow'" :label="playing ? 'Pause' : 'Play'" @click="setPlaying(!playing)"><q-tooltip>Space</q-tooltip></q-btn>
         <span v-for="k in (['speed', 'size', 'width'] as const)" :key="k" class="row items-center gap-xs">
@@ -197,10 +167,7 @@ onBeforeUnmount(() => {
           <b>{{ prefs[k] }}{{ k === 'width' ? '%' : '' }}</b>
           <q-btn dense flat round icon="add" @click="change(k, k === 'speed' ? 1 : k === 'size' ? 4 : 5)" />
         </span>
-        <q-btn dense flat no-caps icon="skip_previous" label="Slide" @click="goToSlide(currentSlide() - 1)"><q-tooltip>← or PageUp</q-tooltip></q-btn>
-        <q-btn dense flat no-caps icon-right="skip_next" label="Slide" @click="goToSlide(currentSlide() + 1)"><q-tooltip>→ or PageDown</q-tooltip></q-btn>
-        <q-btn dense no-caps :flat="!prefs.mirror" :color="prefs.mirror ? 'amber-8' : undefined" label="Mirror" @click="toggle('mirror')"><q-tooltip>M</q-tooltip></q-btn>
-        <q-btn dense no-caps :flat="!prefs.countdown" :color="prefs.countdown ? 'amber-8' : undefined" label="3-2-1" @click="toggle('countdown')"><q-tooltip>Countdown when starting from the top</q-tooltip></q-btn>
+        <q-btn dense no-caps :flat="!prefs.mirror" :color="prefs.mirror ? 'amber-8' : undefined" label="Mirror" @click="toggleMirror()"><q-tooltip>M</q-tooltip></q-btn>
         <q-btn dense flat no-caps icon="fullscreen" label="Full screen" @click="toggleFullscreen"><q-tooltip>F</q-tooltip></q-btn>
         <q-space />
         <span class="text-caption">{{ statusLine }}</span>

@@ -19,16 +19,18 @@ own bumpers from bcn bumpers are used when current, else the files named in [bum
 from __future__ import annotations
 
 import argparse
+import contextlib
 import html
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import cuesheet, fsutil, srt, tools
+from .. import cuesheet, fsutil, srt, storage, tools
 from ..config import Config, Theme, load_theme, resolve_theme_name
 from ..coursemap import load_course_map, speaker_for
-from ..envelope import Diagnostic, Envelope, Fail, TopicResult
-from ..markdown import parse
+from ..envelope import Artifact, Diagnostic, Envelope, Fail, TopicResult, sha256_file
+from ..markdown import ParsedTopic, parse, to_html
 from ..media import ffmpeg, loudness, probe
 from ..progress import TopicProgress, run as run_proc
 from ..runner import require_input, require_step, run_topics, try_skip
@@ -39,8 +41,10 @@ HELP = "composite video: what package delivers"
 FONT_CANDIDATES = ["/System/Library/Fonts/Helvetica.ttc", "/System/Library/Fonts/Supplemental/Arial.ttf",
                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
 
+IMG_TAG_RE = re.compile(r"<img\b[^>]*>")
 
-ARRANGEMENTS = ("side_by_side", "inset", "stacked", "full_bleed_inset")
+
+ARRANGEMENTS = ("side_by_side", "inset", "stacked", "full_bleed_inset", "full_bleed_text")
 
 
 @dataclass
@@ -145,26 +149,51 @@ def name_tag_box(c: dict, es: EncodeSpec, theme: Theme) -> tuple[int, int, int, 
     W, H = _even(es.width), _even(es.height)
     k = H / theme.height
     nt = theme.name_tag or {}
-    font = round(nt.get("font_size_px") * k) if nt.get("font_size_px") else round(H * 0.036)
     m = _even(H * 0.03)
-    h = _even(font * 2.6)
     arrangement = c["arrangement"]
+
+    def sized(w: int) -> tuple[int, int]:
+        """(font, h) for a box this wide. An explicit [name_tag].font_size_px is still
+        height-relative, per its own documented "percent of frame height" contract in
+        theme.toml — a theme author's deliberate choice, left alone. The default instead
+        scales with the box's own width rather than a flat frame-relative constant: a fixed
+        fraction of frame width looked fine at 1920 (side_by_side's own column) but was
+        either far too large relative to a narrow box (truncating names) or, over-corrected,
+        far too small. Scaling off the box itself tracks whichever width that box actually
+        has — including the 80% of the frame the non-side_by_side arrangements below can
+        now use if a long name needs it.
+        """
+        font = round(nt.get("font_size_px") * k) if nt.get("font_size_px") else round(w * 0.05)
+        return font, _even(font * 2.6)
+
     if arrangement == "side_by_side":
         left = W - _even(W * theme.safe_right)
         x, w = left + m, (W - left) - 2 * m
+        font, h = sized(w)
         y = H - round(theme.safe_bottom * k) - h - m
     elif arrangement == "inset":
-        w = _even(W * 0.5)
+        w = _even(W * 0.8)
+        font, h = sized(w)
         x = W - w - m if nt.get("align", "right") == "right" else m
         y = H - round(theme.safe_bottom * k) - h - m
     elif arrangement == "stacked":
+        w = _even(W * 0.8)
+        font, h = sized(w)
         ph = _presenter_band_height(c, H)
-        w = _even(W * 0.5)
         x = W - w - m if nt.get("align", "right") == "right" else m
         y = ph - h - m
     elif arrangement == "full_bleed_inset":
-        w = _even(W * 0.5)
+        w = _even(W * 0.8)
+        font, h = sized(w)
         x = m if "right" in c["inset_position"] else W - w - m
+        y = H - round(theme.safe_bottom * k) - h - m
+    elif arrangement == "full_bleed_text":
+        # Hard against the right edge regardless of [name_tag] align: this arrangement's
+        # own fixed convention, not a theme choice (the slide text already owns the centre).
+        # The bottom still clears the subtitle safe area, same as every other arrangement.
+        w = _even(W * 0.8)
+        font, h = sized(w)
+        x = W - w
         y = H - round(theme.safe_bottom * k) - h - m
     else:
         raise Fail("CONFIG_INVALID", f"compose arrangement '{arrangement}' is not one of {', '.join(ARRANGEMENTS)}.",
@@ -194,6 +223,56 @@ body {{ display: flex; align-items: flex-end; justify-content: {'flex-end' if si
 .name {{ font-size: {font}px; line-height: 1.15; font-weight: {theme.title_weight}; color: {nt.get('color')}; }}
 .role {{ font-size: {round(font * 0.62)}px; line-height: 1.3; font-weight: 400; color: {nt.get('role_color')}; }}
 </style></head><body><div class="tag"><div class="name">{html.escape(name)}</div>{role_html}</div></body></html>
+"""
+
+
+def slide_text_font_range(theme: Theme, lang: str, H: int) -> tuple[int, int]:
+    """(max, min) px for slide_text_html's #title, card.mjs shrinks within this range to
+    fit. Scaled from the theme's own declared content size, like name_tag_box's k factor,
+    so a longer slide starts big and steps down rather than every slide sharing one size.
+    Deliberately well under the theme's own content size: this is a caption over video, not
+    a full slide deck filling the frame."""
+    base = theme.content_font_size.get(lang) or 44
+    k = H / theme.height
+    return _even(base * k * 0.6), _even(base * k * 0.3)
+
+
+def slide_text_html(theme: Theme, lang: str, content_html: str, width: int, height: int, safe_bottom: int) -> str:
+    """A transparent page the size of the frame: the slide's own text (heading, bullets,
+    paragraphs — images already stripped by the caller), with no background panel behind it
+    — full_bleed_text's whole point is the slide image is gone, not replaced by another box.
+    Legible over arbitrary video via a drop shadow instead of a fill. #title inside #box lets
+    card.mjs shrink long slides to fit rather than overflow or clip.
+
+    Confined to the middle 30% of the frame's height, vertically centred, rather than free to
+    fill it — otherwise even a short slide reads as oversized against the video. safe_bottom
+    (theme.safe_bottom, already scaled to this frame) pulls that band up if it would
+    otherwise dip into the subtitle safe area.
+    """
+    faces = "".join(
+        f"@font-face {{ font-family: \"{f['family']}\"; src: url(\"{(theme.dir / f['file']).as_uri()}\"); font-weight: {f.get('weight', 400)}; }}\n"
+        for f in theme.font_faces or [])
+    stack = ", ".join(f'"{f}"' if f not in ("sans-serif", "serif") else f for f in theme.fonts[lang])
+    side_margin = round(width * 0.06)
+    band_height = round(height * 0.30)
+    band_top = round(height * 0.5 - band_height / 2)
+    max_bottom = height - safe_bottom - round(height * 0.02)
+    if band_top + band_height > max_bottom:
+        band_top = max(0, max_bottom - band_height)
+    return f"""<!doctype html><html lang="{'zh-Hans' if lang == 'zh' else 'en'}"><head><meta charset="utf-8"><style>
+{faces}
+html, body {{ margin: 0; width: {width}px; height: {height}px; overflow: hidden; background: transparent; }}
+body {{ position: relative; }}
+#box {{ position: absolute; left: {side_margin}px; right: {side_margin}px; top: {band_top}px;
+        height: {band_height}px; max-height: {band_height}px; box-sizing: border-box;
+        display: flex; align-items: center; justify-content: center; overflow: hidden; }}
+#title {{ font-family: {stack}; color: #ffffff; text-align: center; max-width: 100%;
+          text-shadow: 0 2px 14px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.9); }}
+#title h1, #title h2, #title h3 {{ font-weight: {theme.title_weight}; font-size: 1.3em; margin: 0 0 0.4em; line-height: 1.15; }}
+#title p {{ font-size: 0.85em; margin: 0 0 0.5em; }}
+#title ul, #title ol {{ font-size: 0.85em; text-align: left; display: inline-block; margin: 0.3em 0; padding-left: 1.2em; }}
+#title li {{ margin: 0.25em 0; }}
+</style></head><body><div id="box"><div id="title">{content_html}</div></div></body></html>
 """
 
 
@@ -271,6 +350,22 @@ def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None
         parts.append(f"[1:v]scale={iw}:-2,fps={fps},setsar=1[slidepip]")
         parts.append(f"[base0][slidepip]overlay=x={x}:y={y}:eof_action=repeat[base]")
         base = "base"
+    elif arrangement == "full_bleed_text":
+        # Presenter fills the whole frame, same as full_bleed_inset; input 1 is not a
+        # rendered slide image here but a transparent per-slide text PNG, already exactly
+        # W x H (compose_topic renders these on the fly, like the logo/name tag), so it is
+        # overlaid at 0,0 with no scaling needed.
+        parts.append(f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={fps},setsar=1[base0]")
+        if tag:
+            # The name tag and the slide's centred text would otherwise land in the same
+            # area early on: hold the text at alpha=0 until the tag's own hold ends, then
+            # fade it in over the tag's own fade duration, rather than showing both at once.
+            reveal_at = tag.start + tag.hold
+            parts.append(f"[1:v]format=rgba,fps={fps},fade=t=in:st={reveal_at:.3f}:d={tag.fade:.3f}:alpha=1[textov]")
+        else:
+            parts.append(f"[1:v]format=rgba,fps={fps}[textov]")
+        parts.append("[base0][textov]overlay=x=0:y=0:eof_action=repeat[base]")
+        base = "base"
     else:
         raise Fail("CONFIG_INVALID", f"compose arrangement '{arrangement}' is not one of {', '.join(ARRANGEMENTS)}.",
                    file="programme.toml")
@@ -316,6 +411,12 @@ def _shift_srt(subs: Path, offset: float) -> str:
 
 
 def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: argparse.Namespace) -> None:
+    with contextlib.ExitStack() as stack:
+        _compose(t, r, tp, cfg, args, stack)
+
+
+def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: argparse.Namespace,
+             stack: contextlib.ExitStack) -> None:
     lang = args.lang
     c = cfg["compose"]
     draft = args.draft
@@ -341,18 +442,22 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
     if not fsutil.is_fresh([t.cues_csv], [t.src("en"), t.srt("en"), t.video]):
         raise Fail("STEP_PREREQUISITE", "The cue sheet is older than the script, SRT or video.", hint="Run bcn cues again.")
     require_step(t, "render", lang, [t.src(lang)], f"bcn render{' --lang ' + lang if lang != 'en' else ''}")
-    n = len(parse(t.src(lang), t.src(lang).name, t.id).slides)
+    p: ParsedTopic = parse(t.src(lang), t.src(lang).name, t.id)
+    n = len(p.slides)
 
-    # Each layout needs one of two slide-content renders: the safe-area-reserved one, for
-    # side_by_side (the presenter's column), or the full-bleed one, for every other
-    # arrangement (the presenter isn't confined to a fixed in-frame column there). bcn render
-    # produces both; resolve whichever set(s) the selected layouts actually need.
-    modes_needed = sorted({layout["arrangement"] != "side_by_side" for layout in layouts.values()})
+    # Each layout needs one of two pre-rendered slide-content renders: the safe-area-
+    # reserved one, for side_by_side (the presenter's column), or the full-bleed one, for
+    # inset/stacked/full_bleed_inset (the presenter isn't confined to a fixed in-frame
+    # column there). bcn render produces both; resolve whichever set(s) the selected layouts
+    # actually need. full_bleed_text needs neither: its "slide" track is the slide's own
+    # text, rendered fresh per layout further down, not a pre-rendered slide image at all.
+    modes_needed = sorted({layout["arrangement"] != "side_by_side" for layout in layouts.values()
+                           if layout["arrangement"] != "full_bleed_text"})
     pngs_by_mode: dict[bool, list[Path]] = {}
     for full_bleed in modes_needed:
         pngs = [t.slides_dir(lang, full_bleed) / t.slide_name(i, lang) for i in range(1, n + 1)]
-        for p in pngs:
-            require_input(t, p, lang, step_hint=f"bcn render{' --lang ' + lang if lang != 'en' else ''}")
+        for png in pngs:
+            require_input(t, png, lang, step_hint=f"bcn render{' --lang ' + lang if lang != 'en' else ''}")
         pngs_by_mode[full_bleed] = pngs
 
     subs = t.subtitle_out(lang, "srt")
@@ -374,12 +479,12 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
                                                 hint=f"Run bcn bumpers{' --lang ' + lang if lang != 'en' else ''} again."))
             rel = cfg["bumpers"][kind]
             if rel:
-                p = (t.root / rel).resolve()
-                if not str(p).startswith(str(t.root.resolve())) or not p.is_file():
+                bumper_path = (t.root / rel).resolve()
+                if not str(bumper_path).startswith(str(t.root.resolve())) or not bumper_path.is_file():
                     r.diagnostics.append(Diagnostic("COMPOSE_BUMPER", f"The {kind} bumper '{rel}' does not exist inside the programme root; it is skipped.",
                                                     topic=t.id, lang=lang, file="programme.toml"))
                 else:
-                    bumpers[kind] = p
+                    bumpers[kind] = bumper_path
 
     outputs = [(t.draft(lang, name) if draft else t.composed(lang, name)) for name in layouts]
     sidecar = None if (draft or burn_in) else t.composed_srt(lang)
@@ -389,8 +494,11 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
     course_map = t.module_dir / "course-map.md"
     speaker = speaker_for(load_course_map(t.module_dir), t.unit, lang)
     all_pngs = [p for pngs in pngs_by_mode.values() for p in pngs]
-    inputs = [t.video, t.cues_csv, subs, t.root / "programme.toml", *([course_map] if course_map.is_file() else []),
-              *theme.files(), *all_pngs, *bumpers.values()]
+    # t.src(lang) itself, not just the rendered pngs: full_bleed_text builds its slide track
+    # straight from the topic's text, and if it's the only layout selected, modes_needed is
+    # empty and all_pngs has nothing in it to catch a content change via mtime instead.
+    inputs = [t.video, t.cues_csv, subs, t.src(lang), t.root / "programme.toml",
+              *([course_map] if course_map.is_file() else []), *theme.files(), *all_pngs, *bumpers.values()]
     if try_skip(t, r, "compose", lang, outputs, inputs, args.force):
         return
 
@@ -398,9 +506,13 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
     # everything, unlike bumpers' outro card, which sits on its own separate slide.
     want_logo_any = (bool(theme.bumper) and bool(theme.bumper.get("logo"))
                      and any(layout["arrangement"] == "side_by_side" for layout in layouts.values()))
-    tl = tools.require(cfg, "ffmpeg", "ffprobe", *(["chrome"] if (want_logo_any or speaker) else []))
+    want_text_any = any(layout["arrangement"] == "full_bleed_text" for layout in layouts.values())
+    tl = tools.require(cfg, "ffmpeg", "ffprobe", *(["chrome"] if (want_logo_any or speaker or want_text_any) else []))
     times = cuesheet.read(t.cues_csv, n, t.cues_csv.name)
-    info = probe(tl, t.video, "edit/master.mp4")
+    # The master may live in the bucket: bring it down for this job only. The scratch copy is
+    # removed when `stack` unwinds in compose_topic, whether this succeeds or fails.
+    video = stack.enter_context(storage.workspace(t.root, [t.video], t.build))[t.video]
+    info = probe(tl, video, "edit/master.mp4")
     duration = info.duration
     if times[-1] >= duration:
         raise Fail("CUE_SHEET_INVALID", "The last slide starts after the video ends.", file=t.cues_csv.name)
@@ -409,7 +521,7 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
                                         topic=t.id, lang=lang, file=f"{t.module}/course-map.md",
                                         hint="Add a line like '**Speaker.** Dr Jane Smith, Associate Professor' above the first "
                                              "unit (or inside a unit, for that unit only)."))
-    body_lufs = loudness(tl, t.video) if bumpers else None
+    body_lufs = loudness(tl, video) if bumpers else None
 
     sub_font = theme.subtitle_font(lang)
     wm_font = next((f for f in FONT_CANDIDATES if Path(f).is_file()), None)
@@ -424,19 +536,44 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
             shutil.copyfile(subs, work / "subs.srt")
 
         for idx, (name, layout) in enumerate(layouts.items()):
-            full_bleed = layout["arrangement"] != "side_by_side"
-            pngs = pngs_by_mode[full_bleed]
             es = encode_spec(cfg, layout, draft)
             slice_lo, slice_hi = idx / len(layouts), (idx + 1) / len(layouts)
 
             def report(frac: float, label: str) -> None:
                 tp.update(min(99.0, (slice_lo + frac * (slice_hi - slice_lo)) * 100), f"{label} {name}")
 
+            if layout["arrangement"] == "full_bleed_text":
+                # No pre-rendered slide image here: each slide's own text (heading/bullets,
+                # images stripped), rendered fresh as a transparent PNG exactly the size of
+                # this layout's frame — the same card.mjs screenshot technique already used
+                # for the logo watermark and name tag, just once per slide.
+                W_t, H_t = _even(es.width), _even(es.height)
+                maxF, minF = slide_text_font_range(theme, lang, H_t)
+                safe_bottom_px = round(theme.safe_bottom * (H_t / theme.height))
+                text_dir = work / f"text-{name}"
+                text_dir.mkdir(exist_ok=True)
+                pngs = []
+                for i, slide in enumerate(p.slides, 1):
+                    content_html = IMG_TAG_RE.sub("", to_html(slide.content))
+                    html_path, png_path = text_dir / f"s{i:02d}.html", text_dir / f"s{i:02d}.png"
+                    html_path.write_text(slide_text_html(theme, lang, content_html, W_t, H_t, safe_bottom_px), encoding="utf-8")
+                    text_code, _text_out, text_err = run_proc(
+                        [tl.node or "node", str(tools.NODE_DIR / "card.mjs"), str(html_path), str(png_path),
+                         str(W_t), str(H_t), str(maxF), str(minF), "transparent"],
+                        env={"CHROME_PATH": tl.chrome or ""}, cwd=str(tools.NODE_DIR), timeout=180)
+                    if text_code != 0 or not png_path.is_file():
+                        raise Fail("RENDER_FAILED", f"Rendering slide {i}'s text overlay failed (exit {text_code}).",
+                                   topic=t.id, lang=lang, slide=i, data={"stderr": text_err[-2000:]})
+                    pngs.append(png_path)
+            else:
+                full_bleed = layout["arrangement"] != "side_by_side"
+                pngs = pngs_by_mode[full_bleed]
+
             # Slide track on the body's own timeline: cues.csv is correct as written here.
             lines = ["ffconcat version 1.0"]
-            for i, p in enumerate(pngs):
+            for i, png in enumerate(pngs):
                 end = times[i + 1] if i + 1 < len(times) else duration
-                lines += [f"file '{p.as_posix()}'", f"duration {end - times[i]:.3f}"]
+                lines += [f"file '{png.as_posix()}'", f"duration {end - times[i]:.3f}"]
             lines.append(f"file '{pngs[-1].as_posix()}'")
             (work / f"slides-{name}.ffconcat").write_text("\n".join(lines) + "\n")
 
@@ -484,7 +621,7 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
             graph = filter_graph(layout, es, duration, "subs.srt" if burn_in else None, sub_font, c["subtitle_font_size"],
                                  wm_font, theme.fonts_dir, theme.safe_right, logo_input, tag)
             report(0, "encoding")
-            ffmpeg(tl, ["-i", str(t.video), "-f", "concat", "-safe", "0", "-i", f"slides-{name}.ffconcat", *logo_args, *tag_args,
+            ffmpeg(tl, ["-i", str(video), "-f", "concat", "-safe", "0", "-i", f"slides-{name}.ffconcat", *logo_args, *tag_args,
                         "-filter_complex", graph, "-map", "[v]", "-map", "0:a?", "-t", f"{duration:.3f}",
                         *_encode_args(es), str(body)],
                    duration=duration, on_pct=lambda pct: report(pct / 100 * share, "encoding"), cwd=str(work))
@@ -516,9 +653,18 @@ def compose_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args
                 body = joined
 
             out = t.draft(lang, name) if draft else t.composed(lang, name)
-            with fsutil.atomic_path(out) as tmp:
-                shutil.move(str(body), tmp)
-            r.artifacts.append(Envelope.artifact_for(t.root, out, "draft" if draft else "composed"))
+            kind = "draft" if draft else "composed"
+            if storage.remote(t.root) is not None:
+                # The bucket is the home of the finished video; hash it here, where the bytes are,
+                # then upload and leave a pointer in the tree. `body` is consumed by the upload.
+                sha = sha256_file(body)
+                r.artifacts.append(Artifact(str(out.relative_to(t.root)), kind, body.stat().st_size, sha))
+                tp.update(98, f"uploading {out.name}")
+                storage.publish(t.root, body, out, dur=probe(tl, body, out.name).duration, sha256=sha)
+            else:
+                with fsutil.atomic_path(out) as tmp:
+                    shutil.move(str(body), tmp)
+                r.artifacts.append(Envelope.artifact_for(t.root, out, kind))
             layout_results.append({"name": name, "arrangement": layout["arrangement"], "resolution": [_even(es.width), _even(es.height)]})
 
         if sidecar:

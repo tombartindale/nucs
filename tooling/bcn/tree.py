@@ -33,7 +33,7 @@ NOISE = [
 
 TOPIC_FILES = {"topic.md", "topic.zh.md", "review.json", "translation.json"}
 TOPIC_DIRS = {"assets", "edit", "build", "out", ".history"}
-EDIT_FILES = {"master.mp4", "master.srt", "master.zh.srt"}
+EDIT_FILES = {"master.mp4", "master.srt", "master.zh.srt", "master.mp4.s3.json"}
 _CONFLICT_SEP = r"[-_ (]"
 
 

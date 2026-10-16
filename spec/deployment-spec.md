@@ -12,7 +12,7 @@ The goal is to make this deployable for a small team (2-5 concurrent users, occa
 
 ## What has to fundamentally change vs. the current design
 
-1. **Filesystem-as-database.** The entire pipeline's state (topic markdown, review decisions, edit videos, build artifacts, delivery packages) is a folder tree read/written via plain file I/O with mtime-based freshness checks and atomic renames. `bcn` itself has zero cloud-storage awareness.
+1. **Filesystem-as-database.** The entire pipeline's state (topic markdown, review decisions, edit videos, build artifacts, delivery packages) is a folder tree read/written via plain file I/O with mtime-based freshness checks and atomic renames. `bcn` itself had zero cloud-storage awareness; video has since moved to S3 (pointer files in the tree, scratch copies for compose; see README, "Video in object storage"), and the rest of the tree is still plain files on the shared volume.
 2. **In-process job queue.** `JobQueue` in `ui/server/src/jobs.ts` is a `Map` in one Node process, backed by SQLite only for crash recovery of *that same process*. Concurrency control (`overlaps()` — never run two jobs on overlapping paths) is enforced in-memory. This cannot span multiple server instances.
 3. **In-process pub/sub for progress.** The `Bus` that fans job progress out to SSE clients is purely in-memory; SSE connections are pinned to one backend process.
 4. **No auth, localhost-only.** `server.ts` actively 403s any request whose Host/Origin isn't localhost. There's no login, no per-user identity beyond a cosmetic "operator" label.

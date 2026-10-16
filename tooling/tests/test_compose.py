@@ -266,6 +266,27 @@ def test_compose_full_bleed_inset_arrangement(tree, capsys):
     assert v.height > v.width
 
 
+def test_compose_full_bleed_text_arrangement(tree, capsys):
+    """vertical_text: the presenter fills the frame; each slide's own text (no image, no
+    background panel) is overlaid, centred, instead of the rendered slide at all. Selected
+    alone (no other layout), so this also exercises the case where bcn render's pre-rendered
+    slide PNGs are never needed at all for this run."""
+    t = Topic(tree, "KV7015", "U01", "T01")
+    _build_up_to_cues(tree, capsys, t)
+    code, env = bcn(capsys, "compose", str(t.dir), "--layout", "vertical_text")
+    assert code == 0, env["diagnostics"]
+    r = env["results"][0]["layouts"][0]
+    assert r["name"] == "vertical_text" and r["arrangement"] == "full_bleed_text"
+
+    cfg = load(tree)
+    info = tools.locate(cfg)
+    v = probe(info, t.composed("en", "vertical_text"))
+    layout = cfg["compose"]["layouts"]["vertical_text"]
+    assert (v.width, v.height) == (layout["width"], layout["height"])
+    assert v.height > v.width
+    assert v.duration > 0
+
+
 def test_compose_unknown_layout_fails(tree, capsys):
     t = Topic(tree, "KV7015", "U01", "T01")
     _build_up_to_cues(tree, capsys, t)

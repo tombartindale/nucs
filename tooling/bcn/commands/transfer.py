@@ -40,7 +40,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from .. import fsutil
+from .. import fsutil, storage
 from ..envelope import Cancelled, Diagnostic, Envelope, Fail, TopicResult, sha256_file, utcnow
 from ..markdown import parse
 from ..progress import CANCEL, Progress
@@ -162,7 +162,7 @@ def _export(env: Envelope, target: Target, media: bool, nested: bool, full: bool
                     if f.is_file() and not is_noise(f.name):
                         included.append((t.module, f"{t.unit}/{t.code}/assets/{f.name}"))
             for f in (t.video, t.srt("en"), t.srt("zh")):
-                if f.is_file():
+                if f.is_file() or storage.is_remote(f):
                     included.append((t.module, f"{t.unit}/{t.code}/edit/{f.name}"))
 
     # (source path, generated text, name inside the zip, manifest module-or-None) for every
@@ -221,7 +221,13 @@ def _export(env: Envelope, target: Target, media: bool, nested: bool, full: bool
                         raise Cancelled()
                     with prog.topic(name) as tp:
                         tp.update(0, f"zipping {name}")
-                        if src is not None:
+                        if src is not None and not src.is_file() and storage.is_remote(src):
+                            # Master in the bucket: fetch it for this one entry only, so peak
+                            # extra disk is a single video, not the whole export.
+                            with storage.workspace(target.root, [src], exports) as local:
+                                z.write(local[src], name)
+                                digest = sha256_file(local[src])
+                        elif src is not None:
                             z.write(src, name)
                             digest = sha256_file(src)
                         else:
@@ -293,6 +299,9 @@ def _place(env: Envelope, rel: str, f: Path, dest: str, dry_run: bool, overwrite
     r = TopicResult(rel, rel)
     env.results.append(r)
     r.extra["path"] = dest
+    store = storage.remote(Path(env.root)) if env.root and dest_path.suffix == ".mp4" else None
+    if store is not None:
+        return _place_remote(r, store, rel, f, dest_path, dry_run, overwrite)
     if dest_path.is_file() and not overwrite:
         if filecmp.cmp(f, dest_path, shallow=False):
             r.extra["action"] = "unchanged"
@@ -320,6 +329,34 @@ def _place(env: Envelope, rel: str, f: Path, dest: str, dry_run: bool, overwrite
             shutil.copyfileobj(src_f, out_f)
         r.extra["action"] = "written"
         r.diagnostics.append(Diagnostic("XFER_WRITTEN", f"Wrote {dest}.", file=rel))
+    return r.extra["action"], True
+
+
+def _place_remote(r: TopicResult, store: "storage.Store", rel: str, f: Path, dest_path: Path, dry_run: bool,
+                  overwrite: bool) -> tuple[str, bool]:
+    """_place for a video when object storage is on: the bytes go to the bucket and the tree
+    keeps a pointer. Same-content and exists-differs rules as for a local file; sameness is
+    judged by sha256 against the pointer (or the local file, if not yet migrated)."""
+    digest = sha256_file(f)
+    ptr = storage.read_pointer(dest_path)
+    existing = (ptr.get("sha256") if ptr else None) or (sha256_file(dest_path) if dest_path.is_file() else None)
+    if (ptr or dest_path.is_file()) and not overwrite:
+        if existing == digest:
+            r.extra["action"] = "unchanged"
+            r.diagnostics.append(Diagnostic("XFER_UNCHANGED", f"{dest_path} already holds this content.", file=rel))
+            return "unchanged", True
+        r.ok = False
+        r.extra["action"] = "exists_differs"
+        r.extra["diff"] = ""
+        r.diagnostics.append(Diagnostic("XFER_EXISTS_DIFFERS", f"{dest_path} exists and differs; nothing was written.", file=rel,
+                                        hint="Review it. If the import is right, remove the existing video yourself or import with replace."))
+        return "exists_differs", False
+    if dry_run:
+        r.extra["action"] = "would_write"
+    else:
+        store.put(f, dest_path, sha256=digest)
+        r.extra["action"] = "written"
+        r.diagnostics.append(Diagnostic("XFER_WRITTEN", f"Wrote {store.key(dest_path)}.", file=rel))
     return r.extra["action"], True
 
 

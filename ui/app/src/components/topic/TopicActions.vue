@@ -55,6 +55,7 @@ const LAYOUTS = [
   { value: 'widescreen', label: 'Widescreen 16:9' },
   { value: 'vertical_stacked', label: 'Vertical, stacked' },
   { value: 'vertical_inset', label: 'Vertical, inset' },
+  { value: 'vertical_text', label: 'Vertical, text over video' },
 ] as const;
 
 const emit = defineEmits<{ verify: [] }>();

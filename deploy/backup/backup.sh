@@ -99,6 +99,7 @@ aws s3 sync "$programme" "$dest" \
   --delete \
   --exclude "*" \
   --include "*/edit/master.mp4" \
+  --include "*/edit/master.mp4.s3.json" \
   --include "*/edit/master.srt" \
   --include "*/edit/master.zh.srt"
 
