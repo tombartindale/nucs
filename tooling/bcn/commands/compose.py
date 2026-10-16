@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import html
+import json
 import re
 import shutil
 from dataclasses import dataclass
@@ -546,25 +547,34 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
                 # No pre-rendered slide image here: each slide's own text (heading/bullets,
                 # images stripped), rendered fresh as a transparent PNG exactly the size of
                 # this layout's frame — the same card.mjs screenshot technique already used
-                # for the logo watermark and name tag, just once per slide.
+                # for the logo watermark and name tag, but batched into one Chrome launch for
+                # every slide instead of relaunching per slide: this is the only place in bcn
+                # where the number of Chrome launches would otherwise scale with slide count
+                # rather than staying a small fixed number per command, and on a long topic
+                # that was enough repeated launch/teardown overhead to risk an OOM kill.
                 W_t, H_t = _even(es.width), _even(es.height)
                 maxF, minF = slide_text_font_range(theme, lang, H_t)
                 safe_bottom_px = round(theme.safe_bottom * (H_t / theme.height))
                 text_dir = work / f"text-{name}"
                 text_dir.mkdir(exist_ok=True)
                 pngs = []
+                manifest = []
                 for i, slide in enumerate(p.slides, 1):
                     content_html = IMG_TAG_RE.sub("", to_html(slide.content))
                     html_path, png_path = text_dir / f"s{i:02d}.html", text_dir / f"s{i:02d}.png"
                     html_path.write_text(slide_text_html(theme, lang, content_html, W_t, H_t, safe_bottom_px), encoding="utf-8")
-                    text_code, _text_out, text_err = run_proc(
-                        [tl.node or "node", str(tools.NODE_DIR / "card.mjs"), str(html_path), str(png_path),
-                         str(W_t), str(H_t), str(maxF), str(minF), "transparent"],
-                        env={"CHROME_PATH": tl.chrome or ""}, cwd=str(tools.NODE_DIR), timeout=180)
-                    if text_code != 0 or not png_path.is_file():
-                        raise Fail("RENDER_FAILED", f"Rendering slide {i}'s text overlay failed (exit {text_code}).",
-                                   topic=t.id, lang=lang, slide=i, data={"stderr": text_err[-2000:]})
+                    manifest.append({"in": str(html_path), "out": str(png_path), "w": W_t, "h": H_t,
+                                     "maxF": maxF, "minF": minF, "mode": "transparent"})
                     pngs.append(png_path)
+                manifest_path = text_dir / "manifest.json"
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+                text_code, _text_out, text_err = run_proc(
+                    [tl.node or "node", str(tools.NODE_DIR / "card.mjs"), "--batch", str(manifest_path)],
+                    env={"CHROME_PATH": tl.chrome or ""}, cwd=str(tools.NODE_DIR), timeout=180 + 10 * n)
+                missing = [i for i, png in enumerate(pngs, 1) if not png.is_file()]
+                if text_code != 0 or missing:
+                    raise Fail("RENDER_FAILED", f"Rendering the slide text overlays failed (exit {text_code}).",
+                               topic=t.id, lang=lang, data={"stderr": text_err[-2000:], "missing_slides": missing})
             else:
                 full_bleed = layout["arrangement"] != "side_by_side"
                 pngs = pngs_by_mode[full_bleed]
