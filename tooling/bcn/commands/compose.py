@@ -238,35 +238,42 @@ def slide_text_font_range(theme: Theme, lang: str, H: int) -> tuple[int, int]:
     return _even(base * k * 0.6), _even(base * k * 0.3)
 
 
-def slide_text_html(theme: Theme, lang: str, content_html: str, width: int, height: int, safe_bottom: int) -> str:
-    """A transparent page the size of the frame: the slide's own text (heading, bullets,
-    paragraphs — images already stripped by the caller), with no background panel behind it
-    — full_bleed_text's whole point is the slide image is gone, not replaced by another box.
-    Legible over arbitrary video via a drop shadow instead of a fill. #title inside #box lets
-    card.mjs shrink long slides to fit rather than overflow or clip.
+def text_band(height: int, safe_bottom: int) -> tuple[int, int]:
+    """(top, height) of full_bleed_text's text band: the middle 30% of the frame, pulled up
+    if that would otherwise dip into the subtitle safe area (safe_bottom, theme.safe_bottom
+    already scaled to this frame). Shared by slide_text_html (which renders a page only this
+    tall, not the whole frame — a full-frame transparent canvas composited for the whole
+    video duration was the one thing in full_bleed_text's filter graph with no equivalent
+    anywhere else in bcn's ffmpeg usage, everything else overlays a bounded region) and
+    filter_graph (which positions that smaller overlay at the same y).
+    """
+    band_height = round(height * 0.30)
+    band_top = round(height * 0.5 - band_height / 2)
+    max_bottom = height - safe_bottom - round(height * 0.02)
+    if band_top + band_height > max_bottom:
+        band_top = max(0, max_bottom - band_height)
+    return band_top, band_height
 
-    Confined to the middle 30% of the frame's height, vertically centred, rather than free to
-    fill it — otherwise even a short slide reads as oversized against the video. safe_bottom
-    (theme.safe_bottom, already scaled to this frame) pulls that band up if it would
-    otherwise dip into the subtitle safe area.
+
+def slide_text_html(theme: Theme, lang: str, content_html: str, width: int, band_height: int) -> str:
+    """A transparent page the width of the frame but only as tall as the text band itself
+    (text_band's band_height) — not the whole frame, which would be mostly empty alpha=0
+    padding composited for no reason. The slide's own text (heading, bullets, paragraphs —
+    images already stripped by the caller), with no background panel behind it — full_bleed_
+    text's whole point is the slide image is gone, not replaced by another box. Legible over
+    arbitrary video via a drop shadow instead of a fill. #title inside #box lets card.mjs
+    shrink long slides to fit rather than overflow or clip.
     """
     faces = "".join(
         f"@font-face {{ font-family: \"{f['family']}\"; src: url(\"{(theme.dir / f['file']).as_uri()}\"); font-weight: {f.get('weight', 400)}; }}\n"
         for f in theme.font_faces or [])
     stack = ", ".join(f'"{f}"' if f not in ("sans-serif", "serif") else f for f in theme.fonts[lang])
     side_margin = round(width * 0.06)
-    band_height = round(height * 0.30)
-    band_top = round(height * 0.5 - band_height / 2)
-    max_bottom = height - safe_bottom - round(height * 0.02)
-    if band_top + band_height > max_bottom:
-        band_top = max(0, max_bottom - band_height)
     return f"""<!doctype html><html lang="{'zh-Hans' if lang == 'zh' else 'en'}"><head><meta charset="utf-8"><style>
 {faces}
-html, body {{ margin: 0; width: {width}px; height: {height}px; overflow: hidden; background: transparent; }}
-body {{ position: relative; }}
-#box {{ position: absolute; left: {side_margin}px; right: {side_margin}px; top: {band_top}px;
-        height: {band_height}px; max-height: {band_height}px; box-sizing: border-box;
-        display: flex; align-items: center; justify-content: center; overflow: hidden; }}
+html, body {{ margin: 0; width: {width}px; height: {band_height}px; overflow: hidden; background: transparent; }}
+body {{ box-sizing: border-box; padding: 0 {side_margin}px; display: flex; align-items: center; justify-content: center; }}
+#box {{ max-height: {band_height}px; width: 100%; overflow: hidden; }}
 #title {{ font-family: {stack}; color: #ffffff; text-align: center; max-width: 100%;
           text-shadow: 0 2px 14px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.9); }}
 #title h1, #title h2, #title h3 {{ font-weight: {theme.title_weight}; font-size: 1.3em; margin: 0 0 0.4em; line-height: 1.15; }}
@@ -279,7 +286,7 @@ body {{ position: relative; }}
 
 def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None, sub_font: str, sub_font_size: int,
                  watermark_font: str | None, fonts_dir: Path | None = None, safe_right: float = 0.5,
-                 logo_input: str | None = None, tag: NameTag | None = None) -> str:
+                 logo_input: str | None = None, tag: NameTag | None = None, text_band_top: int = 0) -> str:
     """burn_subs is the SRT filename to burn in, or None to leave the video plain (sidecar mode).
 
     c is this layout's own entry from [compose.layouts] (arrangement, inset_scale,
@@ -298,6 +305,10 @@ def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None
 
     tag, if given, is the speaker's name tag: faded in and out by its alpha channel over its
     time window, drawn last so it sits above everything else.
+
+    text_band_top is full_bleed_text's own input 1 (its text overlay) y position: that input
+    is already cropped to text_band's band height, not the full frame (see slide_text_html),
+    so it only needs placing, not scaling.
     """
     W, H, fps = _even(es.width), _even(es.height), es.fps
     parts = []
@@ -353,9 +364,11 @@ def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None
         base = "base"
     elif arrangement == "full_bleed_text":
         # Presenter fills the whole frame, same as full_bleed_inset; input 1 is not a
-        # rendered slide image here but a transparent per-slide text PNG, already exactly
-        # W x H (compose_topic renders these on the fly, like the logo/name tag), so it is
-        # overlaid at 0,0 with no scaling needed.
+        # rendered slide image here but a transparent per-slide text PNG — cropped to just
+        # the text band's own height (see text_band/slide_text_html), not the full frame, so
+        # it is only placed at text_band_top, not scaled. A full-frame transparent overlay
+        # composited for the whole video duration would be the one thing in this filter
+        # graph with no bounded-region equivalent anywhere else in bcn's ffmpeg usage.
         parts.append(f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={fps},setsar=1[base0]")
         if tag:
             # The name tag and the slide's centred text would otherwise land in the same
@@ -365,7 +378,7 @@ def filter_graph(c: dict, es: EncodeSpec, duration: float, burn_subs: str | None
             parts.append(f"[1:v]format=rgba,fps={fps},fade=t=in:st={reveal_at:.3f}:d={tag.fade:.3f}:alpha=1[textov]")
         else:
             parts.append(f"[1:v]format=rgba,fps={fps}[textov]")
-        parts.append("[base0][textov]overlay=x=0:y=0:eof_action=repeat[base]")
+        parts.append(f"[base0][textov]overlay=x=0:y={text_band_top}:eof_action=repeat[base]")
         base = "base"
     else:
         raise Fail("CONFIG_INVALID", f"compose arrangement '{arrangement}' is not one of {', '.join(ARRANGEMENTS)}.",
@@ -538,6 +551,7 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
 
         for idx, (name, layout) in enumerate(layouts.items()):
             es = encode_spec(cfg, layout, draft)
+            text_band_top = 0  # full_bleed_text only; everything else overlays at y=0 or doesn't use this at all
             slice_lo, slice_hi = idx / len(layouts), (idx + 1) / len(layouts)
 
             def report(frac: float, label: str) -> None:
@@ -555,6 +569,7 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
                 W_t, H_t = _even(es.width), _even(es.height)
                 maxF, minF = slide_text_font_range(theme, lang, H_t)
                 safe_bottom_px = round(theme.safe_bottom * (H_t / theme.height))
+                text_band_top, band_height = text_band(H_t, safe_bottom_px)
                 text_dir = work / f"text-{name}"
                 text_dir.mkdir(exist_ok=True)
                 pngs = []
@@ -562,8 +577,8 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
                 for i, slide in enumerate(p.slides, 1):
                     content_html = IMG_TAG_RE.sub("", to_html(slide.content))
                     html_path, png_path = text_dir / f"s{i:02d}.html", text_dir / f"s{i:02d}.png"
-                    html_path.write_text(slide_text_html(theme, lang, content_html, W_t, H_t, safe_bottom_px), encoding="utf-8")
-                    manifest.append({"in": str(html_path), "out": str(png_path), "w": W_t, "h": H_t,
+                    html_path.write_text(slide_text_html(theme, lang, content_html, W_t, band_height), encoding="utf-8")
+                    manifest.append({"in": str(html_path), "out": str(png_path), "w": W_t, "h": band_height,
                                      "maxF": maxF, "minF": minF, "mode": "transparent"})
                     pngs.append(png_path)
                 manifest_path = text_dir / "manifest.json"
@@ -629,7 +644,7 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
             share = 0.85 if bumpers else 1.0
             body = work / f"body-{name}.mp4"
             graph = filter_graph(layout, es, duration, "subs.srt" if burn_in else None, sub_font, c["subtitle_font_size"],
-                                 wm_font, theme.fonts_dir, theme.safe_right, logo_input, tag)
+                                 wm_font, theme.fonts_dir, theme.safe_right, logo_input, tag, text_band_top)
             report(0, "encoding")
             ffmpeg(tl, ["-i", str(video), "-f", "concat", "-safe", "0", "-i", f"slides-{name}.ffconcat", *logo_args, *tag_args,
                         "-filter_complex", graph, "-map", "[v]", "-map", "0:a?", "-t", f"{duration:.3f}",
