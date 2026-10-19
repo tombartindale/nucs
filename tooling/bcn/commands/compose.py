@@ -150,7 +150,7 @@ def name_tag_box(c: dict, es: EncodeSpec, theme: Theme) -> tuple[int, int, int, 
     W, H = _even(es.width), _even(es.height)
     k = H / theme.height
     nt = theme.name_tag or {}
-    m = _even(H * 0.03)
+    m = _even(H * c["name_tag_margin"])
     arrangement = c["arrangement"]
 
     def sized(w: int) -> tuple[int, int]:
@@ -161,10 +161,10 @@ def name_tag_box(c: dict, es: EncodeSpec, theme: Theme) -> tuple[int, int, int, 
         fraction of frame width looked fine at 1920 (side_by_side's own column) but was
         either far too large relative to a narrow box (truncating names) or, over-corrected,
         far too small. Scaling off the box itself tracks whichever width that box actually
-        has — including the 80% of the frame the non-side_by_side arrangements below can
-        now use if a long name needs it.
+        has — including up to [compose.layouts].name_tag_width_scale of the frame the
+        non-side_by_side arrangements below can use if a long name needs it.
         """
-        font = round(nt.get("font_size_px") * k) if nt.get("font_size_px") else round(w * 0.05)
+        font = round(nt.get("font_size_px") * k) if nt.get("font_size_px") else round(w * c["name_tag_font_scale"])
         return font, _even(font * 2.6)
 
     if arrangement == "side_by_side":
@@ -173,18 +173,18 @@ def name_tag_box(c: dict, es: EncodeSpec, theme: Theme) -> tuple[int, int, int, 
         font, h = sized(w)
         y = H - round(theme.safe_bottom * k) - h - m
     elif arrangement == "inset":
-        w = _even(W * 0.8)
+        w = _even(W * c["name_tag_width_scale"])
         font, h = sized(w)
         x = W - w - m if nt.get("align", "right") == "right" else m
         y = H - round(theme.safe_bottom * k) - h - m
     elif arrangement == "stacked":
-        w = _even(W * 0.8)
+        w = _even(W * c["name_tag_width_scale"])
         font, h = sized(w)
         ph = _presenter_band_height(c, H)
         x = W - w - m if nt.get("align", "right") == "right" else m
         y = ph - h - m
     elif arrangement == "full_bleed_inset":
-        w = _even(W * 0.8)
+        w = _even(W * c["name_tag_width_scale"])
         font, h = sized(w)
         x = m if "right" in c["inset_position"] else W - w - m
         y = H - round(theme.safe_bottom * k) - h - m
@@ -192,7 +192,7 @@ def name_tag_box(c: dict, es: EncodeSpec, theme: Theme) -> tuple[int, int, int, 
         # Hard against the right edge regardless of [name_tag] align: this arrangement's
         # own fixed convention, not a theme choice (the slide text already owns the centre).
         # The bottom still clears the subtitle safe area, same as every other arrangement.
-        w = _even(W * 0.8)
+        w = _even(W * c["name_tag_width_scale"])
         font, h = sized(w)
         x = W - w
         y = H - round(theme.safe_bottom * k) - h - m
@@ -227,35 +227,37 @@ body {{ display: flex; align-items: flex-end; justify-content: {'flex-end' if si
 """
 
 
-def slide_text_font_range(theme: Theme, lang: str, H: int) -> tuple[int, int]:
+def slide_text_font_range(theme: Theme, lang: str, H: int, layout: dict) -> tuple[int, int]:
     """(max, min) px for slide_text_html's #title, card.mjs shrinks within this range to
     fit. Scaled from the theme's own declared content size, like name_tag_box's k factor,
     so a longer slide starts big and steps down rather than every slide sharing one size.
-    Deliberately well under the theme's own content size: this is a caption over video, not
-    a full slide deck filling the frame."""
+    Deliberately well under the theme's own content size by default (text_font_max_scale/
+    text_font_min_scale): this is a caption over video, not a full slide deck filling the
+    frame."""
     base = theme.content_font_size.get(lang) or 44
     k = H / theme.height
-    return _even(base * k * 0.6), _even(base * k * 0.3)
+    return _even(base * k * layout["text_font_max_scale"]), _even(base * k * layout["text_font_min_scale"])
 
 
-def text_band(height: int, safe_bottom: int) -> tuple[int, int]:
-    """(top, height) of full_bleed_text's text band: the middle 30% of the frame, pulled up
-    if that would otherwise dip into the subtitle safe area (safe_bottom, theme.safe_bottom
-    already scaled to this frame). Shared by slide_text_html (which renders a page only this
-    tall, not the whole frame — a full-frame transparent canvas composited for the whole
-    video duration was the one thing in full_bleed_text's filter graph with no equivalent
-    anywhere else in bcn's ffmpeg usage, everything else overlays a bounded region) and
-    filter_graph (which positions that smaller overlay at the same y).
+def text_band(height: int, safe_bottom: int, layout: dict) -> tuple[int, int]:
+    """(top, height) of full_bleed_text's text band: text_band_height of the frame, centred
+    at text_band_center, pulled up if that would otherwise dip into the subtitle safe area
+    (safe_bottom, theme.safe_bottom already scaled to this frame). Shared by slide_text_html
+    (which renders a page only this tall, not the whole frame — a full-frame transparent
+    canvas composited for the whole video duration was the one thing in full_bleed_text's
+    filter graph with no equivalent anywhere else in bcn's ffmpeg usage, everything else
+    overlays a bounded region) and filter_graph (which positions that smaller overlay at the
+    same y).
     """
-    band_height = round(height * 0.30)
-    band_top = round(height * 0.5 - band_height / 2)
+    band_height = round(height * layout["text_band_height"])
+    band_top = round(height * layout["text_band_center"] - band_height / 2)
     max_bottom = height - safe_bottom - round(height * 0.02)
     if band_top + band_height > max_bottom:
         band_top = max(0, max_bottom - band_height)
     return band_top, band_height
 
 
-def slide_text_html(theme: Theme, lang: str, content_html: str, width: int, band_height: int) -> str:
+def slide_text_html(theme: Theme, lang: str, content_html: str, width: int, band_height: int, layout: dict) -> str:
     """A transparent page the width of the frame but only as tall as the text band itself
     (text_band's band_height) — not the whole frame, which would be mostly empty alpha=0
     padding composited for no reason. The slide's own text (heading, bullets, paragraphs —
@@ -268,17 +270,19 @@ def slide_text_html(theme: Theme, lang: str, content_html: str, width: int, band
         f"@font-face {{ font-family: \"{f['family']}\"; src: url(\"{(theme.dir / f['file']).as_uri()}\"); font-weight: {f.get('weight', 400)}; }}\n"
         for f in theme.font_faces or [])
     stack = ", ".join(f'"{f}"' if f not in ("sans-serif", "serif") else f for f in theme.fonts[lang])
-    side_margin = round(width * 0.06)
+    side_margin = round(width * layout["text_side_margin"])
+    color = layout["text_color"]
+    heading_scale, body_scale = layout["text_heading_scale"], layout["text_body_scale"]
     return f"""<!doctype html><html lang="{'zh-Hans' if lang == 'zh' else 'en'}"><head><meta charset="utf-8"><style>
 {faces}
 html, body {{ margin: 0; width: {width}px; height: {band_height}px; overflow: hidden; background: transparent; }}
 body {{ box-sizing: border-box; padding: 0 {side_margin}px; display: flex; align-items: center; justify-content: center; }}
 #box {{ max-height: {band_height}px; width: 100%; overflow: hidden; }}
-#title {{ font-family: {stack}; color: #ffffff; text-align: center; max-width: 100%;
+#title {{ font-family: {stack}; color: {color}; text-align: center; max-width: 100%;
           text-shadow: 0 2px 14px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.9); }}
-#title h1, #title h2, #title h3 {{ font-weight: {theme.title_weight}; font-size: 1.3em; margin: 0 0 0.4em; line-height: 1.15; }}
-#title p {{ font-size: 0.85em; margin: 0 0 0.5em; }}
-#title ul, #title ol {{ font-size: 0.85em; text-align: left; display: inline-block; margin: 0.3em 0; padding-left: 1.2em; }}
+#title h1, #title h2, #title h3 {{ font-weight: {theme.title_weight}; font-size: {heading_scale}em; margin: 0 0 0.4em; line-height: 1.15; }}
+#title p {{ font-size: {body_scale}em; margin: 0 0 0.5em; }}
+#title ul, #title ol {{ font-size: {body_scale}em; text-align: left; display: inline-block; margin: 0.3em 0; padding-left: 1.2em; }}
 #title li {{ margin: 0.25em 0; }}
 </style></head><body><div id="box"><div id="title">{content_html}</div></div></body></html>
 """
@@ -567,9 +571,9 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
                 # rather than staying a small fixed number per command, and on a long topic
                 # that was enough repeated launch/teardown overhead to risk an OOM kill.
                 W_t, H_t = _even(es.width), _even(es.height)
-                maxF, minF = slide_text_font_range(theme, lang, H_t)
+                maxF, minF = slide_text_font_range(theme, lang, H_t, layout)
                 safe_bottom_px = round(theme.safe_bottom * (H_t / theme.height))
-                text_band_top, band_height = text_band(H_t, safe_bottom_px)
+                text_band_top, band_height = text_band(H_t, safe_bottom_px, layout)
                 text_dir = work / f"text-{name}"
                 text_dir.mkdir(exist_ok=True)
                 pngs = []
@@ -577,7 +581,7 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
                 for i, slide in enumerate(p.slides, 1):
                     content_html = IMG_TAG_RE.sub("", to_html(slide.content))
                     html_path, png_path = text_dir / f"s{i:02d}.html", text_dir / f"s{i:02d}.png"
-                    html_path.write_text(slide_text_html(theme, lang, content_html, W_t, band_height), encoding="utf-8")
+                    html_path.write_text(slide_text_html(theme, lang, content_html, W_t, band_height, layout), encoding="utf-8")
                     manifest.append({"in": str(html_path), "out": str(png_path), "w": W_t, "h": band_height,
                                      "maxF": maxF, "minF": minF, "mode": "transparent"})
                     pngs.append(png_path)
