@@ -602,6 +602,28 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
             lines.append(f"file '{pngs[-1].as_posix()}'")
             (work / f"slides-{name}.ffconcat").write_text("\n".join(lines) + "\n")
 
+            if layout["arrangement"] == "full_bleed_text":
+                # ffmpeg's concat demuxer switching between many distinct alpha PNGs, inside
+                # a filter graph that has to alpha-blend them (not a plain opaque paste),
+                # accumulates memory on every switch instead of staying bounded — confirmed
+                # by direct reproduction: identical filter graph, identical total duration,
+                # one continuous source stayed flat around 300MB while fifteen switches of
+                # the very same image climbed past 1.5GB. (Every other arrangement's slide
+                # track is also a many-file concat, but its PNGs are opaque, so overlay does
+                # a cheap replace rather than a real per-pixel blend — that combination is
+                # what's unique to full_bleed_text.) Collapse the per-slide PNGs into one
+                # continuous alpha video first, in a small separate pass — qtrle is a native
+                # ffmpeg codec (no external library, always built in) with real alpha
+                # support — so the expensive main encode below never sees a multi-file
+                # concat for this track at all.
+                text_track = work / f"text-track-{name}.mov"
+                ffmpeg(tl, ["-f", "concat", "-safe", "0", "-i", f"slides-{name}.ffconcat",
+                            "-vf", f"format=rgba,fps={es.fps}", "-c:v", "qtrle", "-pix_fmt", "argb", str(text_track)],
+                       duration=duration, cwd=str(work))
+                slide_input_args = ["-i", str(text_track)]
+            else:
+                slide_input_args = ["-f", "concat", "-safe", "0", "-i", f"slides-{name}.ffconcat"]
+
             # A watermark of the theme's logo over the presenter, side_by_side only.
             want_logo = layout["arrangement"] == "side_by_side" and want_logo_any
             logo_args: list[str] = []
@@ -646,7 +668,7 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
             graph = filter_graph(layout, es, duration, "subs.srt" if burn_in else None, sub_font, c["subtitle_font_size"],
                                  wm_font, theme.fonts_dir, theme.safe_right, logo_input, tag, text_band_top)
             report(0, "encoding")
-            ffmpeg(tl, ["-i", str(video), "-f", "concat", "-safe", "0", "-i", f"slides-{name}.ffconcat", *logo_args, *tag_args,
+            ffmpeg(tl, ["-i", str(video), *slide_input_args, *logo_args, *tag_args,
                         "-filter_complex", graph, "-map", "[v]", "-map", "0:a?", "-t", f"{duration:.3f}",
                         *_encode_args(es), str(body)],
                    duration=duration, on_pct=lambda pct: report(pct / 100 * share, "encoding"), cwd=str(work))
