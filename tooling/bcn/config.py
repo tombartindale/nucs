@@ -121,8 +121,15 @@ DEFAULTS: dict[str, Any] = {
         # replaced by the slide's own text (heading/bullets, no image, no background panel)
         # centred over the presenter, for when the slide image itself isn't wanted at all.
         # inset_scale/inset_position/inset_margin apply to inset and full_bleed_inset;
-        # split_ratio (the presenter's share of the frame height) applies to stacked only —
-        # every entry carries the same fields regardless, so none of them needs special-casing
+        # split_ratio (the presenter's share of the frame height) applies to stacked only.
+        # name_tag_width_scale/name_tag_font_scale/name_tag_margin size and place the speaker
+        # name tag, for every arrangement except side_by_side (whose tag instead fills the
+        # theme's safe_area.right column — see name_tag_box); name_tag_font_scale (the name's
+        # own font size, as a fraction of the tag box's width) applies to side_by_side too.
+        # text_band_height/text_band_center/text_side_margin/text_heading_scale/
+        # text_body_scale/text_font_max_scale/text_font_min_scale/text_color style
+        # full_bleed_text's slide-text overlay only. Every entry carries the same fields
+        # regardless of whether its own arrangement uses them, so none needs special-casing
         # in programme.toml.
         "layouts": {
             "widescreen": {
@@ -130,24 +137,40 @@ DEFAULTS: dict[str, Any] = {
                 "width": 1920, "height": 1080,
                 "inset_scale": 0.3, "inset_position": "top-right", "inset_margin": 16,
                 "split_ratio": 0.5,
+                "name_tag_width_scale": 0.8, "name_tag_font_scale": 0.05, "name_tag_margin": 0.03,
+                "text_band_height": 0.30, "text_band_center": 0.5, "text_side_margin": 0.06,
+                "text_heading_scale": 1.3, "text_body_scale": 0.85,
+                "text_font_max_scale": 0.6, "text_font_min_scale": 0.3, "text_color": "#ffffff",
             },
             "vertical_stacked": {
                 "arrangement": "stacked",
                 "width": 1080, "height": 1920,
                 "inset_scale": 0.3, "inset_position": "top-right", "inset_margin": 16,
                 "split_ratio": 0.45,
+                "name_tag_width_scale": 0.8, "name_tag_font_scale": 0.05, "name_tag_margin": 0.03,
+                "text_band_height": 0.30, "text_band_center": 0.5, "text_side_margin": 0.06,
+                "text_heading_scale": 1.3, "text_body_scale": 0.85,
+                "text_font_max_scale": 0.6, "text_font_min_scale": 0.3, "text_color": "#ffffff",
             },
             "vertical_inset": {
                 "arrangement": "full_bleed_inset",
                 "width": 1080, "height": 1920,
                 "inset_scale": 0.38, "inset_position": "top-right", "inset_margin": 24,
                 "split_ratio": 0.5,
+                "name_tag_width_scale": 0.8, "name_tag_font_scale": 0.05, "name_tag_margin": 0.03,
+                "text_band_height": 0.30, "text_band_center": 0.5, "text_side_margin": 0.06,
+                "text_heading_scale": 1.3, "text_body_scale": 0.85,
+                "text_font_max_scale": 0.6, "text_font_min_scale": 0.3, "text_color": "#ffffff",
             },
             "vertical_text": {
                 "arrangement": "full_bleed_text",
                 "width": 1080, "height": 1920,
                 "inset_scale": 0.3, "inset_position": "top-right", "inset_margin": 16,
                 "split_ratio": 0.5,
+                "name_tag_width_scale": 0.8, "name_tag_font_scale": 0.05, "name_tag_margin": 0.03,
+                "text_band_height": 0.30, "text_band_center": 0.5, "text_side_margin": 0.06,
+                "text_heading_scale": 1.3, "text_body_scale": 0.85,
+                "text_font_max_scale": 0.6, "text_font_min_scale": 0.3, "text_color": "#ffffff",
             },
         },
         "subtitle_font_size": 16,  # libass units at the default 288-line script resolution; --burn-subtitles only
