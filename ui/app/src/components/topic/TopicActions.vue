@@ -127,10 +127,16 @@ function view(item: Item, lang: 'en' | 'zh') {
   // translation has been returned (tooling/bcn/state.py: validate/subtitles/render take
   // zsrc/zsrt as inputs). Running one before then would just fail, so it is disabled here.
   const waitingForTranslation = lang === 'zh' && !!s && s.stage_index < s.stages.indexOf('returned');
-  const status = !st?.exists ? 'todo' : !st.ok ? 'failed' : st.fresh ? 'done' : 'stale';
-  const ICON = { done: 'check_circle', stale: 'update', failed: 'error', todo: 'radio_button_unchecked' } as const;
-  const COLOR = { done: 'positive', stale: 'warning', failed: 'negative', todo: 'grey-6' } as const;
-  const CAP = { done: `done${st?.time ? ` · ${fmtAgo(st.time, beacon.now)}` : ''}`, stale: 'out of date', failed: 'failed', todo: item.optional ? 'optional check' : 'not run' };
+  // Compose can be run as a --draft preview (ok, fresh) without being "done": package needs
+  // a delivered (non-draft) run, so `next` keeps pointing back at compose until one exists
+  // (Step.delivered in state.py). Without this, a fresh draft run would show "done" right
+  // next to "next: compose", which looks like a contradiction rather than "preview only."
+  const draftOnly = item.name === 'compose' && !!st?.exists && st.ok && st.fresh && !!st.draft;
+  const status = !st?.exists ? 'todo' : !st.ok ? 'failed' : draftOnly ? 'draft' : st.fresh ? 'done' : 'stale';
+  const ICON = { done: 'check_circle', stale: 'update', failed: 'error', todo: 'radio_button_unchecked', draft: 'visibility' } as const;
+  const COLOR = { done: 'positive', stale: 'warning', failed: 'negative', todo: 'grey-6', draft: 'warning' } as const;
+  const CAP = { done: `done${st?.time ? ` · ${fmtAgo(st.time, beacon.now)}` : ''}`, stale: 'out of date', failed: 'failed',
+    todo: item.optional ? 'optional check' : 'not run', draft: `draft only${st?.time ? ` · ${fmtAgo(st.time, beacon.now)}` : ''}` };
   return {
     cls: ['step-btn', status, { current, optional: item.optional, disabled: waitingForTranslation }],
     icon: current && status === 'todo' ? 'play_circle' : ICON[status],
@@ -138,7 +144,8 @@ function view(item: Item, lang: 'en' | 'zh') {
     cap: waitingForTranslation ? 'needs translation' : current ? `next · ${CAP[status]}` : CAP[status],
     disable: waitingForTranslation,
     tip: `${lang === 'zh' ? 'Mandarin. ' : ''}${STEP_HELP[item.name]}${current ? ' This is the next step for this topic.' : ''}`
-      + (waitingForTranslation ? ' Needs topic.zh.md and the Mandarin SRT back from the translator first.' : ''),
+      + (waitingForTranslation ? ' Needs topic.zh.md and the Mandarin SRT back from the translator first.' : '')
+      + (draftOnly ? ' The last run was a draft preview, not delivered — run it without --draft before package can use it.' : ''),
   };
 }
 const rows = computed(() => LANGS.map((lang) => ({

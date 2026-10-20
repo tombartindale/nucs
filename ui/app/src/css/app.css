@@ -82,6 +82,7 @@ body.body--dark a:not(.q-btn):not(.q-item):not(.q-tab):not(.cell) { color: var(-
 .stepflow .step.current { border-color: var(--q-primary); background: var(--q-primary); color: #fff; box-shadow: 0 2px 8px rgba(31, 95, 139, .45); }
 .stepflow .step.current .cap { opacity: .95; font-weight: 600; }
 .stepflow .step.stale { border-color: var(--q-warning); }
+.stepflow .step.draft { border-color: var(--q-warning); }
 .stepflow .step.failed { border-color: var(--q-negative); }
 .stepflow .step.optional { border-style: dashed; }
 .stepflow .step.wait { cursor: default; border-style: dotted; }

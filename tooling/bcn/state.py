@@ -454,7 +454,8 @@ class TopicState:
             if l != lang:
                 continue
             out[name] = {"exists": s.exists, "ok": s.ok if s.exists else None, "fresh": s.fresh if s.exists else None,
-                         "time": _iso(s.mtime), "skipped": s.result.get("skipped") if s.exists else None}
+                         "time": _iso(s.mtime), "skipped": s.result.get("skipped") if s.exists else None,
+                         "draft": (s.result.get("mode") == "draft") if s.exists else None}
         return out
 
     def _manifest_intact(self, name: str) -> bool:
