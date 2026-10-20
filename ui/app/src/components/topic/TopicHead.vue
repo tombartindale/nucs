@@ -20,7 +20,7 @@ const blockers = computed(() => (st.value ? [...st.value.en.blockers.map((b) => 
 
 <template>
   <PageHeader :title="`${t.id} · ${title}`"
-    :crumbs="[{ label: 'Programme', to: '/' }, { label: t.id.slice(0, 6), to: `/module/${t.id.slice(0, 6)}` }, { label: t.id.slice(7, 10) }]">
+    :crumbs="[{ label: 'Programme', to: '/' }, { label: t.id.slice(0, 6), to: `/module/${t.id.slice(0, 6)}` }, { label: t.id.slice(7, 10), to: `/module/${t.id.slice(0, 6)}?unit=${t.id.slice(7, 10)}` }, { label: t.id.slice(11) }]">
     <template #sub>
       <div v-if="st" class="row items-center gap-md">
         <span v-for="[lang, s] in langs" :key="lang" class="row items-center gap-xs">

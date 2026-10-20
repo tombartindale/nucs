@@ -83,6 +83,8 @@ body.body--dark a:not(.q-btn):not(.q-item):not(.q-tab):not(.cell) { color: var(-
 .await-grid .sep { border-left: 1px solid var(--line-2); }
 .await-grid .unit-row th { background: var(--panel-2); font-size: 13px; padding: 8px 10px; }
 .await-grid .unit-row .plan-tag { float: right; font-weight: 400; display: inline-flex; align-items: center; gap: 4px; line-height: 28px; }
+.await-grid .unit-row.focus th { box-shadow: inset 3px 0 0 var(--q-primary); }
+.await-grid .unit-row { scroll-margin-top: 70px; }
 .await-grid .unit-row .t { font-weight: 400; margin-left: 10px; opacity: .8; }
 .await-grid td { padding: 5px 10px; border-top: 1px solid var(--line-2); }
 .await-grid td.sel { width: 28px; }

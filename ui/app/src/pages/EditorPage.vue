@@ -190,7 +190,7 @@ onBeforeUnmount(() => {
 <template>
   <q-page padding>
     <PageHeader :title="`Edit ${file}`" :sub="status"
-      :crumbs="[{ label: 'Programme', to: '/' }, { label: id.slice(0, 6), to: `/module/${id.slice(0, 6)}` }, { label: id, to: `/topic/${id}` }]">
+      :crumbs="[{ label: 'Programme', to: '/' }, { label: id.slice(0, 6), to: `/module/${id.slice(0, 6)}` }, { label: id.slice(7, 10), to: `/module/${id.slice(0, 6)}?unit=${id.slice(7, 10)}` }, { label: id.slice(11), to: `/topic/${id}` }]">
       <q-btn-toggle :model-value="lang" dense no-caps unelevated toggle-color="primary"
         :options="[{ label: 'English', value: 'en' }, { label: 'Mandarin', value: 'zh' }]"
         @update:model-value="(l) => router.push(`/edit/${id}?lang=${l}`)" />

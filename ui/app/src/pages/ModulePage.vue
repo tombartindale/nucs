@@ -2,7 +2,8 @@
 // Module: units down, topics across, one split cell per topic (English | Mandarin).
 // Stage is shown by position; colour marks only stale and blocked. Bulk actions live here,
 // where the scope is visible, and say what they will do before they run.
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import type { LangState, ModulePlanResponse, StepState, TopicStatus } from '@beacon/shared';
 import PageHeader from '@/components/PageHeader.vue';
 import StagePips from '@/components/StagePips.vue';
@@ -14,6 +15,7 @@ import { useBeacon } from '@/stores/beacon';
 
 const BULK = ['validate', 'render', 'script', 'bumpers', 'cues', 'compose', 'package'];
 const props = defineProps<{ module: string }>();
+const route = useRoute();
 const beacon = useBeacon();
 
 const state = reactive({
@@ -88,6 +90,15 @@ const pipelineTip = (r: TopicStatus) => [['en', r.en] as const, ...langs.value.m
   .flatMap(([l, st]) => stepIssues(st).map(([k, v]) => `${l.toUpperCase()} ${k}: ${v === 'failed' ? 'failed' : 'out of date'}`)).join('\n');
 const pipelineSeverity = (r: TopicStatus) => [r.en, ...langs.value.map((l) => r[l])]
   .flatMap(stepIssues).some(([, v]) => v === 'failed') ? 'failed' : pipelineTip(r) ? 'stale' : null;
+// Breadcrumbs from a topic link here with ?unit=U01: scroll that unit's heading into view.
+const focusUnit = ref('');
+watch([() => route.query.unit, () => units.value.length], async ([u]) => {
+  if (typeof u !== 'string' || !units.value.includes(u)) return;
+  await nextTick();
+  focusUnit.value = u;
+  // After the router's own scroll reset and the first paint of the table.
+  setTimeout(() => document.querySelector(`[data-unit="${u}"]`)?.scrollIntoView({ block: 'start' }), 150);
+}, { immediate: true });
 const unitPlan = (unit: string) => plan.value?.plan.units.find((u) => u.unit === unit);
 const waitOptions = computed(() => [{ label: 'anything', value: '' },
   ...AWAITING.map((a) => ({ label: `waiting on ${a.label.toLowerCase()}`, value: a.key })),
@@ -498,7 +509,7 @@ async function sendReminder() {
               </tr>
             </thead>
             <tbody v-for="g in grid" :key="g.unit">
-              <tr class="unit-row">
+              <tr :class="['unit-row', { focus: focusUnit === g.unit }]" :data-unit="g.unit">
                 <th :colspan="99">
                   {{ g.unit }}<span class="t">{{ m.unit_titles?.[g.unit] || '' }}</span>
                   <span v-if="unitPlan(g.unit)?.deliveryDate" class="plan-tag"
