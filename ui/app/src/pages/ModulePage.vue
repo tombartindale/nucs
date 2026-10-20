@@ -302,7 +302,7 @@ async function sendReminder() {
           <q-item-section>
             <q-item-label>Delivery planning</q-item-label>
             <q-item-label caption>
-              {{ plan.plan.units.some((u) => u.deliveryDate) ? plan.plan.units.filter((u) => u.deliveryDate).map((u) => `${u.unit} ${u.deliveryDate}`).join(', ') : 'No delivery dates agreed yet' }}
+              {{ plan.plan.units.some((u) => u.deliveryDate) ? `${plan.plan.units.filter((u) => u.deliveryDate).length} of ${plan.plan.units.length} units dated` : 'No delivery dates agreed yet' }}
               <span v-if="plan.ownerName || plan.ownerEmail"> · {{ plan.ownerName }}{{ plan.ownerName && plan.ownerEmail ? ' · ' : '' }}{{ plan.ownerEmail }}</span>
             </q-item-label>
           </q-item-section>
