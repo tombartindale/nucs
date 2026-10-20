@@ -493,11 +493,18 @@ class TopicState:
                          "bytes": fi.size, "mtime": _iso(fi.mtime), "hydration": fi.hydration if fi.exists else None,
                          "stale": stale if fi.exists else None})
 
+        # Every distinct [compose.layouts] frame size beside widescreen's own: bcn bumpers
+        # builds a full-bleed variant per size (see bumpers.py), named with this tag.
+        ws = self.ctx.cfg["compose"]["layouts"][DEFAULT_LAYOUT]
+        extra_res = sorted({f"{lo['width']}x{lo['height']}" for lo in self.ctx.cfg["compose"]["layouts"].values()
+                            if (lo["width"], lo["height"]) != (ws["width"], ws["height"])})
+
         def bumpers(lang: str) -> None:
             src = fsutil.mtime(t.src(lang)) or 0
-            for kind, p in (("bumper_card", t.bumper_card("intro", lang)), ("bumper_card", t.bumper_card("outro", lang)),
-                            ("bumper", t.bumper("intro", lang)), ("bumper", t.bumper("outro", lang))):
-                add(str(p.relative_to(t.dir)), p, lang, (fsutil.mtime(p) or 0) < src if storage.present(p) else None, kind=kind)
+            for res in (None, *extra_res):
+                for kind, p in (("bumper_card", t.bumper_card("intro", lang, res)), ("bumper_card", t.bumper_card("outro", lang, res)),
+                                ("bumper", t.bumper("intro", lang, res)), ("bumper", t.bumper("outro", lang, res))):
+                    add(str(p.relative_to(t.dir)), p, lang, (fsutil.mtime(p) or 0) < src if storage.present(p) else None, kind=kind)
 
         def stale_of(step: str, lang: str) -> bool | None:
             s = self.steps.get((step, lang))

@@ -165,13 +165,20 @@ class Topic:
         """The delivered subtitle file: master.srt shifted by the intro's duration, never burned in."""
         return self.build / "subtitles" / f"{self.id}.{lang}.delivery.srt"
 
-    def bumper_card(self, kind: str, lang: str = "en") -> Path:
-        """The still behind a bumper: 'intro' is the topic title, 'outro' the logo."""
-        return self.build / "bumpers" / f"{self.id}.{kind}-card.{lang}.png"
+    def bumper_card(self, kind: str, lang: str = "en", res: str | None = None) -> Path:
+        """The still behind a bumper: 'intro' is the topic title, 'outro' the logo.
 
-    def bumper(self, kind: str, lang: str = "en") -> Path:
-        """kind is "intro" or "outro"."""
-        return self.build / "bumpers" / f"{self.id}.{kind}.{lang}.mp4"
+        res names a frame size other than [compose.layouts].widescreen's own (e.g. "1080x1920"),
+        for a bumper built to match a vertical layout's aspect ratio instead of being stretched
+        to fit it afterward; omitted (None) is widescreen's own size, named as before so a
+        programme using only the default layout sees no filename change."""
+        tag = f".{res}" if res else ""
+        return self.build / "bumpers" / f"{self.id}.{kind}-card{tag}.{lang}.png"
+
+    def bumper(self, kind: str, lang: str = "en", res: str | None = None) -> Path:
+        """kind is "intro" or "outro". res: see bumper_card."""
+        tag = f".{res}" if res else ""
+        return self.build / "bumpers" / f"{self.id}.{kind}{tag}.{lang}.mp4"
 
     @property
     def review_file(self) -> Path:

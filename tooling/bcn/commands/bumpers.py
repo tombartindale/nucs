@@ -5,12 +5,19 @@ topic.md or topic.zh.md), laid over the theme's background video (or on its back
 none). The outro is the logo the theme names, on its own. Cards are rendered to PNG
 with the pinned Chrome; ffmpeg holds each for the durations in the theme's [bumper]
 table with a silent stereo track so it joins cleanly to the edit. The intro starts
-on its first frame and fades to black; the outro fades from and to black. Size and frame rate follow [delivery] in programme.toml,
-so the bumpers match the master.
+on its first frame and fades to black; the outro fades from and to black. Frame rate
+follows [delivery] in programme.toml, so the bumpers match the master.
+
+One full set is built per distinct frame size among [compose.layouts] (e.g. widescreen's
+16:9 and the vertical presets' 9:16), each full-bleed at its own aspect ratio, so compose
+can deliver a vertical layout's bumper filling the frame rather than letterboxed inside it.
 
 Outputs, in build/bumpers/: <id>.intro-card.<lang>.png, <id>.outro-card.<lang>.png,
-<id>.intro.<lang>.mp4 and <id>.outro.<lang>.mp4. compose wraps the draft in them and
-package delivers them beside the master. The master and the cue sheet are never changed.
+<id>.intro.<lang>.mp4 and <id>.outro.<lang>.mp4 for the default (widescreen) size; every
+other distinct size gets the same names with its own ".<width>x<height>" tag before the
+language suffix (tree.py's bumper()/bumper_card()). compose wraps the draft in the variant
+matching its own layout; package delivers the default-size ones beside the master. The
+master and the cue sheet are never changed.
 """
 
 from __future__ import annotations
@@ -28,7 +35,7 @@ from ..markdown import parse
 from ..media import ffmpeg
 from ..progress import TopicProgress, run as run_proc
 from ..runner import require_input, run_topics, try_skip
-from ..tree import Target, Topic
+from ..tree import DEFAULT_LAYOUT, Target, Topic
 
 HELP = "intro and outro title-card videos"
 
@@ -51,9 +58,8 @@ def font_faces_css(theme: Theme) -> str:
         for f in theme.font_faces or [])
 
 
-def _page(theme: Theme, lang: str, body: str, extra_css: str = "", transparent: bool = False) -> str:
+def _page(theme: Theme, lang: str, body: str, W: int, H: int, extra_css: str = "", transparent: bool = False) -> str:
     b = theme.bumper
-    W, H = theme.width, theme.height
     background = "transparent" if transparent else b["background"]
     faces = font_faces_css(theme)
     return f"""<!doctype html><html lang="{'zh-Hans' if lang == 'zh' else 'en'}"><head><meta charset="utf-8"><style>
@@ -66,14 +72,21 @@ main {{ width: {W}px; height: {H}px; box-sizing: border-box; padding: {round(H *
 """
 
 
-def intro_card_html(theme: Theme, title: str, lang: str, over_video: bool = False, module: str = "") -> str:
+def intro_card_html(theme: Theme, title: str, lang: str, W: int, H: int, over_video: bool = False, module: str = "") -> str:
     """The intro: the module code above the topic title. No logo; that is the outro.
 
     Over a background video the card is transparent and the title carries a soft
     shadow, so it stays legible whatever the video does behind it.
+
+    W, H are this card's own frame size, which may differ from the theme's own (theme.width/
+    height): a vertical layout's bumper is rendered full-bleed at its own aspect ratio rather
+    than built once at the theme's size and stretched/letterboxed afterward. Sizes expressed
+    in theme.toml at the theme's own resolution (the module code's font size here; the logo's
+    height in outro_card_html) are scaled by k so they read the same relative size at any
+    frame size.
     """
     b = theme.bumper
-    W, H = theme.width, theme.height
+    k = H / theme.height
     zh = "word-break: normal; line-break: strict;" if lang == "zh" else ""
     shadow = "text-shadow: 0 2px 24px rgba(0, 0, 0, .55);" if over_video else ""
     css = f"""
@@ -83,17 +96,18 @@ def intro_card_html(theme: Theme, title: str, lang: str, over_video: bool = Fals
 #title {{ margin: 0; font-family: {_font_stack(theme.fonts[lang])}; font-weight: {theme.title_weight}; color: {b['color']};
           line-height: 1.2; text-align: center; text-wrap: balance; {zh} {shadow} }}"""
     code = f'<div id="module">{html.escape(module)}</div>' if module else ""
-    return _page(theme, lang, f'{code}<div id="box"><h1 id="title">{html.escape(title)}</h1></div>', css,
+    return _page(theme, lang, f'{code}<div id="box"><h1 id="title">{html.escape(title)}</h1></div>', W, H, css,
                  transparent=over_video)
 
 
-def outro_card_html(theme: Theme, lang: str) -> str:
-    """The outro: the logo alone, centred. Blank background if the theme names no logo."""
+def outro_card_html(theme: Theme, lang: str, W: int, H: int) -> str:
+    """The outro: the logo alone, centred. Blank background if the theme names no logo.
+    W, H: see intro_card_html."""
     b = theme.bumper
-    W = theme.width
+    k = H / theme.height
     logo = f"<img id='logo' src='{theme.asset(b['logo']).as_uri()}' alt=''>" if b["logo"] else ""
-    css = f"#logo {{ height: {b['logo_height']:.0f}px; max-width: {round(W * 0.6)}px; object-fit: contain; }}"
-    return _page(theme, lang, logo, css)
+    css = f"#logo {{ height: {b['logo_height'] * k:.0f}px; max-width: {round(W * 0.6)}px; object-fit: contain; }}"
+    return _page(theme, lang, logo, W, H, css)
 
 
 def _video_args(d: dict, seconds: float, fade: float, background: str, still: str, video: Path | None = None,
@@ -124,9 +138,22 @@ def bumpers_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, lang
     src = t.src(lang)
     require_input(t, src, lang)
     theme = load_theme(t.root, resolve_theme_name(cfg, theme_flag))
-    intro_card, outro_card = t.bumper_card("intro", lang), t.bumper_card("outro", lang)
-    intro, outro = t.bumper("intro", lang), t.bumper("outro", lang)
-    outputs = [intro_card, outro_card, intro, outro]
+
+    # One set of cards/videos per distinct frame size among [compose.layouts], each rendered
+    # full-bleed at its own aspect ratio (so a vertical layout's bumper fills its frame instead
+    # of being letterboxed inside it by compose's re-encode). widescreen's own size is the
+    # default (res=None), named exactly as before so a programme using only the default layout
+    # sees no filename change.
+    ws = cfg["compose"]["layouts"][DEFAULT_LAYOUT]
+    sizes: dict[str | None, tuple[int, int]] = {}
+    for layout in cfg["compose"]["layouts"].values():
+        w, h = layout["width"], layout["height"]
+        sizes[None if (w, h) == (ws["width"], ws["height"]) else f"{w}x{h}"] = (w, h)
+
+    targets = {res: {"intro_card": t.bumper_card("intro", lang, res), "outro_card": t.bumper_card("outro", lang, res),
+                     "intro": t.bumper("intro", lang, res), "outro": t.bumper("outro", lang, res)}
+              for res in sizes}
+    outputs = [p for paths in targets.values() for p in paths.values()]
     # The single shared card from before intro and outro had cards of their own.
     old_card = t.build / "bumpers" / f"{t.id}.card.{lang}.png"
     inputs = [src, t.root / "programme.toml", *theme.files(), *theme.bumper_media()]
@@ -141,55 +168,66 @@ def bumpers_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, lang
                                         hint="Put the logo in the theme directory and set logo under [bumper] in theme.toml."))
     tl = tools.require(cfg, "marp", "chrome", "ffmpeg")
     b = theme.bumper
-    # Bumpers aren't layout-aware: compose rescales the intro/outro it delivers to each
-    # layout's own frame size anyway (see compose.py's bumper re-encode), so the card/video
-    # built here just needs some base resolution — the default (widescreen) layout's, same
-    # as every programme already got before [delivery] carried a size of its own.
-    d = {**cfg["delivery"], "width": cfg["compose"]["layouts"]["widescreen"]["width"],
-         "height": cfg["compose"]["layouts"]["widescreen"]["height"]}
+    video = theme.asset(b["background_video"]) if b["background_video"] else None
 
     work = t.build / f".bumpers-{lang}"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
+    variants: list[dict] = []
     try:
-        video = theme.asset(b["background_video"]) if b["background_video"] else None
-        (work / "intro-card.html").write_text(intro_card_html(theme, title, lang, over_video=bool(video), module=t.module), encoding="utf-8")
-        (work / "outro-card.html").write_text(outro_card_html(theme, lang), encoding="utf-8")
-        hi, lo = TITLE_PX[lang]
-        fit: dict = {}
-        for i, kind in enumerate(("intro", "outro")):
-            tp.update(5 + 10 * i, f"rendering {kind} card")
-            transparent = ["transparent"] if kind == "intro" and video else []
-            code, out, err = run_proc([tl.node or "node", str(tools.NODE_DIR / "card.mjs"), str(work / f"{kind}-card.html"),
-                                       str(work / f"{kind}-card.png"), str(theme.width), str(theme.height), str(hi), str(lo),
-                                       *transparent],
-                                      env={"CHROME_PATH": tl.chrome or ""}, cwd=str(tools.NODE_DIR), timeout=180)
-            if code != 0 or not (work / f"{kind}-card.png").is_file():
-                raise Fail("RENDER_FAILED", f"Rendering the {kind} card failed (exit {code}).", file=src.name,
-                           data={"stderr": err[-2000:]})
-            if kind == "intro":
-                fit = json.loads(out.strip().splitlines()[-1])
-        if not fit["fits"]:
-            r.diagnostics.append(Diagnostic("BUMPER_TITLE_FIT", f"The title does not fit the card even at {fit['font_size']}px.",
-                                            topic=t.id, lang=lang, file=src.name, hint="Shorten the title."))
-        for i, (kind, seconds) in enumerate((("intro", b["intro_seconds"]), ("outro", b["outro_seconds"]))):
-            tp.update(20 + 40 * i, f"encoding {kind}")
-            ffmpeg(tl, [*_video_args(d, seconds, b["fade_seconds"], b["background"], f"{kind}-card.png",
-                                     video if kind == "intro" else None, fade_in=kind != "intro"), f"{kind}.mp4"],
-                   duration=seconds, on_pct=lambda pct, i=i, kind=kind: tp.update(20 + 40 * i + pct * 0.4, f"encoding {kind}"), cwd=str(work))
-        for name, dest in (("intro-card.png", intro_card), ("outro-card.png", outro_card), ("intro.mp4", intro), ("outro.mp4", outro)):
-            with fsutil.atomic_path(dest) as tmp:
-                shutil.move(str(work / name), tmp)
+        slot = 90 / len(sizes)
+        for ri, (res, (W, H)) in enumerate(sizes.items()):
+            base = ri * slot
+            tag = res or "widescreen"
+            # TITLE_PX is tuned at the theme's own declared resolution; k scales it (and the
+            # outro logo) to read the same relative size at this card's own frame size.
+            k = H / theme.height
+            hi, lo = round(TITLE_PX[lang][0] * k), round(TITLE_PX[lang][1] * k)
+            (work / f"{tag}-intro-card.html").write_text(
+                intro_card_html(theme, title, lang, W, H, over_video=bool(video), module=t.module), encoding="utf-8")
+            (work / f"{tag}-outro-card.html").write_text(outro_card_html(theme, lang, W, H), encoding="utf-8")
+            fit: dict = {}
+            for i, kind in enumerate(("intro", "outro")):
+                tp.update(base + slot * (0.05 + 0.1 * i), f"rendering {kind} card ({tag})")
+                transparent = ["transparent"] if kind == "intro" and video else []
+                code, out, err = run_proc(
+                    [tl.node or "node", str(tools.NODE_DIR / "card.mjs"), str(work / f"{tag}-{kind}-card.html"),
+                     str(work / f"{tag}-{kind}-card.png"), str(W), str(H), str(hi), str(lo), *transparent],
+                    env={"CHROME_PATH": tl.chrome or ""}, cwd=str(tools.NODE_DIR), timeout=180)
+                if code != 0 or not (work / f"{tag}-{kind}-card.png").is_file():
+                    raise Fail("RENDER_FAILED", f"Rendering the {kind} card ({tag}) failed (exit {code}).", file=src.name,
+                               data={"stderr": err[-2000:]})
+                if kind == "intro":
+                    fit = json.loads(out.strip().splitlines()[-1])
+            if not fit["fits"]:
+                r.diagnostics.append(Diagnostic("BUMPER_TITLE_FIT",
+                    f"The title does not fit the {W}x{H} card even at {fit['font_size']}px.",
+                    topic=t.id, lang=lang, file=src.name, hint="Shorten the title."))
+            d = {**cfg["delivery"], "width": W, "height": H}
+            for i, (kind, seconds) in enumerate((("intro", b["intro_seconds"]), ("outro", b["outro_seconds"]))):
+                tp.update(base + slot * (0.2 + 0.4 * i), f"encoding {kind} ({tag})")
+                ffmpeg(tl, [*_video_args(d, seconds, b["fade_seconds"], b["background"], f"{tag}-{kind}-card.png",
+                                         video if kind == "intro" else None, fade_in=kind != "intro"), f"{tag}-{kind}.mp4"],
+                       duration=seconds,
+                       on_pct=lambda pct, base=base, i=i, kind=kind, tag=tag: tp.update(
+                           base + slot * (0.2 + 0.4 * i) + pct / 100 * slot * 0.4, f"encoding {kind} ({tag})"),
+                       cwd=str(work))
+            dest = targets[res]
+            for name, key in (("intro-card.png", "intro_card"), ("outro-card.png", "outro_card"),
+                              ("intro.mp4", "intro"), ("outro.mp4", "outro")):
+                with fsutil.atomic_path(dest[key]) as tmp:
+                    shutil.move(str(work / f"{tag}-{name}"), tmp)
+            variants.append({"res": res, "resolution": [W, H], "font_size": fit["font_size"]})
         old_card.unlink(missing_ok=True)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
-    for f, kind in ((intro_card, "bumper_card"), (outro_card, "bumper_card"), (intro, "bumper"), (outro, "bumper")):
-        r.artifacts.append(Envelope.artifact_for(t.root, f, kind))
+    for paths in targets.values():
+        for key, f in paths.items():
+            r.artifacts.append(Envelope.artifact_for(t.root, f, "bumper_card" if key.endswith("card") else "bumper"))
     r.extra.update({"title": title, "logo": bool(b["logo"]), "background_video": bool(b["background_video"]),
-                    "font_size": fit["font_size"],
-                    "intro_seconds": b["intro_seconds"], "outro_seconds": b["outro_seconds"],
-                    "resolution": [d["width"], d["height"]], "fps": d["fps"]})
+                    "intro_seconds": b["intro_seconds"], "outro_seconds": b["outro_seconds"], "fps": cfg["delivery"]["fps"],
+                    "variants": variants})
     tp.update(100, "done")
 
 
