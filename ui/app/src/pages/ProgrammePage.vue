@@ -37,17 +37,18 @@ const milestoneChips = computed(() => {
   return out;
 });
 
-// The programme-wide view: every module with at least one unit's delivery date agreed,
-// worst-behind first (worst-unit-wins rollup — see planning.ts), so a producer scanning
-// across all modules sees what needs attention without opening each one.
-const scheduleRows = computed(() => Object.entries(plans.value)
-  .filter(([, p]) => p.units.some((u) => u.deliveryDate !== null))
-  .map(([name, p]) => ({
-    name,
-    dates: p.units.filter((u) => u.deliveryDate !== null).map((u) => `${u.unit} ${u.deliveryDate}`).join(', '),
-    onTrack: p.onTrack, daysBehind: p.daysBehind, next: milestoneChip(name),
-  }))
-  .sort((a, b) => b.daysBehind - a.daysBehind || a.name.localeCompare(b.name)));
+// Worst-unit-wins on-track status (see planning.ts) — null until at least one unit has an
+// agreed delivery date, so a module with none set shows no chip at all.
+function onTrackChip(name: string): { label: string; kind: string } | null {
+  const p = plans.value[name];
+  if (!p || p.onTrack === null) return null;
+  return { label: p.onTrack ? 'on track' : `${plural(p.daysBehind, 'day')} behind`, kind: p.onTrack ? 'ok' : 'blocked' };
+}
+const onTrackChips = computed(() => {
+  const out: Record<string, { label: string; kind: string } | null> = {};
+  for (const name of Object.keys(plans.value)) out[name] = onTrackChip(name);
+  return out;
+});
 
 const env = computed(() => beacon.status);
 const s = computed(() => env.value!.summary);
@@ -112,28 +113,6 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `28px repeat(${ladder.v
         </div>
       </div>
 
-      <q-card v-if="Object.keys(plans).length" flat bordered class="q-mb-md">
-        <q-card-section class="row items-center q-pb-sm">
-          <div class="text-subtitle1 text-weight-medium">Delivery schedule</div>
-          <q-space />
-          <span class="text-caption text-grey-7">How each module's plan compares to today</span>
-        </q-card-section>
-        <q-list v-if="scheduleRows.length" separator>
-          <q-item v-for="r in scheduleRows" :key="r.name" clickable :to="`/module/${r.name}`">
-            <q-item-section>
-              <q-item-label class="text-weight-bold">{{ r.name }}</q-item-label>
-              <q-item-label caption>Delivery {{ r.dates }}{{ r.next ? ` · ${r.next.label}` : '' }}</q-item-label>
-            </q-item-section>
-            <q-item-section side>
-              <StateChip :kind="r.onTrack ? 'ok' : 'blocked'" :label="r.onTrack ? 'on track' : `${plural(r.daysBehind, 'day')} behind`" />
-            </q-item-section>
-          </q-item>
-        </q-list>
-        <q-card-section v-else class="text-grey-7">
-          No modules have a delivery date set yet. Open a module's Delivery planning section to set one.
-        </q-card-section>
-      </q-card>
-
       <q-card flat bordered>
         <q-list separator>
           <!-- Column headings: laid out exactly like a module row, so the columns line up. -->
@@ -172,6 +151,9 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `28px repeat(${ladder.v
               </div>
             </q-item-section>
             <q-item-section side class="prog-flags row items-center gap-xs" style="flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-content: center">
+              <StateChip v-if="onTrackChips[name]" :kind="onTrackChips[name]!.kind" :label="onTrackChips[name]!.label">
+                <q-tooltip>Delivery status across this module's units · worst unit wins</q-tooltip>
+              </StateChip>
               <StateChip v-if="milestoneChips[name]" :kind="milestoneChips[name]!.kind" :label="milestoneChips[name]!.label">
                 <q-tooltip>Next delivery-planning milestone · see the module page for details</q-tooltip>
               </StateChip>
