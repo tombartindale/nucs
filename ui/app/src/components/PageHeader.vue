@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // Crumbs, a title, a line under it, and the page's own actions on the right.
-defineProps<{ title: string; sub?: string; crumbs?: Array<{ label: string; to?: string }> }>();
+// `stacked` puts the actions on their own row under the title, for pages with many of them.
+defineProps<{ title: string; sub?: string; crumbs?: Array<{ label: string; to?: string }>; stacked?: boolean }>();
 </script>
 
 <template>
-  <div class="row items-end q-col-gutter-md q-mb-md no-wrap">
+  <div :class="stacked ? 'column q-gutter-y-md q-mb-md' : 'row items-end q-col-gutter-md q-mb-md no-wrap'">
     <div class="col">
       <div v-if="crumbs?.length" class="crumbs q-mb-xs">
         <template v-for="(c, i) in crumbs" :key="i">
@@ -15,6 +16,6 @@ defineProps<{ title: string; sub?: string; crumbs?: Array<{ label: string; to?: 
       <div class="text-h5 text-weight-medium">{{ title }}</div>
       <div v-if="sub || $slots.sub" class="text-grey-7 q-mt-xs"><slot name="sub">{{ sub }}</slot></div>
     </div>
-    <div class="col-auto row items-center gap-sm"><slot /></div>
+    <div :class="stacked ? 'row items-center gap-sm' : 'col-auto row items-center gap-sm'"><slot /></div>
   </div>
 </template>

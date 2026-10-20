@@ -3,13 +3,13 @@
 // Stage is shown by position; colour marks only stale and blocked. Bulk actions live here,
 // where the scope is visible, and say what they will do before they run.
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import type { LangState, ModulePlanResponse, TopicStatus } from '@beacon/shared';
+import type { LangState, ModulePlanResponse, StepState, TopicStatus } from '@beacon/shared';
 import PageHeader from '@/components/PageHeader.vue';
 import StagePips from '@/components/StagePips.vue';
 import StateChip from '@/components/StateChip.vue';
 import { api, fileUrl } from '@/api';
 import { confirm } from '@/composables/confirm';
-import { fmtMinutes, LANG_NAME, plural, STAGE_LABEL, STEP_HELP, topicPath } from '@/format';
+import { fmtAgo, fmtMinutes, LANG_NAME, plural, STAGE_LABEL, STEP_HELP, topicPath } from '@/format';
 import { useBeacon } from '@/stores/beacon';
 
 const BULK = ['validate', 'render', 'script', 'bumpers', 'cues', 'compose', 'package'];
@@ -20,7 +20,7 @@ const state = reactive({
   selected: new Set<string>(),
   lang: 'en' as 'en' | 'zh',    // language for bulk actions
   force: false,
-  filter: { stage: '', lang: 'en' as 'en' | 'zh' | 'both', stale: false, blocked: false },
+  filter: { wait: '', stale: false, blocked: false },
 });
 
 const env = computed(() => beacon.status);
@@ -29,18 +29,73 @@ const m = computed(() => env.value?.summary.modules[props.module]);
 const units = computed(() => [...new Set(rows.value.map((r) => r.unit))].sort());
 const codes = computed(() => [...new Set(rows.value.map((r) => r.code))].sort());
 const grid = computed(() => units.value.map((unit) => ({
-  unit, cells: codes.value.map((c) => rows.value.find((x) => x.unit === unit && x.code === c) ?? null),
+  unit, topics: rows.value.filter((x) => x.unit === unit).sort((a, b) => a.code.localeCompare(b.code)),
   activity: (m.value?.documents || []).find((d) => d.path === `${props.module}/${unit}/activity.md`) ?? null,
 })));
-const stageOptions = computed(() => [{ label: 'any stage', value: '' },
-  ...[...new Set([...(rows.value[0]?.en.stages || []), ...(rows.value[0]?.zh.stages || [])])].map((s) => ({ label: STAGE_LABEL[s], value: s }))]);
 const cols = computed(() => beacon.boot?.prefs.module_columns || { en: true, zh: true });
-const langs = computed(() => (['en', 'zh'] as const).filter((l) => cols.value[l] !== false));
+// Translated languages only: English is the source, shown as the three "awaiting" columns.
+const langs = computed(() => (['zh'] as const).filter((l) => cols.value[l] !== false));
+
+// What we wait for from outside: the draft script, the recording and its subtitles (English
+// source files), then per language whether the translated copy has come back.
+const AWAITING = [
+  { key: 'script', label: 'Script', file: 'topic.md', help: 'Draft script (topic.md)' },
+  { key: 'recording', label: 'Recording', file: 'edit/master.mp4', help: 'Recording (edit/master.mp4)' },
+  { key: 'subtitles', label: 'Subtitles', file: 'edit/master.srt', help: 'Subtitles (edit/master.srt)' },
+] as const;
+type AwaitKey = typeof AWAITING[number]['key'];
+function have(r: TopicStatus, key: AwaitKey) {
+  const file = AWAITING.find((a) => a.key === key)!.file;
+  if (key === 'script' && r.en.stage === 'planned') return false;
+  return r.artifacts.some((a) => a.key === file && a.exists);
+}
+// Translated copy is "in the system" once the stage reaches 'returned' (script + subtitles on disk).
+function translated(r: TopicStatus, lang: 'en' | 'zh') {
+  const l = r[lang], at = l.stages.indexOf('returned');
+  return at >= 0 && l.stage_index >= at;
+}
+function issue(l: LangState): 'error' | 'warn' | null {
+  return l.blocked || l.diagnostics.error ? 'error' : l.diagnostics.warn ? 'warn' : null;
+}
+const issueTip = (l: LangState) => [...l.blockers.map((b) => b.message),
+  l.diagnostics.error ? plural(l.diagnostics.error, 'error') : '', l.diagnostics.warn ? plural(l.diagnostics.warn, 'warning') : ''].filter(Boolean).join('\n');
+const waitingOn = computed(() => Object.fromEntries(AWAITING.map((a) => [a.key, rows.value.filter((r) => !have(r, a.key)).length])) as Record<AwaitKey, number>);
+const waitingTrans = computed(() => Object.fromEntries(langs.value.map((l) => [l, rows.value.filter((r) => !translated(r, l)).length])) as Record<string, number>);
+// Pipeline steps between the awaited inputs and delivery. The compact view collapses them to
+// one icon that only appears when a step has failed or gone stale; the detailed view shows each.
+const DETAIL_KEY = 'beacon.moduleDetail';
+const detail = ref((() => { try { return localStorage.getItem(DETAIL_KEY) === '1'; } catch { return false; } })());
+watch(detail, (v) => { try { localStorage.setItem(DETAIL_KEY, v ? '1' : '0'); } catch { /* private window: fine */ } });
+const stepKeys = (lang: 'en' | 'zh') => [...new Set(rows.value.flatMap((r) => Object.keys(r[lang].steps)))];
+const STEP_ICON = {
+  ok: ['check', 'positive'], failed: ['error', 'negative'], stale: ['update', 'warning'], draft: ['edit_note', 'warning'], none: ['remove', 'grey-5'],
+} as const;
+function stepStatus(s: StepState | undefined): keyof typeof STEP_ICON {
+  if (!s || !s.exists) return 'none';
+  if (s.ok === false) return 'failed';
+  if (s.fresh === false) return 'stale';
+  if (s.draft) return 'draft';
+  return 'ok';
+}
+const STEP_WORD = { ok: 'up to date', failed: 'failed', stale: 'out of date (inputs changed since it ran)', draft: 'draft only, not delivered', none: 'not run yet' };
+const stepTip = (name: string, s: StepState | undefined) =>
+  `${name}: ${STEP_WORD[stepStatus(s)]}${s?.time ? `\nran ${fmtAgo(s.time)}` : ''}`;
+// Steps with a problem (failed or stale), for the compact view's single icon.
+function stepIssues(l: LangState) {
+  return Object.entries(l.steps).map(([k, s]) => [k, stepStatus(s)] as const).filter(([, st]) => st === 'failed' || st === 'stale');
+}
+const pipelineTip = (r: TopicStatus) => [['en', r.en] as const, ...langs.value.map((l) => [l, r[l]] as const)]
+  .flatMap(([l, st]) => stepIssues(st).map(([k, v]) => `${l.toUpperCase()} ${k}: ${v === 'failed' ? 'failed' : 'out of date'}`)).join('\n');
+const pipelineSeverity = (r: TopicStatus) => [r.en, ...langs.value.map((l) => r[l])]
+  .flatMap(stepIssues).some(([, v]) => v === 'failed') ? 'failed' : pipelineTip(r) ? 'stale' : null;
+const unitPlan = (unit: string) => plan.value?.plan.units.find((u) => u.unit === unit);
+const waitOptions = computed(() => [{ label: 'anything', value: '' },
+  ...AWAITING.map((a) => ({ label: `waiting on ${a.label.toLowerCase()}`, value: a.key })),
+  ...langs.value.map((l) => ({ label: `waiting on ${LANG_NAME[l]}`, value: l }))]);
 
 function matches(r: TopicStatus) {
-  const f = state.filter;
-  const sides = f.lang === 'both' ? [r.en, r.zh] : [r[f.lang]];
-  if (f.stage && !sides.some((s) => s.stage === f.stage)) return false;
+  const f = state.filter, sides = [r.en, ...langs.value.map((l) => r[l])];
+  if (f.wait && (f.wait in waitingOn.value ? have(r, f.wait as AwaitKey) : translated(r, f.wait as 'zh'))) return false;
   if (f.stale && !sides.some((s) => s.stale)) return false;
   if (f.blocked && !sides.some((s) => s.blocked)) return false;
   return true;
@@ -240,8 +295,8 @@ async function sendReminder() {
     <div v-if="!env" class="text-grey-7 q-pa-lg">Reading the programme…</div>
     <div v-else-if="!m" class="text-grey-7 q-pa-lg">No module {{ module }}.</div>
     <template v-else>
-      <PageHeader :title="`${module}${m.title ? ' · ' + m.title : ''}`" :crumbs="[{ label: 'Programme', to: '/' }, { label: module }]"
-        :sub="`${m.topics} topics · English ${m.complete.en} complete · Mandarin ${m.complete.zh} complete`">
+      <PageHeader stacked :title="`${module}${m.title ? ' · ' + m.title : ''}`" :crumbs="[{ label: 'Programme', to: '/' }, { label: module }]"
+        :sub="`${m.topics} topics · waiting on ${waitingOn.script} scripts · ${waitingOn.recording} recordings · ${waitingOn.subtitles} subtitles`">
         <StateChip v-if="m.blocked" kind="blocked" :label="`${m.blocked} blocked`" />
         <StateChip v-if="m.stale" kind="stale" :label="`${m.stale} stale`" />
         <StateChip v-if="m.cloud" kind="cloud" :label="`☁ ${m.cloud} cloud-only`" />
@@ -403,86 +458,137 @@ async function sendReminder() {
       <q-card flat bordered>
         <q-card-section class="row items-center gap-sm">
           <strong class="text-caption">Show</strong>
-          <q-select v-model="state.filter.stage" dense outlined emit-value map-options :options="stageOptions" style="min-width: 150px" aria-label="Stage" />
-          <q-select v-model="state.filter.lang" dense outlined emit-value map-options style="min-width: 150px" aria-label="Language"
-            :options="[{ label: 'English', value: 'en' }, { label: 'Mandarin', value: 'zh' }, { label: 'either language', value: 'both' }]" />
+          <q-select v-model="state.filter.wait" dense outlined emit-value map-options :options="waitOptions" style="min-width: 190px" aria-label="Waiting on" />
           <q-checkbox v-model="state.filter.stale" dense label="stale" />
           <q-checkbox v-model="state.filter.blocked" dense label="blocked" />
+          <q-toggle v-model="detail" dense label="Show pipeline steps">
+            <q-tooltip>One column per step (validate, render, cues, …) for each language</q-tooltip>
+          </q-toggle>
           <span class="text-caption text-grey-7">{{ visible.length }} of {{ rows.length }} match</span>
           <q-space />
           <q-btn flat dense no-caps label="Select matching" @click="visible.filter((r) => r.has_dir).forEach((r) => state.selected.add(r.topic))" />
           <q-btn flat dense no-caps label="Clear selection" @click="state.selected.clear()" />
         </q-card-section>
-        <q-separator />
-        <q-card-section class="row items-center gap-sm bg-grey-2 bulkbar">
-          <strong>{{ nSelected ? `${nSelected} selected` : 'Select topics to act on them' }}</strong>
-          <q-btn-toggle v-model="state.lang" dense no-caps unelevated toggle-color="primary" :disable="!nSelected"
+        <q-separator v-if="nSelected" />
+        <q-card-section v-if="nSelected" class="row items-center gap-sm bg-grey-2 bulkbar">
+          <strong>{{ nSelected }} selected</strong>
+          <q-btn-toggle v-model="state.lang" dense no-caps unelevated toggle-color="primary" 
             :options="[{ label: 'English', value: 'en' }, { label: 'Mandarin', value: 'zh' }]" />
-          <q-btn v-for="c in BULK" :key="c" outline dense no-caps :label="c" :disable="!nSelected" @click="bulk(c)">
+          <q-btn v-for="c in BULK" :key="c" outline dense no-caps :label="c"  @click="bulk(c)">
             <q-tooltip max-width="320px">{{ STEP_HELP[c] }} Runs on the selected topics; you confirm first.</q-tooltip>
           </q-btn>
-          <q-checkbox v-model="state.force" dense label="force" :disable="!nSelected" />
+          <q-checkbox v-model="state.force" dense label="force"  />
           <q-space />
-          <span class="text-caption text-grey-7">Click a cell to open it; ⌘-click or tick to select.</span>
+          
         </q-card-section>
         <q-card-section class="scroll">
-          <table class="topic-grid">
-            <thead><tr><th></th><th v-for="c in codes" :key="c">{{ c }}</th><th>Activity</th></tr></thead>
-            <tbody>
-              <tr v-for="row in grid" :key="row.unit">
-                <th class="unit">
-                  {{ row.unit }}<span class="t">{{ m.unit_titles?.[row.unit] || '' }}</span>
+          <table class="await-grid">
+            <thead>
+              <tr>
+                <th></th><th>Topic</th>
+                <th v-for="a in AWAITING" :key="a.key" class="c">{{ a.label }}<span class="n">{{ rows.length - waitingOn[a.key] }}/{{ rows.length }}</span></th>
+                <template v-if="detail">
+                  <th v-for="k in stepKeys('en')" :key="`en-${k}`" :class="['c st', { sep: k === stepKeys('en')[0] }]">{{ k }}<span class="n">en</span></th>
+                </template>
+                <th v-if="!detail" class="c sep">Pipeline<span class="n">issues</span></th>
+                <template v-for="l in langs" :key="l">
+                  <th class="c sep">{{ LANG_NAME[l] }}<span class="n">{{ rows.length - waitingTrans[l] }}/{{ rows.length }}</span></th>
+                  <template v-if="detail"><th v-for="k in stepKeys(l)" :key="`${l}-${k}`" class="c st">{{ k }}<span class="n">{{ l }}</span></th></template>
+                </template>
+              </tr>
+            </thead>
+            <tbody v-for="g in grid" :key="g.unit">
+              <tr class="unit-row">
+                <th :colspan="99">
+                  {{ g.unit }}<span class="t">{{ m.unit_titles?.[g.unit] || '' }}</span>
+                  <span v-if="unitPlan(g.unit)?.deliveryDate" class="plan-tag"
+                    :class="unitPlan(g.unit)!.onTrack === false ? 'text-negative' : 'text-positive'">
+                    <q-icon name="schedule" size="18px" />
+                    due {{ unitPlan(g.unit)!.deliveryDate }}<template v-if="unitPlan(g.unit)!.onTrack !== null"> · {{ unitPlan(g.unit)!.onTrack ? 'on track' : `${plural(unitPlan(g.unit)!.daysBehind, 'day')} behind` }}</template>
+                  </span>
+                  <span v-else-if="plan" class="plan-tag text-grey-6">no delivery date</span>
+                  <q-btn-dropdown v-if="g.activity?.exists" split outline dense no-caps size="sm" label="activity" class="q-ml-md" :to="`/edit-doc/${g.activity.path}`">
+                    <q-badge v-if="g.activity.errors" color="negative" floating>{{ g.activity.errors }}</q-badge>
+                    <q-badge v-else-if="g.activity.warnings" color="warning" floating>{{ g.activity.warnings }}</q-badge>
+                    <q-list>
+                      <q-item clickable v-close-popup :to="`/doc/${g.activity.path}`">
+                        <q-item-section avatar><q-icon name="visibility" /></q-item-section>
+                        <q-item-section>View</q-item-section>
+                      </q-item>
+                      <q-item clickable v-close-popup :href="fileUrl(g.activity.path, null, `download=${module}-${g.unit}-activity.md`)">
+                        <q-item-section avatar><q-icon name="download" color="primary" /></q-item-section>
+                        <q-item-section>Download</q-item-section>
+                      </q-item>
+                      <q-item v-if="g.activity.quiz?.exists" clickable v-close-popup :href="fileUrl(g.activity.quiz.package, null, 'download=1')">
+                        <q-item-section avatar><q-icon name="download" :color="g.activity.quiz.stale ? 'warning' : 'primary'" /></q-item-section>
+                        <q-item-section>{{ g.activity.quiz.stale ? 'Download QTI (out of date)' : `Download QTI · ${plural(g.activity.quiz.questions, 'question')}` }}</q-item-section>
+                      </q-item>
+                      <q-item v-if="g.activity.quiz && (!g.activity.quiz.exists || g.activity.quiz.stale)" clickable v-close-popup
+                        @click="beacon.runJob('qti', [`${module}/${g.unit}`], { force: true })">
+                        <q-item-section avatar><q-icon name="quiz" /></q-item-section>
+                        <q-item-section>{{ g.activity.quiz.exists ? 'Update QTI' : 'Export QTI' }}</q-item-section>
+                      </q-item>
+                    </q-list>
+                  </q-btn-dropdown>
                 </th>
-                <td v-for="(r, i) in row.cells" :key="codes[i]">
-                  <a v-if="r" :href="`#/topic/${r.topic}`" @click="cellClick($event, r)"
-                    :class="['cell', { one: langs.length === 1, cloud: isCloud(r), planned: r.en.stage === 'planned', selected: state.selected.has(r.topic), dim: !matches(r) }]">
-                    <span class="code">{{ r.code }}{{ isCloud(r) ? ' ☁' : '' }}</span>
-                    <input v-if="r.en.stage !== 'planned'" type="checkbox" class="sel" :aria-label="`Select ${r.topic}`"
-                      :checked="state.selected.has(r.topic)" @click.stop="toggle(r.topic, ($event.target as HTMLInputElement).checked)">
-                    <div v-for="lang in langs" :key="lang" :class="['half', { stale: r[lang].stale, blocked: r[lang].blocked }]">
-                      <StagePips :index="r[lang].stage_index" :total="r[lang].stages.length" />
-                      <span class="lbl">{{ STAGE_LABEL[r[lang].stage] }}</span>
-                      <q-tooltip style="white-space: pre-line">{{ r.topic }}{{ r.title ? ` — ${r.title}` : '' }}{{ isCloud(r) ? '\ncloud-only files' : '' }}{{ '\n' + halfTip(r[lang], lang) }}</q-tooltip>
-                    </div>
+              </tr>
+              <tr v-for="r in g.topics" :key="r.topic" :class="['topic-row', { cloud: isCloud(r), selected: state.selected.has(r.topic), dim: !matches(r) }]">
+                <td class="sel">
+                  <input v-if="r.has_dir" type="checkbox" :aria-label="`Select ${r.topic}`" :checked="state.selected.has(r.topic)"
+                    @change="toggle(r.topic, ($event.target as HTMLInputElement).checked)">
+                </td>
+                <td>
+                  <a :href="`#/topic/${r.topic}`" class="tname" @click="cellClick($event, r)">
+                    <strong>{{ r.code }}</strong>{{ isCloud(r) ? ' ☁' : '' }}<span v-if="r.title" class="t">{{ r.title }}</span>
                     <span v-if="r.unreviewed_mistranscriptions" class="unrev">✎{{ r.unreviewed_mistranscriptions }}<q-tooltip>suspected mis-transcriptions to review</q-tooltip></span>
                   </a>
                 </td>
-                <td>
-                  <div v-if="row.activity?.exists" class="cell one activity">
-                    <q-btn-dropdown split outline dense no-caps size="sm" label="activity" :to="`/edit-doc/${row.activity.path}`">
-                      <q-badge v-if="row.activity.errors" color="negative" floating>{{ row.activity.errors }}</q-badge>
-                      <q-badge v-else-if="row.activity.warnings" color="warning" floating>{{ row.activity.warnings }}</q-badge>
-                      <q-list>
-                        <q-item clickable v-close-popup :to="`/doc/${row.activity.path}`">
-                          <q-item-section avatar><q-icon name="visibility" /></q-item-section>
-                          <q-item-section>View</q-item-section>
-                        </q-item>
-                        <q-item clickable v-close-popup :href="fileUrl(row.activity.path, null, `download=${module}-${row.unit}-activity.md`)">
-                          <q-item-section avatar><q-icon name="download" color="primary" /></q-item-section>
-                          <q-item-section>Download</q-item-section>
-                        </q-item>
-                        <q-item v-if="row.activity.quiz?.exists" clickable v-close-popup :href="fileUrl(row.activity.quiz.package, null, 'download=1')">
-                          <q-item-section avatar><q-icon name="download" :color="row.activity.quiz.stale ? 'warning' : 'primary'" /></q-item-section>
-                          <q-item-section>{{ row.activity.quiz.stale ? 'Download QTI (out of date)' : `Download QTI · ${plural(row.activity.quiz.questions, 'question')}` }}</q-item-section>
-                        </q-item>
-                        <q-item v-if="row.activity.quiz && (!row.activity.quiz.exists || row.activity.quiz.stale)" clickable v-close-popup
-                          @click="beacon.runJob('qti', [`${module}/${row.unit}`], { force: true })">
-                          <q-item-section avatar><q-icon name="quiz" /></q-item-section>
-                          <q-item-section>{{ row.activity.quiz.exists ? 'Update QTI' : 'Export QTI' }}</q-item-section>
-                        </q-item>
-                      </q-list>
-                    </q-btn-dropdown>
-                  </div>
+                <td v-for="a in AWAITING" :key="a.key" class="c">
+                  <q-icon v-if="have(r, a.key)" :name="a.key === 'script' && issue(r.en) ? (issue(r.en) === 'error' ? 'error' : 'warning') : 'check_circle'"
+                    :color="a.key === 'script' && issue(r.en) ? (issue(r.en) === 'error' ? 'negative' : 'warning') : 'positive'" size="20px">
+                    <q-tooltip style="white-space: pre-line">{{ a.help }} received{{ a.key === 'script' && issue(r.en) ? '\n' + issueTip(r.en) : '' }}</q-tooltip>
+                  </q-icon>
+                  <q-icon v-else name="hourglass_empty" color="grey-6" size="20px"><q-tooltip>Waiting for {{ a.help }}</q-tooltip></q-icon>
                 </td>
+                <template v-if="detail">
+                  <td v-for="k in stepKeys('en')" :key="`en-${k}`" :class="['c st', { sep: k === stepKeys('en')[0] }]">
+                    <q-icon :name="STEP_ICON[stepStatus(r.en.steps[k])][0]" :color="STEP_ICON[stepStatus(r.en.steps[k])][1]" size="18px">
+                      <q-tooltip style="white-space: pre-line">{{ stepTip(`EN ${k}`, r.en.steps[k]) }}</q-tooltip>
+                    </q-icon>
+                  </td>
+                </template>
+                <td v-if="!detail" class="c sep">
+                  <q-icon v-if="pipelineSeverity(r)" :name="pipelineSeverity(r) === 'failed' ? 'error' : 'update'" :color="pipelineSeverity(r) === 'failed' ? 'negative' : 'warning'" size="20px">
+                    <q-tooltip style="white-space: pre-line">{{ pipelineTip(r) }}</q-tooltip>
+                  </q-icon>
+                </td>
+                <template v-for="l in langs" :key="l">
+                <td class="c sep">
+                  <q-icon v-if="issue(r[l])" :name="issue(r[l]) === 'error' ? 'error' : 'warning'" :color="issue(r[l]) === 'error' ? 'negative' : 'warning'" size="20px">
+                    <q-tooltip style="white-space: pre-line">{{ halfTip(r[l], l) }}{{ '\n' + issueTip(r[l]) }}</q-tooltip>
+                  </q-icon>
+                  <q-icon v-else-if="translated(r, l)" name="check_circle" color="positive" size="20px"><q-tooltip>{{ LANG_NAME[l] }} copy in the system</q-tooltip></q-icon>
+                  <q-icon v-else name="hourglass_empty" color="grey-6" size="20px"><q-tooltip style="white-space: pre-line">{{ halfTip(r[l], l) }}</q-tooltip></q-icon>
+                </td>
+                <template v-if="detail">
+                  <td v-for="k in stepKeys(l)" :key="`${l}-${k}`" class="c st">
+                    <q-icon :name="STEP_ICON[stepStatus(r[l].steps[k])][0]" :color="STEP_ICON[stepStatus(r[l].steps[k])][1]" size="18px">
+                      <q-tooltip style="white-space: pre-line">{{ stepTip(`${l.toUpperCase()} ${k}`, r[l].steps[k]) }}</q-tooltip>
+                    </q-icon>
+                  </td>
+                </template>
+                </template>
               </tr>
             </tbody>
           </table>
         </q-card-section>
       </q-card>
       <p class="text-caption text-grey-7 q-mt-md">
-        Each cell: English on the left, Mandarin on the right. Filled pips show how far the topic has got.
-        <StateChip kind="stale" label="amber" /> is stale (built from older inputs);
-        <StateChip kind="blocked" label="red" /> is blocked (needs a person); a dashed cell has cloud-only files.
+        <q-icon name="check_circle" color="positive" /> received / in the system ·
+        <q-icon name="hourglass_empty" color="grey-6" /> waiting ·
+        <q-icon name="warning" color="warning" /> validation warnings ·
+        <q-icon name="error" color="negative" /> errors, blocked or a failed step ·
+        <q-icon name="update" color="warning" /> a step is out of date. A ☁ topic has cloud-only files. Click a row to open it; ⌘-click or tick to select.
       </p>
     </template>
   </q-page>

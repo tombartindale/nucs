@@ -73,6 +73,27 @@ body.body--dark a:not(.q-btn):not(.q-item):not(.q-tab):not(.cell) { color: var(-
 .cell .unrev { position: absolute; bottom: 2px; right: 4px; font-size: 10px; color: var(--q-warning); font-weight: 700; }
 .cell.activity { display: flex; align-items: center; justify-content: center; border-style: dashed; }
 
+/* -- module grid v2: awaiting content + per-language presence ---------------------------- */
+.await-grid { border-collapse: collapse; width: 100%; }
+.await-grid th { font-size: 12px; font-weight: 600; text-align: left; padding: 6px 10px; }
+.await-grid th .n { display: block; font-weight: 400; opacity: .6; }
+.await-grid .c { text-align: center; width: 90px; }
+.await-grid .c.st { width: 62px; padding-left: 4px; padding-right: 4px; }
+.await-grid th.st { font-weight: 500; }
+.await-grid .sep { border-left: 1px solid var(--line-2); }
+.await-grid .unit-row th { background: var(--panel-2); font-size: 13px; padding: 8px 10px; }
+.await-grid .unit-row .plan-tag { float: right; font-weight: 400; display: inline-flex; align-items: center; gap: 4px; line-height: 28px; }
+.await-grid .unit-row .t { font-weight: 400; margin-left: 10px; opacity: .8; }
+.await-grid td { padding: 5px 10px; border-top: 1px solid var(--line-2); }
+.await-grid td.sel { width: 28px; }
+.await-grid .tname { color: inherit; text-decoration: none; }
+.await-grid .tname:hover { color: var(--q-primary); }
+.await-grid .tname .t { margin-left: 10px; opacity: .75; }
+.await-grid .unrev { margin-left: 8px; font-size: 11px; color: var(--q-warning); font-weight: 700; }
+.await-grid tr.topic-row.selected { background: var(--panel-2); }
+.await-grid tr.topic-row.dim { opacity: .25; }
+.await-grid tr.topic-row.cloud .tname strong { border-bottom: 1px dashed currentColor; }
+
 /* -- topic: the pipeline as a row of steps ---------------------------------------------- */
 .stepflow { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding-bottom: 2px; }
 .stepflow .step { min-width: 104px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; text-align: left; }
