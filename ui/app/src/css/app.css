@@ -152,9 +152,13 @@ body.body--dark a:not(.q-btn):not(.q-item):not(.q-tab):not(.cell) { color: var(-
 .safe-area span { position: absolute; top: 4px; left: 6px; font-size: 11px; color: #fff; background: rgba(0, 0, 0, .6); padding: 0 4px; border-radius: 2px; }
 
 /* -- topic: video with cue timeline ---------------------------------------------------- */
-.player-main { display: grid; grid-template-columns: 3fr 2fr; gap: 10px; align-items: start; }
-.player-main video { width: 100%; background: #000; border-radius: 4px; }
-.current-slide img { width: 100%; border-radius: 4px; border: 1px solid var(--line); }
+/* Both scale with the height of the window rather than the width of the pane: the video takes
+   the width its height allows and the slide gets the rest, so neither swamps the other. */
+.player-main { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.player-main video { flex: 0 1 auto; width: auto; height: auto; max-width: 100%; max-height: 50vh; background: #000; border-radius: 4px; }
+/* The slide sits beside the video when there is room for it (at least 280px), else wraps below. */
+.current-slide { flex: 1 1 280px; min-width: 0; }
+.current-slide img { width: auto; height: auto; max-width: 100%; max-height: 50vh; border-radius: 4px; border: 1px solid var(--line); }
 .timeline { position: relative; height: 34px; margin: 10px 0 6px; background: var(--panel-2); border-radius: 4px; cursor: pointer; }
 .timeline .played { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(31, 95, 139, .18); pointer-events: none; }
 .timeline .head { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--q-primary); pointer-events: none; }
