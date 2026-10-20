@@ -90,9 +90,10 @@ RESULT_EXTRAS: dict[str, dict[str, Any]] = {
             "package": _str_or_null},
     "coursemap": {"pdf": _str_or_null},
     "readinglist": {"path": {"type": "string"}, "units": {"type": "integer"}, "entries": {"type": "integer"}},
-    "bumpers": {"title": {"type": "string"}, "logo": {"type": "boolean"}, "font_size": {"type": "integer"},
-                "intro_seconds": {"type": "number"}, "outro_seconds": {"type": "number"},
-                "resolution": {"type": "array"}, "fps": {"type": "number"}},
+    "bumpers": {"title": {"type": "string"}, "logo": {"type": "boolean"}, "background_video": {"type": "boolean"},
+                "intro_seconds": {"type": "number"}, "outro_seconds": {"type": "number"}, "fps": {"type": "number"},
+                "variants": {"type": "array", "items": {"type": "object", "properties": {
+                    "res": {"type": ["string", "null"]}, "resolution": {"type": "array"}, "font_size": {"type": "integer"}}}}},
     "edit": {"slides": {"type": "integer"}, "words": {"type": "integer"}, "target_words": {"type": ["integer", "null"]},
              "written": {"type": "boolean"}, "sha256": {"type": ["string", "null"]}, "current_sha256": {"type": "string"}},
     "docedit": {"written": {"type": "boolean"}, "sha256": {"type": ["string", "null"]}, "current_sha256": {"type": "string"}},

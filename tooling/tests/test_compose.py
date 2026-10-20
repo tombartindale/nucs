@@ -287,6 +287,28 @@ def test_compose_full_bleed_text_arrangement(tree, capsys):
     assert v.duration > 0
 
 
+def test_vertical_layout_uses_its_own_bumper_resolution(tree, capsys):
+    """A vertical layout picks the bumper variant built at its own frame size (bcn bumpers'
+    per-size render), not the widescreen one stretched/letterboxed to fit — confirmed here by
+    there being no COMPOSE_BUMPER fallback diagnostic (that fires when no matching bumper is
+    found) and the delivered intro/outro both being reported as used."""
+    t = Topic(tree, "KV7015", "U01", "T01")
+    _build_up_to_cues(tree, capsys, t)
+    _with_bumpers(tree, capsys, t)
+    code, env = bcn(capsys, "compose", str(t.dir), "--layout", "vertical_stacked")
+    assert code == 0, env["diagnostics"]
+    assert "COMPOSE_BUMPER" not in [d["code"] for d in env["diagnostics"]], env["diagnostics"]
+    r = env["results"][0]
+    assert r["bumpers"] == ["intro", "outro"]
+    assert r["body_offset"] > 0
+
+    info = tools.locate(load(tree))
+    cfg = load(tree)
+    vs = cfg["compose"]["layouts"]["vertical_stacked"]
+    vintro = probe(info, t.bumper("intro", "en", "1080x1920"))
+    assert (vintro.width, vintro.height) == (vs["width"], vs["height"])
+
+
 def test_compose_unknown_layout_fails(tree, capsys):
     t = Topic(tree, "KV7015", "U01", "T01")
     _build_up_to_cues(tree, capsys, t)

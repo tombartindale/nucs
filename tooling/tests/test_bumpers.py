@@ -53,16 +53,28 @@ def test_bumpers_end_to_end(tree, capsys):
     assert (v.width, v.height, round(v.fps)) == (1920, 1080, 25) and v.has_audio
     assert abs(v.duration - 5.0) < 0.1
 
+    # One variant per distinct [compose.layouts] frame size, not just widescreen's own: the
+    # vertical presets' 1080x1920 is built full-bleed at its own aspect ratio, not stretched
+    # from the widescreen card afterward.
+    cfg = load(tree)
+    assert {v["res"] for v in r["variants"]} == {None, "1080x1920"}
+    vcard = t.bumper_card("intro", "en", "1080x1920")
+    assert vcard.is_file() and vcard.read_bytes() != cards[0].read_bytes()
+    vintro = probe(info, t.bumper("intro", "en", "1080x1920"))
+    vs = cfg["compose"]["layouts"]["vertical_stacked"]
+    assert (vintro.width, vintro.height) == (vs["width"], vs["height"])
+
     # Unchanged: skipped. Edited script: status marks the bumpers stale.
     code, env = bcn(capsys, "bumpers", str(t.dir))
     assert env["results"][0]["skipped"] is True
-    for p in (*cards, t.bumper("intro", "en"), t.bumper("outro", "en")):
+    for p in (*cards, t.bumper("intro", "en"), t.bumper("outro", "en"), vcard, t.bumper("intro", "en", "1080x1920")):
         age(p, 60)
     t.src("en").write_text(t.src("en").read_text().replace("A topic title", "A new title"))
     code, env = bcn(capsys, "status", str(t.dir))
     rows = {a["key"]: a for a in env["results"][0]["artifacts"]}
     assert rows[f"build/bumpers/{t.id}.intro.en.mp4"]["stale"] is True
     assert rows[f"build/bumpers/{t.id}.intro.zh.mp4"]["exists"] is False
+    assert rows[f"build/bumpers/{t.id}.intro.1080x1920.en.mp4"]["stale"] is True
 
 
 def test_bumpers_need_a_title(tree, capsys):

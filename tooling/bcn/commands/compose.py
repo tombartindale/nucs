@@ -35,7 +35,7 @@ from ..markdown import ParsedTopic, parse, to_html
 from ..media import ffmpeg, loudness, probe
 from ..progress import TopicProgress, run as run_proc
 from ..runner import require_input, require_step, run_topics, try_skip
-from ..tree import Target, Topic
+from ..tree import DEFAULT_LAYOUT, Target, Topic
 
 HELP = "composite video: what package delivers"
 
@@ -483,26 +483,38 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
         subs = t.srt(lang)
     require_input(t, subs, lang)
 
-    # The topic's own bumpers (bcn bumpers) come first; the programme-wide files in [bumpers] are the fallback.
-    bumpers: dict[str, Path] = {}
+    # The topic's own bumpers (bcn bumpers) come first; the programme-wide files in [bumpers]
+    # are the fallback. One set is resolved per distinct frame size among the selected layouts:
+    # bcn bumpers builds its intro/outro full-bleed at each size's own aspect ratio, so the
+    # right one is picked per layout rather than stretched/letterboxed from a single size (see
+    # tree.py's bumper()/bumper_card() res parameter). A [bumpers] fallback file is of unknown
+    # aspect ratio, so every layout that falls back to it gets the identical file regardless of
+    # size — compose's own re-encode below already letterboxes it safely if the aspect differs.
+    widescreen = cfg["compose"]["layouts"][DEFAULT_LAYOUT]
+    bumpers_by_size: dict[tuple[int, int], dict[str, Path]] = {}
     if not args.no_bumpers:
-        for kind in ("intro", "outro"):
-            made = t.bumper(kind, lang)
-            if made.is_file():
-                if fsutil.is_fresh([made], [t.src(lang)]):
-                    bumpers[kind] = made
-                    continue
-                r.diagnostics.append(Diagnostic("COMPOSE_BUMPER", f"The topic's {kind} is older than {t.src(lang).name}; it is skipped.",
-                                                topic=t.id, lang=lang, file=str(made.relative_to(t.dir)),
-                                                hint=f"Run bcn bumpers{' --lang ' + lang if lang != 'en' else ''} again."))
-            rel = cfg["bumpers"][kind]
-            if rel:
-                bumper_path = (t.root / rel).resolve()
-                if not str(bumper_path).startswith(str(t.root.resolve())) or not bumper_path.is_file():
-                    r.diagnostics.append(Diagnostic("COMPOSE_BUMPER", f"The {kind} bumper '{rel}' does not exist inside the programme root; it is skipped.",
-                                                    topic=t.id, lang=lang, file="programme.toml"))
-                else:
-                    bumpers[kind] = bumper_path
+        sizes_needed = {(layout["width"], layout["height"]) for layout in layouts.values()}
+        for (W, H) in sizes_needed:
+            res = None if (W, H) == (widescreen["width"], widescreen["height"]) else f"{W}x{H}"
+            kinds: dict[str, Path] = {}
+            for kind in ("intro", "outro"):
+                made = t.bumper(kind, lang, res)
+                if made.is_file():
+                    if fsutil.is_fresh([made], [t.src(lang)]):
+                        kinds[kind] = made
+                        continue
+                    r.diagnostics.append(Diagnostic("COMPOSE_BUMPER", f"The topic's {kind} ({W}x{H}) is older than {t.src(lang).name}; it is skipped.",
+                                                    topic=t.id, lang=lang, file=str(made.relative_to(t.dir)),
+                                                    hint=f"Run bcn bumpers{' --lang ' + lang if lang != 'en' else ''} again."))
+                rel = cfg["bumpers"][kind]
+                if rel:
+                    bumper_path = (t.root / rel).resolve()
+                    if not str(bumper_path).startswith(str(t.root.resolve())) or not bumper_path.is_file():
+                        r.diagnostics.append(Diagnostic("COMPOSE_BUMPER", f"The {kind} bumper '{rel}' does not exist inside the programme root; it is skipped.",
+                                                        topic=t.id, lang=lang, file="programme.toml"))
+                    else:
+                        kinds[kind] = bumper_path
+            bumpers_by_size[(W, H)] = kinds
 
     outputs = [(t.draft(lang, name) if draft else t.composed(lang, name)) for name in layouts]
     sidecar = None if (draft or burn_in) else t.composed_srt(lang)
@@ -515,8 +527,9 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
     # t.src(lang) itself, not just the rendered pngs: full_bleed_text builds its slide track
     # straight from the topic's text, and if it's the only layout selected, modes_needed is
     # empty and all_pngs has nothing in it to catch a content change via mtime instead.
+    all_bumpers = [p for kinds in bumpers_by_size.values() for p in kinds.values()]
     inputs = [t.video, t.cues_csv, subs, t.src(lang), t.root / "programme.toml",
-              *([course_map] if course_map.is_file() else []), *theme.files(), *all_pngs, *bumpers.values()]
+              *([course_map] if course_map.is_file() else []), *theme.files(), *all_pngs, *all_bumpers]
     if try_skip(t, r, "compose", lang, outputs, inputs, args.force):
         return
 
@@ -539,7 +552,7 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
                                         topic=t.id, lang=lang, file=f"{t.module}/course-map.md",
                                         hint="Add a line like '**Speaker.** Dr Jane Smith, Associate Professor' above the first "
                                              "unit (or inside a unit, for that unit only)."))
-    body_lufs = loudness(tl, video) if bumpers else None
+    body_lufs = loudness(tl, video) if all_bumpers else None
 
     sub_font = theme.subtitle_font(lang)
     wm_font = next((f for f in FONT_CANDIDATES if Path(f).is_file()), None)
@@ -555,6 +568,7 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
 
         for idx, (name, layout) in enumerate(layouts.items()):
             es = encode_spec(cfg, layout, draft)
+            bumpers = bumpers_by_size.get((layout["width"], layout["height"]), {})
             text_band_top = 0  # full_bleed_text only; everything else overlays at y=0 or doesn't use this at all
             slice_lo, slice_hi = idx / len(layouts), (idx + 1) / len(layouts)
 
