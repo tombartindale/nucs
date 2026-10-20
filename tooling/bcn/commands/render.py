@@ -54,8 +54,17 @@ def marp_source(p: ParsedTopic, theme: Theme, lang: str, safe_right: float | Non
         style += " section { word-break: normal; line-break: strict; }"
     body = p.stripped_body()
     # The temp file lives in build/.render-<lang>/, two levels below the topic.
-    body = IMAGE_RE.sub(lambda m: m.group(0).replace(f"({m.group(2)}", f"(../../{m.group(2)}", 1)
-                        if m.group(2).startswith("assets/") else m.group(0), body)
+    # Rewrite the path by its span, not by text search: the markup may be `(<assets/a b.png>)`.
+    def rebase(m: re.Match) -> str:
+        path = m.group(2)
+        while path.startswith("./"):  # validation accepts `./assets/x.png` too
+            path = path[2:]
+        if not path.startswith("assets/"):
+            return m.group(0)
+        a, b = m.span(2)
+        s = m.start()
+        return m.group(0)[:a - s] + "../../" + path + m.group(0)[b - s:]
+    body = IMAGE_RE.sub(rebase, body)
     fm = [
         "---",
         "marp: true",
