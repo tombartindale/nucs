@@ -112,7 +112,7 @@ function view(item: Item, lang: 'en' | 'zh') {
     const status = !made.length ? 'todo' : made.some((a) => a.stale) ? 'stale' : 'done';
     const ICON = { done: 'check_circle', stale: 'update', todo: 'radio_button_unchecked' } as const;
     const COLOR = { done: 'positive', stale: 'warning', todo: 'grey-6' } as const;
-    const CAP = { done: 'done', stale: 'out of date', todo: 'optional' };
+    const CAP = { done: '', stale: 'out of date', todo: 'optional' };
     return {
       cls: ['step-btn', status, { optional: true, disabled: waitingForTranslation }],
       icon: ICON[status], color: COLOR[status], cap: waitingForTranslation ? 'needs translation' : CAP[status],
@@ -135,13 +135,14 @@ function view(item: Item, lang: 'en' | 'zh') {
   const status = !st?.exists ? 'todo' : !st.ok ? 'failed' : draftOnly ? 'draft' : st.fresh ? 'done' : 'stale';
   const ICON = { done: 'check_circle', stale: 'update', failed: 'error', todo: 'radio_button_unchecked', draft: 'visibility' } as const;
   const COLOR = { done: 'positive', stale: 'warning', failed: 'negative', todo: 'grey-6', draft: 'warning' } as const;
-  const CAP = { done: `done${st?.time ? ` · ${fmtAgo(st.time, beacon.now)}` : ''}`, stale: 'out of date', failed: 'failed',
+  // A finished step says when it ran, not "done": the green tick already says that.
+  const CAP = { done: st?.time ? fmtAgo(st.time, beacon.now) : '', stale: 'out of date', failed: 'failed',
     todo: item.optional ? 'optional check' : 'not run', draft: `draft only${st?.time ? ` · ${fmtAgo(st.time, beacon.now)}` : ''}` };
   return {
     cls: ['step-btn', status, { current, optional: item.optional, disabled: waitingForTranslation }],
     icon: current && status === 'todo' ? 'play_circle' : ICON[status],
     color: current ? 'white' : COLOR[status],
-    cap: waitingForTranslation ? 'needs translation' : current ? `next · ${CAP[status]}` : CAP[status],
+    cap: waitingForTranslation ? 'needs translation' : CAP[status],
     disable: waitingForTranslation,
     tip: `${lang === 'zh' ? 'Mandarin. ' : ''}${STEP_HELP[item.name]}${current ? ' This is the next step for this topic.' : ''}`
       + (waitingForTranslation ? ' Needs topic.zh.md and the Mandarin SRT back from the translator first.' : '')
