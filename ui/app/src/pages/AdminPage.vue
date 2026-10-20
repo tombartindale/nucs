@@ -9,6 +9,7 @@
 import { ref } from 'vue';
 import PageHeader from '@/components/PageHeader.vue';
 import ProgrammeTomlEditor from '@/components/admin/ProgrammeTomlEditor.vue';
+import ComposeLayoutReference from '@/components/admin/ComposeLayoutReference.vue';
 import CustomTheme from '@/components/admin/CustomTheme.vue';
 import ThemeCheck from '@/components/admin/ThemeCheck.vue';
 
@@ -24,7 +25,10 @@ const themeVersion = ref(0);
       <q-route-tab name="programme" to="/admin" exact label="Programme settings" />
       <q-route-tab name="theme" to="/admin/theme" exact label="Theme" />
     </q-tabs>
-    <ProgrammeTomlEditor v-if="tab === 'programme'" />
+    <template v-if="tab === 'programme'">
+      <ProgrammeTomlEditor />
+      <ComposeLayoutReference class="q-mt-md" />
+    </template>
     <template v-else>
       <CustomTheme @changed="themeVersion++" />
       <ThemeCheck :key="themeVersion" class="q-mt-md" />
