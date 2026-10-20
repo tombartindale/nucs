@@ -64,6 +64,8 @@ NESTED_RULES: list[tuple[str, str]] = [
     (r"(?P<u>U\d\d)/(?P<t>T\d\d)/(?P<f>topic\.md|topic\.zh\.md|review\.json)", "{u}/{t}/{f}"),
     (r"(?P<u>U\d\d)/(?P<t>T\d\d)/edit/(?P<f>master\.mp4|master\.srt|master\.zh\.srt)", "{u}/{t}/edit/{f}"),
     (r"(?P<u>U\d\d)/(?P<t>T\d\d)/assets/(?P<f>[^/]+)", "{u}/{t}/assets/{f}"),
+    # Images dropped straight into the topic folder (U01/T01/fig-01.png) rather than its assets/.
+    (r"(?P<u>U\d\d)/(?P<t>T\d\d)/(?P<f>[^/]+\.(?i:png|jpe?g|gif|svg|webp))", "{u}/{t}/assets/{f}"),
 ]
 
 # Local path under the module -> flat remote name, for files that have never been pulled.
