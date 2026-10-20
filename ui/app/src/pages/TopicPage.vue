@@ -23,7 +23,8 @@ const diags = ref<Diagnostic[]>([]);
 const verify = shallowRef<TopicVerifyResponse | null>(null);
 const verifying = ref(false);
 const error = ref<string | null>(null);
-const layout = ref<'side' | 'stacked'>(beacon.boot?.prefs.topic_layout || 'side');
+// Set in Settings; no per-page switcher.
+const layout = computed(() => beacon.boot?.prefs.topic_layout || 'side');
 const bottomTab = ref<'diagnostics' | 'artefacts'>('diagnostics');
 
 // Which panes to show: a per-browser preference, not a server one, since it's a quick
@@ -84,7 +85,7 @@ const allDiags = computed(() => [...((verify.value?.diagnostics || []) as Diagno
     <q-banner v-if="error" class="bg-negative text-white q-mb-md" rounded>{{ error }}</q-banner>
     <div v-if="!data && !error" class="text-grey-7 q-pa-lg"><q-spinner /> Loading {{ id }}…</div>
     <template v-if="data">
-      <TopicHead v-model:layout="layout" v-model:show-script="panes.script" v-model:show-slides="panes.slides" v-model:show-video="panes.video" />
+      <TopicHead v-model:show-script="panes.script" v-model:show-slides="panes.slides" v-model:show-video="panes.video" />
       <TopicActions @verify="runVerify" />
       <div v-if="!visiblePanes" class="text-grey-7 q-mb-md">No panes selected — pick at least one above.</div>
       <div v-else :class="['panes', layout, `count-${visiblePanes}`, 'q-mb-md']">
