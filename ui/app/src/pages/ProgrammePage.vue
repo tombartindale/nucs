@@ -125,6 +125,7 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `28px repeat(${ladder.v
               </div>
             </q-item-section>
             <q-item-section side class="prog-flags"></q-item-section>
+            <q-item-section side class="prog-track"></q-item-section>
           </q-item>
           <q-item v-for="[name, m] in modules" :key="name" clickable :to="`/module/${name}`" class="q-py-md">
             <q-item-section class="prog-name">
@@ -151,9 +152,6 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `28px repeat(${ladder.v
               </div>
             </q-item-section>
             <q-item-section side class="prog-flags row items-center gap-xs" style="flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-content: center">
-              <StateChip v-if="onTrackChips[name]" :kind="onTrackChips[name]!.kind" :label="onTrackChips[name]!.label">
-                <q-tooltip>Delivery status across this module's units · worst unit wins</q-tooltip>
-              </StateChip>
               <StateChip v-if="milestoneChips[name]" :kind="milestoneChips[name]!.kind" :label="milestoneChips[name]!.label">
                 <q-tooltip>Next delivery-planning milestone · see the module page for details</q-tooltip>
               </StateChip>
@@ -162,6 +160,11 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `28px repeat(${ladder.v
               <StateChip v-if="m.cloud" kind="cloud" :label="`☁ ${m.cloud} cloud-only`" />
               <StateChip v-if="m.unreviewed" kind="warn" :label="`${m.unreviewed} to proofread`" />
               <StateChip v-if="m.errors" kind="error" :label="`module documents: ${plural(m.errors, 'error')}`" />
+            </q-item-section>
+            <q-item-section v-if="onTrackChips[name]" side class="prog-track">
+              <q-icon name="schedule" size="32px" :color="onTrackChips[name]!.kind === 'ok' ? 'positive' : 'negative'">
+                <q-tooltip>{{ onTrackChips[name]!.label }} · delivery status across this module's units, worst unit wins</q-tooltip>
+              </q-icon>
             </q-item-section>
           </q-item>
           <q-item v-if="!modules.length"><q-item-section class="text-grey-7">No modules found.</q-item-section></q-item>
