@@ -20,6 +20,10 @@ export interface AuthOptions {
   baseUrl: string;            // e.g. https://beacon.example.org, used in the emailed link
   emailFrom: string;
   sendgridApiKey?: string;    // unset: log the link instead of emailing it (local dev)
+  /** Power Automate "When an HTTP request is received" URL. When set, login emails are sent
+   *  by that flow (Send an email (V2)) instead of SendGrid. The URL embeds its own access
+   *  signature, so treat it as a secret. */
+  powerAutomateLoginUrl?: string;
 }
 
 export interface Session { email: string }
@@ -109,6 +113,22 @@ export class Auth {
   }
 
   private async send(email: string, link: string): Promise<void> {
+    if (this.opts.powerAutomateLoginUrl) {
+      // The flow receives the recipient and the full sign-in link, and owns the subject/body.
+      // Failures are logged, not thrown, so the endpoint's response never depends on the address.
+      try {
+        const res = await fetch(this.opts.powerAutomateLoginUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, url: link }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!res.ok) process.stderr.write(`beacon-ui: Power Automate login flow returned HTTP ${res.status}\n`);
+      } catch (err) {
+        process.stderr.write(`beacon-ui: Power Automate login flow failed: ${(err as Error).message}\n`);
+      }
+      return;
+    }
     await this.mailer.send(email, 'Sign in to NUCS',
       `Sign in to NUCS: ${link}\n\nThis link expires in 15 minutes.`);
   }
@@ -122,5 +142,6 @@ export function authOptionsFromEnv(): AuthOptions {
     // verified/authenticated domain) — SendGrid rejects sends from an unverified "from".
     emailFrom: process.env.EMAIL_FROM || 'beacon@localhost',
     sendgridApiKey: process.env.SENDGRID_API_KEY || undefined,
+    powerAutomateLoginUrl: process.env.POWER_AUTOMATE_LOGIN_URL || undefined,
   };
 }
