@@ -8,9 +8,11 @@ table with a silent stereo track so it joins cleanly to the edit. The intro star
 on its first frame and fades to black; the outro fades from and to black. Frame rate
 follows [delivery] in programme.toml, so the bumpers match the master.
 
-One full set is built per distinct frame size among [compose.layouts] (e.g. widescreen's
-16:9 and the vertical presets' 9:16), each full-bleed at its own aspect ratio, so compose
-can deliver a vertical layout's bumper filling the frame rather than letterboxed inside it.
+One full set is built per distinct frame size among [compose].default_layouts (the
+programme's own active layouts, e.g. widescreen's 16:9 and a vertical preset's 9:16 — not
+every style sitting unused in the [compose.layouts] catalog), each full-bleed at its own
+aspect ratio, so compose can deliver a vertical layout's bumper filling the frame rather
+than letterboxed inside it.
 
 Outputs, in build/bumpers/: <id>.intro-card.<lang>.png, <id>.outro-card.<lang>.png,
 <id>.intro.<lang>.mp4 and <id>.outro.<lang>.mp4 for the default (widescreen) size; every
@@ -139,14 +141,16 @@ def bumpers_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, lang
     require_input(t, src, lang)
     theme = load_theme(t.root, resolve_theme_name(cfg, theme_flag))
 
-    # One set of cards/videos per distinct frame size among [compose.layouts], each rendered
-    # full-bleed at its own aspect ratio (so a vertical layout's bumper fills its frame instead
-    # of being letterboxed inside it by compose's re-encode). widescreen's own size is the
-    # default (res=None), named exactly as before so a programme using only the default layout
-    # sees no filename change.
+    # One set of cards/videos per distinct frame size among [compose].default_layouts (the
+    # programme's own active set, not every style sitting in the [compose.layouts] catalog),
+    # each rendered full-bleed at its own aspect ratio (so a vertical layout's bumper fills its
+    # frame instead of being letterboxed inside it by compose's re-encode). widescreen's own
+    # size is the default (res=None), named exactly as before so a programme using only the
+    # default layout sees no filename change.
     ws = cfg["compose"]["layouts"][DEFAULT_LAYOUT]
+    active = [cfg["compose"]["layouts"][name] for name in cfg["compose"]["default_layouts"]]
     sizes: dict[str | None, tuple[int, int]] = {}
-    for layout in cfg["compose"]["layouts"].values():
+    for layout in active:
         w, h = layout["width"], layout["height"]
         sizes[None if (w, h) == (ws["width"], ws["height"]) else f"{w}x{h}"] = (w, h)
 

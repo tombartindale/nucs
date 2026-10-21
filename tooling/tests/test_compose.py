@@ -6,9 +6,12 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from bcn import srt, tools
 from bcn.commands.compose import _draft_dims
 from bcn.config import load
+from bcn.envelope import Fail
 from bcn.markdown import parse
 from bcn.media import probe
 from bcn.tree import Topic
@@ -219,9 +222,16 @@ def test_status_next_is_compose_for_draft_only(tree, capsys):
 
 def test_compose_multiple_layouts_in_one_run(tree, capsys):
     """Selecting more than one layout builds each its own file, at its own resolution, but
-    writes exactly one shared sidecar SRT (layout-independent: it's just shifted text)."""
+    writes exactly one shared sidecar SRT (layout-independent: it's just shifted text).
+    status only shows rows for layouts the programme declares active, so vertical_stacked and
+    vertical_inset are added to [compose].default_layouts here first."""
     t = Topic(tree, "KV7015", "U01", "T01")
     _build_up_to_cues(tree, capsys, t)
+    (tree / "programme.toml").write_text(
+        '[programme]\nname = "test"\n\n[compose]\n'
+        'default_layouts = ["widescreen", "vertical_stacked", "vertical_inset"]\n')
+    from bcn import config
+    config._cache.clear()
     code, env = bcn(capsys, "compose", str(t.dir), "--layout", "widescreen", "--layout", "vertical_stacked")
     assert code == 0, env["diagnostics"]
     r = env["results"][0]
@@ -291,9 +301,15 @@ def test_vertical_layout_uses_its_own_bumper_resolution(tree, capsys):
     """A vertical layout picks the bumper variant built at its own frame size (bcn bumpers'
     per-size render), not the widescreen one stretched/letterboxed to fit — confirmed here by
     there being no COMPOSE_BUMPER fallback diagnostic (that fires when no matching bumper is
-    found) and the delivered intro/outro both being reported as used."""
+    found) and the delivered intro/outro both being reported as used. bcn bumpers only builds a
+    vertical variant for a layout the programme actually declares active, so vertical_stacked
+    is added to [compose].default_layouts here first."""
     t = Topic(tree, "KV7015", "U01", "T01")
     _build_up_to_cues(tree, capsys, t)
+    (tree / "programme.toml").write_text(
+        '[programme]\nname = "test"\n\n[compose]\ndefault_layouts = ["widescreen", "vertical_stacked"]\n')
+    from bcn import config
+    config._cache.clear()
     _with_bumpers(tree, capsys, t)
     code, env = bcn(capsys, "compose", str(t.dir), "--layout", "vertical_stacked")
     assert code == 0, env["diagnostics"]
@@ -317,9 +333,27 @@ def test_compose_unknown_layout_fails(tree, capsys):
     assert env["diagnostics"][0]["code"] == "CONFIG_INVALID"
 
 
+def test_default_layouts_must_name_real_layouts(tree, capsys):
+    """[compose].default_layouts is validated at config load time, not just when bcn compose
+    happens to run: it is now also read directly by bcn bumpers and package, which would
+    otherwise hit a raw KeyError on a typo instead of a clean diagnostic."""
+    (tree / "programme.toml").write_text(
+        '[programme]\nname = "test"\n\n[compose]\ndefault_layouts = ["widescreen", "square"]\n')
+    from bcn import config
+    config._cache.clear()
+    with pytest.raises(Fail, match="square"):
+        load(tree)
+
+
 def test_package_delivers_extra_layouts_and_excludes_stale_ones(tree, capsys):
+    """package only ever considers delivering a layout the programme declares active
+    ([compose].default_layouts), not every style sitting in the [compose.layouts] catalog."""
     t = Topic(tree, "KV7015", "U01", "T01")
     _build_up_to_cues(tree, capsys, t)
+    (tree / "programme.toml").write_text(
+        '[programme]\nname = "test"\n\n[compose]\ndefault_layouts = ["widescreen", "vertical_stacked"]\n')
+    from bcn import config
+    config._cache.clear()
     code, env = bcn(capsys, "compose", str(t.dir), "--layout", "widescreen", "--layout", "vertical_stacked")
     assert code == 0, env["diagnostics"]
     # vertical_inset was never composed, so it's simply absent, not stale.
@@ -340,3 +374,23 @@ def test_package_delivers_extra_layouts_and_excludes_stale_ones(tree, capsys):
     names = {lo["name"] for lo in manifest["layouts"]}
     assert names == {"widescreen"}
     assert any(d["code"] == "PACKAGE_STALE_LAYOUT" for d in env["diagnostics"])
+
+
+def test_package_ignores_catalog_layouts_that_are_not_active(tree, capsys):
+    """A layout present in the [compose.layouts] catalog but absent from
+    [compose].default_layouts is never delivered, even if it was manually composed once via
+    --layout."""
+    t = Topic(tree, "KV7015", "U01", "T01")
+    _build_up_to_cues(tree, capsys, t)
+    # default_layouts stays the default (["widescreen"] only); vertical_inset is composed
+    # anyway via the CLI's explicit --layout override, which still works ad hoc.
+    code, env = bcn(capsys, "compose", str(t.dir), "--layout", "vertical_inset")
+    assert code == 0, env["diagnostics"]
+    code, env = bcn(capsys, "compose", str(t.dir))
+    assert code == 0, env["diagnostics"]
+    code, env = bcn(capsys, "package", str(t.dir))
+    assert code == 0, env["diagnostics"]
+    manifest = json.loads(t.manifest("en").read_text())
+    names = {lo["name"] for lo in manifest["layouts"]}
+    assert names == {"widescreen"}
+    assert not (t.out / f"{t.id}.vertical_inset.mp4").is_file()

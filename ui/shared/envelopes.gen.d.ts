@@ -59,6 +59,12 @@ export interface BcnStatusEnvelope {
       steps?: {};
     };
     artifacts?: {}[];
+    active_layouts?: {
+      name?: string;
+      arrangement?: string;
+      width?: number;
+      height?: number;
+    }[];
   }[];
   artifacts: {
     path: string;

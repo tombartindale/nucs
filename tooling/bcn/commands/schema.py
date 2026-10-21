@@ -70,7 +70,10 @@ RESULT_EXTRAS: dict[str, dict[str, Any]] = {
                "in_course_map": {"type": "boolean"}, "has_dir": {"type": "boolean"},
                "hydration": {"enum": ["local", "cloud", "partial", "unknown"]},
                "unreviewed_mistranscriptions": {"type": "integer"}, "en": LANG_STATE, "zh": LANG_STATE,
-               "artifacts": {"type": "array", "items": {"type": "object"}}},
+               "artifacts": {"type": "array", "items": {"type": "object"}},
+               "active_layouts": {"type": "array", "items": {"type": "object", "properties": {
+                   "name": {"type": "string"}, "arrangement": {"type": "string"},
+                   "width": {"type": "integer"}, "height": {"type": "integer"}}}}},
     "show": {"en": {"type": ["object", "null"]}, "zh": {"type": ["object", "null"]}, "cues": {"type": "array"},
              "cue_threshold": {"type": "number"}, "render": {"type": "object"}, "media": {"type": "object"},
              "review": {"type": "object"}},

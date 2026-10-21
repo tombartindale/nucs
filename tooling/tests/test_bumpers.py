@@ -53,28 +53,54 @@ def test_bumpers_end_to_end(tree, capsys):
     assert (v.width, v.height, round(v.fps)) == (1920, 1080, 25) and v.has_audio
     assert abs(v.duration - 5.0) < 0.1
 
-    # One variant per distinct [compose.layouts] frame size, not just widescreen's own: the
-    # vertical presets' 1080x1920 is built full-bleed at its own aspect ratio, not stretched
-    # from the widescreen card afterward.
-    cfg = load(tree)
-    assert {v["res"] for v in r["variants"]} == {None, "1080x1920"}
-    vcard = t.bumper_card("intro", "en", "1080x1920")
-    assert vcard.is_file() and vcard.read_bytes() != cards[0].read_bytes()
-    vintro = probe(info, t.bumper("intro", "en", "1080x1920"))
-    vs = cfg["compose"]["layouts"]["vertical_stacked"]
-    assert (vintro.width, vintro.height) == (vs["width"], vs["height"])
+    # Only the programme's active layouts get a variant (here, just widescreen's own default
+    # [compose].default_layouts = ["widescreen"]) -- not every size sitting in the
+    # [compose.layouts] catalog. See test_bumpers_builds_only_the_active_sizes for a programme
+    # that actually declares a vertical layout active.
+    assert {v["res"] for v in r["variants"]} == {None}
 
     # Unchanged: skipped. Edited script: status marks the bumpers stale.
     code, env = bcn(capsys, "bumpers", str(t.dir))
     assert env["results"][0]["skipped"] is True
-    for p in (*cards, t.bumper("intro", "en"), t.bumper("outro", "en"), vcard, t.bumper("intro", "en", "1080x1920")):
+    for p in (*cards, t.bumper("intro", "en"), t.bumper("outro", "en")):
         age(p, 60)
     t.src("en").write_text(t.src("en").read_text().replace("A topic title", "A new title"))
     code, env = bcn(capsys, "status", str(t.dir))
     rows = {a["key"]: a for a in env["results"][0]["artifacts"]}
     assert rows[f"build/bumpers/{t.id}.intro.en.mp4"]["stale"] is True
     assert rows[f"build/bumpers/{t.id}.intro.zh.mp4"]["exists"] is False
-    assert rows[f"build/bumpers/{t.id}.intro.1080x1920.en.mp4"]["stale"] is True
+    assert f"build/bumpers/{t.id}.intro.1080x1920.en.mp4" not in rows
+
+
+def test_bumpers_builds_only_the_active_sizes(tree, capsys):
+    """bcn bumpers scopes its per-size renders to [compose].default_layouts (the programme's
+    own active layouts), not the full [compose.layouts] catalog: vertical_inset is in the
+    catalog but not declared active here, so it gets no variant even though it shares
+    vertical_stacked's 1080x1920 size would otherwise suggest one 'extra' variant either way --
+    the point is the selection, not the size count."""
+    _needs_tools(tree)
+    _isolated_theme(tree)
+    (tree / "programme.toml").write_text(
+        '[programme]\nname = "test"\n\n[compose]\ndefault_layouts = ["widescreen", "vertical_stacked"]\n')
+    t = Topic(tree, "KV7015", "U01", "T01")
+    code, env = bcn(capsys, "bumpers", str(t.dir))
+    assert code == 0, env["diagnostics"]
+    r = env["results"][0]
+    assert {v["res"] for v in r["variants"]} == {None, "1080x1920"}
+
+    cfg = load(tree)
+    info = tools.locate(cfg)
+    from bcn.media import probe
+    vcard = t.bumper_card("intro", "en", "1080x1920")
+    widecard = t.bumper_card("intro", "en")
+    assert vcard.is_file() and vcard.read_bytes() != widecard.read_bytes()
+    vintro = probe(info, t.bumper("intro", "en", "1080x1920"))
+    vs = cfg["compose"]["layouts"]["vertical_stacked"]
+    assert (vintro.width, vintro.height) == (vs["width"], vs["height"])
+
+    code, env = bcn(capsys, "status", str(t.dir))
+    rows = {a["key"]: a for a in env["results"][0]["artifacts"]}
+    assert rows[f"build/bumpers/{t.id}.intro.1080x1920.en.mp4"]["exists"] is True
 
 
 def test_bumpers_need_a_title(tree, capsys):

@@ -239,6 +239,14 @@ class TopicState:
             "en": en.to_json(),
             "zh": zh.to_json(),
             "artifacts": self._artifacts(),
+            # The programme's own active layout set (uniform across the whole programme: a
+            # module.toml cannot override [compose] at all), so the UI can build its compose
+            # layout checkboxes from real config instead of a hardcoded guess.
+            "active_layouts": [
+                {"name": name, "arrangement": lo["arrangement"], "width": lo["width"], "height": lo["height"]}
+                for name in self.ctx.cfg["compose"]["default_layouts"]
+                if (lo := self.ctx.cfg["compose"]["layouts"].get(name)) is not None
+            ],
         }
 
     # -- English --------------------------------------------------------------------
@@ -493,10 +501,12 @@ class TopicState:
                          "bytes": fi.size, "mtime": _iso(fi.mtime), "hydration": fi.hydration if fi.exists else None,
                          "stale": stale if fi.exists else None})
 
-        # Every distinct [compose.layouts] frame size beside widescreen's own: bcn bumpers
-        # builds a full-bleed variant per size (see bumpers.py), named with this tag.
+        # Every distinct frame size among [compose].default_layouts (the programme's own
+        # active layouts, not the full [compose.layouts] catalog) beside widescreen's own: bcn
+        # bumpers builds a full-bleed variant per size (see bumpers.py), named with this tag.
         ws = self.ctx.cfg["compose"]["layouts"][DEFAULT_LAYOUT]
-        extra_res = sorted({f"{lo['width']}x{lo['height']}" for lo in self.ctx.cfg["compose"]["layouts"].values()
+        active_layouts = [self.ctx.cfg["compose"]["layouts"][name] for name in self.ctx.cfg["compose"]["default_layouts"]]
+        extra_res = sorted({f"{lo['width']}x{lo['height']}" for lo in active_layouts
                             if (lo["width"], lo["height"]) != (ws["width"], ws["height"])})
 
         def bumpers(lang: str) -> None:
@@ -510,10 +520,11 @@ class TopicState:
             s = self.steps.get((step, lang))
             return (not s.fresh) if s and s.exists else None
 
-        # Every layout beside the default (which keeps its own unsuffixed build/composed.mp4 /
-        # build/draft.mp4 rows below) — not shown unless a compose run actually selected it
+        # Every layout the programme actually produces beside the default (which keeps its own
+        # unsuffixed build/composed.mp4 / build/draft.mp4 rows below) — not the full
+        # [compose.layouts] catalog, and not shown unless a compose run actually selected it
         # (add()'s rows are hidden by the UI when they don't exist, same as bumpers/scripts).
-        extra_layouts = [name for name in self.ctx.cfg["compose"]["layouts"] if name != DEFAULT_LAYOUT]
+        extra_layouts = [name for name in self.ctx.cfg["compose"]["default_layouts"] if name != DEFAULT_LAYOUT]
 
         def layout_videos(lang: str) -> None:
             for name in extra_layouts:

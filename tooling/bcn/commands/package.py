@@ -124,13 +124,16 @@ def package_en(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
     require_input(t, sidecar, "en", step_hint="bcn compose (without --burn-subtitles)")
     bumpers = _bumpers(t, "en")
 
-    # Every other configured layout is optional: the last compose run may not have selected
-    # it. Present files are delivered alongside the default layout's; present-but-stale ones
-    # are excluded with a diagnostic rather than failing the whole package. Freshness is
-    # judged against the true external sources only (not the default layout's own composed
-    # file or the shared sidecar, which compose always finishes writing last, after every
-    # layout's video — checking against those would call every layout "stale" by definition).
-    extra_names = [name for name in cfg["compose"]["layouts"] if name != DEFAULT_LAYOUT]
+    # Every other layout the programme actually produces ([compose].default_layouts, not the
+    # full [compose.layouts] catalog -- a preset nobody asked for isn't something to deliver
+    # just because someone once composed it) is still optional here: the last compose run may
+    # not have selected it. Present files are delivered alongside the default layout's;
+    # present-but-stale ones are excluded with a diagnostic rather than failing the whole
+    # package. Freshness is judged against the true external sources only (not the default
+    # layout's own composed file or the shared sidecar, which compose always finishes writing
+    # last, after every layout's video — checking against those would call every layout
+    # "stale" by definition).
+    extra_names = [name for name in cfg["compose"]["default_layouts"] if name != DEFAULT_LAYOUT]
     extra_composed = {name: t.composed("en", name) for name in extra_names if storage.present(t.composed("en", name))}
     source_inputs = [src, t.video, t.srt("en"), t.cues_csv, *pngs, *bumpers, t.root / "programme.toml"]
 
@@ -257,7 +260,7 @@ def package_zh(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force: 
     require_input(t, sidecar, "zh", step_hint="bcn compose --lang zh (without --burn-subtitles)")
     bumpers = _bumpers(t, "zh")
 
-    extra_names = [name for name in cfg["compose"]["layouts"] if name != DEFAULT_LAYOUT]
+    extra_names = [name for name in cfg["compose"]["default_layouts"] if name != DEFAULT_LAYOUT]
     extra_composed = {name: t.composed("zh", name) for name in extra_names if storage.present(t.composed("zh", name))}
     source_inputs = [src, t.srt("zh"), *pngs, *bumpers, t.manifest("en")]
 
