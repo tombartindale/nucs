@@ -47,24 +47,26 @@ const WAIT_HELP: Record<string, string> = {
 
 const LANGS = ['en', 'zh'] as const;
 
-// Mirrors the built-in presets in tooling/bcn/config.py's [compose.layouts] DEFAULTS.
-// Hardcoded, like LANGS above: there's no backend endpoint exposing resolved programme.toml
-// config today, and a programme can't add a new preset name without a code change there
-// either (see config.py's _merge). Keep this list in sync if that ever changes.
-const LAYOUTS = [
-  { value: 'widescreen', label: 'Widescreen 16:9' },
-  { value: 'vertical_stacked', label: 'Vertical, stacked' },
-  { value: 'vertical_inset', label: 'Vertical, inset' },
-  { value: 'vertical_text', label: 'Vertical, text over video' },
-] as const;
-
 const emit = defineEmits<{ verify: [] }>();
 const t = inject(TOPIC)!;
 const beacon = useBeacon();
 const force = ref(false);
 const noBumpers = ref(true);
 const draftMode = ref(true);
-const selectedLayouts = ref<string[]>(['widescreen']);
+const selectedLayouts = ref<string[]>([]);
+let seededLayouts = false;
+
+// The programme's own active layout set ([compose].default_layouts, read off bcn status —
+// not the full [compose.layouts] catalog of styles merely available to pick from). Seeded
+// into selectedLayouts once, the first time it loads, so it doesn't stomp a selection already
+// in progress on every status poll.
+const activeLayouts = computed(() => t.status.value?.active_layouts ?? []);
+watch(activeLayouts, (v) => {
+  if (!seededLayouts && v.length) {
+    selectedLayouts.value = v.map((l) => l.name).filter((n): n is string => !!n);
+    seededLayouts = true;
+  }
+}, { immediate: true });
 
 const stateOf = (lang: 'en' | 'zh') => t.status.value?.[lang] ?? null;
 
@@ -107,9 +109,14 @@ function view(item: Item, lang: 'en' | 'zh') {
     // Reads topic.zh.md for the Mandarin title (bumpers.py: require_input(t, src, lang)), so
     // it is gated the same as the real Mandarin steps until translation has been returned.
     const waitingForTranslation = lang === 'zh' && !!s && s.stage_index < s.stages.indexOf('returned');
+    // arts is the programme's own active set (bcn state.py scopes bumper rows to
+    // [compose].default_layouts, not the full [compose.layouts] catalog), so a row that
+    // doesn't exist yet is something this programme actually needs built, not a style nobody
+    // asked for — it must count toward 'stale', not be silently dropped by the made filter.
     const arts = (t.status.value?.artifacts || []).filter((a) => a.kind.startsWith('bumper') && a.lang === lang);
     const made = arts.filter((a) => a.exists);
-    const status = !made.length ? 'todo' : made.some((a) => a.stale) ? 'stale' : 'done';
+    const missing = arts.some((a) => !a.exists);
+    const status = !made.length ? 'todo' : (made.some((a) => a.stale) || missing) ? 'stale' : 'done';
     const ICON = { done: 'check_circle', stale: 'update', todo: 'radio_button_unchecked' } as const;
     const COLOR = { done: 'positive', stale: 'warning', todo: 'grey-6' } as const;
     const CAP = { done: '', stale: 'out of date', todo: 'optional' };
@@ -291,10 +298,10 @@ async function bumpers(lang: 'en' | 'zh') {
       </q-checkbox>
       <q-separator vertical class="q-mx-xs" />
       <span class="text-caption text-grey-7">layouts</span>
-      <q-checkbox v-for="l in LAYOUTS" :key="l.value" dense :label="l.label"
-        :model-value="selectedLayouts.includes(l.value)"
-        @update:model-value="(v) => { selectedLayouts = v ? [...selectedLayouts, l.value] : selectedLayouts.filter((x) => x !== l.value); }">
-        <q-tooltip max-width="320px">Which output(s) compose builds. Pick more than one to get, e.g., a widescreen cut and a vertical cut from the same recording in one run.</q-tooltip>
+      <q-checkbox v-for="l in activeLayouts" :key="l.name" dense :label="`${l.name} (${l.width}×${l.height})`"
+        :model-value="!!l.name && selectedLayouts.includes(l.name)"
+        @update:model-value="(v) => { if (!l.name) return; selectedLayouts = v ? [...selectedLayouts, l.name] : selectedLayouts.filter((x) => x !== l.name); }">
+        <q-tooltip max-width="320px">Which of the programme's active output(s) compose builds this run. Pick more than one to get, e.g., a widescreen cut and a vertical cut from the same recording in one run. The active set itself is a programme-wide setting ([compose].default_layouts in programme.toml).</q-tooltip>
       </q-checkbox>
       <q-space />
       <q-btn flat dense no-caps icon="verified" label="Verify files" @click="emit('verify')">

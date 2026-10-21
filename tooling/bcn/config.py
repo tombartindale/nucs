@@ -106,9 +106,14 @@ DEFAULTS: dict[str, Any] = {
         "audio_bitrate": "192k",
     },
     "compose": {
-        # Which [compose.layouts] entries to build when --layout (or the UI's layout
-        # checkboxes) select none: the single 16:9 output every programme got before
-        # multiple layouts existed.
+        # Which [compose.layouts] entries this programme actually produces — not just a
+        # compose-time fallback for an empty --layout/UI selection (though it is still that
+        # too): bcn bumpers scopes its per-size renders to this set, package treats these
+        # (beside the default layout) as the ones worth trying to deliver, and status/the UI
+        # use it to know which layouts to show as expected. [compose.layouts] itself stays a
+        # catalog of styles available to pick from — a preset sitting in the catalog but
+        # absent here is simply not produced by this programme. Validated at load time: every
+        # name here must exist in [compose.layouts].
         "default_layouts": ["widescreen"],
         # Each entry is one output variant: its own frame size and its own arrangement of
         # slides vs. presenter. side_by_side and inset keep the presenter within a 16:9
@@ -260,6 +265,10 @@ def load(root: Path, module_dir: Path | None = None) -> Config:
     if key in _cache:
         return _cache[key]
     data = _merge(DEFAULTS, _load_toml(root / "programme.toml"), "programme.toml")
+    unknown_layouts = [n for n in data["compose"]["default_layouts"] if n not in data["compose"]["layouts"]]
+    if unknown_layouts:
+        raise Fail("CONFIG_INVALID", f"[compose].default_layouts names unknown layout(s): {', '.join(unknown_layouts)}.",
+                   file="programme.toml", hint="Check the spelling against [compose.layouts] in programme.toml.")
     if module_dir is not None and (module_dir / "module.toml").is_file():
         mod = _load_toml(module_dir / "module.toml")
         bad = set(mod) - MODULE_OVERRIDABLE
