@@ -85,7 +85,7 @@ onUnmounted(() => clearInterval(timer));
       <div class="text-body2 q-mb-sm">
         Start the runner on the other machine with this one-time token (valid until {{ new Date(token.expires).toLocaleString() }}):
       </div>
-      <pre class="text-mono q-pa-sm bg-grey-2 rounded-borders" style="white-space: pre-wrap; overflow-wrap: anywhere">{{ command }}</pre>
+      <pre class="text-mono text-black q-pa-sm bg-grey-2 rounded-borders" style="white-space: pre-wrap; overflow-wrap: anywhere">{{ command }}</pre>
       <q-btn flat dense no-caps icon="content_copy" label="Copy" @click="copy(command)" />
     </q-card-section>
     <q-markup-table v-if="data?.runners.length" flat dense>
