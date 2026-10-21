@@ -140,7 +140,12 @@ export interface Prefs {
   poll_seconds: number;
   module_columns: Record<Lang, boolean>;
   topic_layout: 'side' | 'stacked';
+  routing: Record<string, Routing>;          // command -> where it runs (see RunnersResponse.remote_commands)
+  routing_labels: Record<string, string[]>;  // command -> labels a runner must have to take it
 }
+
+/** local: the server's own worker. remote: a runner only (waits for one). auto: a runner when one is online. */
+export type Routing = 'local' | 'remote' | 'auto';
 
 export type JobState = 'queued' | 'running' | 'stalled' | 'done' | 'failed' | 'cancelled' | 'interrupted';
 export type JobArgs = Record<string, string | number | boolean | string[]>;
@@ -158,13 +163,27 @@ export interface JobSummary {
   exit_code: number | null; duration_ms: number | null;
   progress: ProgressEvent | null; target_index: number; target_count: number;
   last_event_age_ms: number | null; ok: boolean | null;
+  pool: 'local' | 'remote';
+  runner: string | null;      // the runner's name, once a runner has taken it
 }
 export interface JobDetail extends JobSummary {
   log: string[];              // NDJSON lines as received, plus the UI's own notes
   envelopes: AnyEnvelope[];   // exactly as bcn printed them, one per target
 }
 
+/** A machine that takes remote jobs (an administrator registers it; see deploy/RUNNER.md). */
+export interface RunnerInfo {
+  id: string; name: string; labels: string[]; commands: string[]; slots: number; version: string;
+  created: string; last_seen: string | null; online: boolean; running: number;
+}
+
 // -- routes --------------------------------------------------------------------------------------
+export interface RunnersResponse {
+  runners: RunnerInfo[];
+  remote_commands: string[];     // commands that can be routed to a runner at all
+  server_version: string;
+}
+export interface RunnerTokenResponse { token: string; expires: string }
 export interface BootResponse {
   root: string; prefs: Prefs; operator: string; warnings: string[]; admin: boolean;
   doctor: Queried<DoctorEnvelope> | null; codes: CodeInfo[]; status_version: number;

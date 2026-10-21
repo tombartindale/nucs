@@ -100,7 +100,7 @@ RESULT_EXTRAS: dict[str, dict[str, Any]] = {
     "edit": {"slides": {"type": "integer"}, "words": {"type": "integer"}, "target_words": {"type": ["integer", "null"]},
              "written": {"type": "boolean"}, "sha256": {"type": ["string", "null"]}, "current_sha256": {"type": "string"}},
     "docedit": {"written": {"type": "boolean"}, "sha256": {"type": ["string", "null"]}, "current_sha256": {"type": "string"}},
-    "diagnostics": {}, "codes": {}, "schema": {}, "themecheck": {},
+    "diagnostics": {}, "codes": {}, "schema": {}, "themecheck": {}, "bundle": {},
 }
 
 TOP_EXTRAS: dict[str, dict[str, Any]] = {
@@ -120,6 +120,10 @@ TOP_EXTRAS: dict[str, dict[str, Any]] = {
     "sync": {"direction": {"enum": ["pull", "push"]}, "dry_run": {"type": "boolean"}, "remote": {"type": "string"},
              "counts": {"type": "object"}, "plan": {"type": "array"}, "ignored": {"type": "array"},
              "last_pull": _str_or_null, "last_push": _str_or_null},
+    "bundle": {"archive": {"type": "string"}, "stamp": {"type": "number"}, "files": {"type": "integer"},
+               "bytes": {"type": "integer"}, "written": {"type": "array", "items": {"type": "string"}},
+               "deleted": {"type": "array", "items": {"type": "string"}},
+               "remote_commands": {"type": "array", "items": {"type": "string"}}},
     "themecheck": {"theme": {"type": "string"}, "resolved": {"type": "boolean"}, "dir": _str_or_null, "custom": {"type": "boolean"},
                    "css": _str_or_null, "files": {"type": "array", "items": {"type": "string"}},
                    "bumper_logo": _str_or_null, "bumper_background_video": _str_or_null, "document_logo": _str_or_null,

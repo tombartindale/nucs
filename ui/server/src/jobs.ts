@@ -92,6 +92,7 @@ export function summaryFromRow(row: JobRow): JobSummary {
     target_index: row.target_index, target_count: JSON.parse(row.targets).length,
     last_event_age_ms: lastEvent ? Math.floor(Date.now() - lastEvent) : null,
     ok: ['queued', 'running'].includes(row.state) ? null : row.state === 'done',
+    pool: row.pool === 'remote' ? 'remote' : 'local', runner: row.runner_name || null,
   };
 }
 
@@ -104,15 +105,22 @@ export function detailFromRow(row: JobRow): JobDetail {
 /** Published on the wake channel so a worker checks for work immediately, not on its next poll. */
 export const WAKE_CHANNEL = 'beacon:jobs:wake';
 
+/** Which claimers may take a job: the server's own worker ('local'), or a remote runner
+ *  that has every one of `requires` among its labels ('remote'). See App.submit. */
+export interface Placement { pool: 'local' | 'remote'; requires: string[] }
+export const LOCAL: Placement = { pool: 'local', requires: [] };
+
 export class JobQueue {
   constructor(private db: DB, private bus: EventBus) {}
 
-  async submit(command: string, targets: string[], args: JobArgs, label: string, by: string): Promise<JobSummary> {
+  async submit(command: string, targets: string[], args: JobArgs, label: string, by: string,
+    placement: Placement = LOCAL): Promise<JobSummary> {
     validateArgs(command, targets, args);
     const created = now();
     const res = await this.db.pool.query<{ id: number }>(
-      "INSERT INTO jobs(created, by, command, label, targets, args, state) VALUES($1,$2,$3,$4,$5,$6, 'queued') RETURNING id",
-      [created, by, command, label, JSON.stringify(targets), JSON.stringify(args)]);
+      `INSERT INTO jobs(created, by, command, label, targets, args, state, pool, requires)
+       VALUES($1,$2,$3,$4,$5,$6, 'queued', $7, $8) RETURNING id`,
+      [created, by, command, label, JSON.stringify(targets), JSON.stringify(args), placement.pool, JSON.stringify(placement.requires)]);
     const row = await this.getRow(res.rows[0].id);
     const summary = summaryFromRow(row!);
     this.publish(summary);
@@ -121,7 +129,7 @@ export class JobQueue {
   }
 
   /** Queued jobs are simply removed; a running job is asked to stop via its `cancel_requested` flag,
-   *  which the worker running it checks between targets and honours by sending bcn SIGINT. */
+   *  which the worker or runner running it polls and honours by sending bcn SIGINT. */
   async cancel(id: number): Promise<JobSummary | null> {
     const row = await this.getRow(id);
     if (!row) return null;

@@ -9,7 +9,9 @@
 #   - public access is blocked (browsers only ever get short-lived presigned URLs);
 #   - browser uploads go straight to the bucket, so it needs a CORS rule for the app's origin,
 #     exposing the ETag header (the browser must read each part's ETag to finish the upload);
-#   - abandoned browser uploads (<prefix>/_incoming/) and incomplete multipart uploads expire.
+#   - abandoned browser uploads (<prefix>/_incoming/) and incomplete multipart uploads expire;
+#   - remote runner hand-off archives (<prefix>/_jobs/, see deploy/RUNNER.md) expire; the
+#     server deletes each job's as it finishes, so these are only ones a crash left behind.
 #
 # Idempotent: safe to re-run, including to change retention or the allowed origin.
 #
@@ -62,6 +64,13 @@ cat > "$tmp/lifecycle.json" <<JSON
       "Status": "Enabled",
       "Filter": { "Prefix": "${prefix}/_incoming/" },
       "Expiration": { "Days": 2 },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 1 }
+    },
+    {
+      "ID": "expire-runner-job-archives",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "${prefix}/_jobs/" },
+      "Expiration": { "Days": 7 },
       "NoncurrentVersionExpiration": { "NoncurrentDays": 1 }
     },
     {

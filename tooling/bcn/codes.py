@@ -143,6 +143,8 @@ CODES: dict[str, tuple[str, str]] = {
     "XFER_EXISTS_DIFFERS": ("error", "An imported file already exists with different content."),
     "XFER_UNCHANGED": ("info", "An imported file already exists with identical content."),
     "XFER_WRITTEN": ("info", "An imported file was written."),
+    "BUNDLE_SNAPSHOT": ("error", "A remote job's inputs cannot be snapshotted, or a runner workspace has no snapshot."),
+    "BUNDLE_REJECTED": ("error", "A runner's output archive holds a file the command may not write; nothing was applied."),
     # --- sync --------------------------------------------------------------
     "SYNC_NOT_CONFIGURED": ("error", "No [sync] remote is set in programme.toml."),
     "SYNC_REMOTE_MISSING": ("error", "The shared folder is not where programme.toml says it is."),

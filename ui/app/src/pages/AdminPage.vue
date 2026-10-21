@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Admin: the server-wide settings and maintenance only administrators see. Each tab has its
-// own URL (/admin, /admin/theme) so a tab can be linked to directly.
+// own URL (/admin, /admin/theme, /admin/runners) so a tab can be linked to directly.
 //
 // The "Backups" tab is hidden for now (not deleted -- see BackupsPanel.vue): it still only
 // knows about the pre-redesign full/db S3 prefixes, and deploy/backup/backup.sh no longer
@@ -11,24 +11,27 @@ import PageHeader from '@/components/PageHeader.vue';
 import ProgrammeTomlEditor from '@/components/admin/ProgrammeTomlEditor.vue';
 import ComposeLayoutReference from '@/components/admin/ComposeLayoutReference.vue';
 import CustomTheme from '@/components/admin/CustomTheme.vue';
+import RunnersPanel from '@/components/admin/RunnersPanel.vue';
 import ThemeCheck from '@/components/admin/ThemeCheck.vue';
 
-defineProps<{ tab: 'programme' | 'theme' }>();
+defineProps<{ tab: 'programme' | 'theme' | 'runners' }>();
 // Bumped after a theme upload or switch, so the active-theme check re-runs.
 const themeVersion = ref(0);
 </script>
 
 <template>
   <q-page padding class="page-max">
-    <PageHeader title="Admin" sub="Programme settings and the active theme. Only administrators see this page." />
+    <PageHeader title="Admin" sub="Programme settings, the active theme and remote runners. Only administrators see this page." />
     <q-tabs dense no-caps align="left" class="q-mb-md" active-color="primary" indicator-color="primary">
       <q-route-tab name="programme" to="/admin" exact label="Programme settings" />
       <q-route-tab name="theme" to="/admin/theme" exact label="Theme" />
+      <q-route-tab name="runners" to="/admin/runners" exact label="Runners" />
     </q-tabs>
     <template v-if="tab === 'programme'">
       <ProgrammeTomlEditor />
       <ComposeLayoutReference class="q-mt-md" />
     </template>
+    <RunnersPanel v-else-if="tab === 'runners'" />
     <template v-else>
       <CustomTheme @changed="themeVersion++" />
       <ThemeCheck :key="themeVersion" class="q-mt-md" />

@@ -35,6 +35,34 @@ CREATE TABLE IF NOT EXISTS jobs (
     worker_id TEXT              -- which worker process is running this job, for diagnostics
 );
 CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state);
+-- Remote runners (runner-api.ts). Added after the table first shipped, hence ALTER ... IF NOT
+-- EXISTS: this file is the only migration mechanism, and every statement in it must stay
+-- safe to run again on every start.
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS pool TEXT NOT NULL DEFAULT 'local';   -- local | remote
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS requires TEXT NOT NULL DEFAULT '[]';  -- JSON: labels a runner must have
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS runner_id TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS runner_name TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS lease_expires_at TEXT;               -- a remote job not reported on by then is interrupted
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS snapshot_stamp DOUBLE PRECISION;     -- bcn bundle create's stamp, for apply
+CREATE TABLE IF NOT EXISTS runners (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,  -- sha256 of the bearer token; the token itself is never stored
+    labels TEXT NOT NULL DEFAULT '[]',    -- JSON list
+    commands TEXT NOT NULL DEFAULT '[]',  -- JSON list; empty takes any command routed to runners
+    slots INTEGER NOT NULL DEFAULT 1,
+    version TEXT NOT NULL DEFAULT '',
+    created TEXT NOT NULL,
+    last_seen TEXT,
+    revoked BOOLEAN NOT NULL DEFAULT false
+);
+-- One-time tokens an administrator hands to a new runner so it can register itself.
+CREATE TABLE IF NOT EXISTS runner_registration_tokens (
+    token_hash TEXT PRIMARY KEY,
+    created TEXT NOT NULL,
+    expires TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS prefs (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 -- One row per live worker process, refreshed on a short interval. A 'running' job whose
 -- worker has no recent heartbeat was abandoned by a crashed/killed worker and is marked
@@ -74,6 +102,11 @@ export const DEFAULT_PREFS: Prefs = {
   poll_seconds: 15,
   module_columns: { en: true, zh: true },
   topic_layout: 'side',    // side | stacked
+  // Where each remote-capable command (bcn bundle specs) runs: 'local' on the worker,
+  // 'remote' always on a runner (waits for one), 'auto' on a runner when one that takes it
+  // is online, else locally. Unlisted commands run locally.
+  routing: { compose: 'auto' },
+  routing_labels: {},      // command -> labels a runner must have to take it
 };
 
 export interface JobRow {
@@ -82,6 +115,13 @@ export interface JobRow {
   exit_code: number | null; duration_ms: number | null; envelope: string | null; log: string | null;
   target_index: number; progress: string | null; last_event: string | null;
   cancel_requested: boolean; worker_id: string | null;
+  pool: string; requires: string; runner_id: string | null; runner_name: string | null;
+  lease_expires_at: string | null; snapshot_stamp: number | null;
+}
+
+export interface RunnerRow {
+  id: string; name: string; token_hash: string; labels: string; commands: string; slots: number;
+  version: string; created: string; last_seen: string | null; revoked: boolean;
 }
 
 export interface ModulePlanRow {

@@ -7,15 +7,18 @@ import type { CodeInfo, DoctorEnvelope, JobArgs, JobSummary, Queried } from '@be
 import { Auth, authOptionsFromEnv } from './auth.js';
 import { Bcn } from './bcn.js';
 import { Bus, type EventBus } from './bus.js';
-import { DB } from './db.js';
+import { DB, type RunnerRow } from './db.js';
 import { BadRequest, BcnError, Forbidden, StartupError } from './errors.js';
-import { JobQueue } from './jobs.js';
+import { JobQueue, LOCAL, type Placement } from './jobs.js';
 import { StatusCache } from './status.js';
-import { sha1 } from './util.js';
+import { now, sha1 } from './util.js';
 import { Watcher } from './watcher.js';
 
 export const TOPIC_ID_RE = /^([A-Z]{2}\d{4})-(U\d{2})-(T\d{2})$/;
 const TARGET_RE = /^(\.|[A-Z]{2}\d{4}(\/U\d{2}(\/T\d{2})?)?)$/;
+const LEVEL_RE = [/^[A-Z]{2}\d{4}$/, /^U\d{2}$/, /^T\d{2}$/];
+/** A runner not heard from for this long no longer counts as online for 'auto' routing. */
+export const RUNNER_ONLINE_MS = 60_000;
 
 /** Outside the programme root on purpose: UI state must never sync to SharePoint or be mistaken for content. */
 export function defaultDataDir(root: string): string {
@@ -77,6 +80,8 @@ export class App {
   readonly auth: Auth;
   doctor: Queried<DoctorEnvelope> | null = null;
   codes: CodeInfo[] = [];
+  /** Commands bcn can carry to a runner (bcn bundle specs); the only ones routing may send there. */
+  remoteCommands: string[] = [];
   private queryCache = new Map<string, { at: number; env: Record<string, unknown> }>();
 
   private constructor(opts: AppOptions, db: DB, bus: EventBus) {
@@ -122,6 +127,7 @@ export class App {
     try {
       this.doctor = await this.bcn.query<DoctorEnvelope>('doctor', [this.root]);
       this.codes = (await this.bcn.query<{ codes?: CodeInfo[] }>('codes')).codes || [];
+      this.remoteCommands = (await this.bcn.query<{ remote_commands?: string[] }>('bundle', [this.root, 'specs'])).remote_commands || [];
     } catch (e) {
       if (!(e instanceof BcnError)) throw e;
       this.warnings.push(`bcn could not run: ${e.message}`);
@@ -172,12 +178,65 @@ export class App {
     return rel;
   }
 
+  /** Submits a job from the browser, placed where the routing preference says (Prefs.routing).
+   *  A job routed to runners is split into one job per topic, so several runners (or one
+   *  runner's slots) work through a unit or module in parallel instead of one topic at a time. */
+  async submitJob(command: string, targets: string[], args: JobArgs, by: string): Promise<JobSummary> {
+    const placement = await this.place(command);
+    if (placement.pool === 'local') return this.jobs.submit(command, targets, args, jobLabel(command, targets, args), by);
+    const topics = [...new Set(targets.flatMap((t) => this.topicsUnder(t)))];
+    const parts = topics.length ? topics : targets;
+    let first: JobSummary | null = null;
+    for (const t of parts) {
+      const job = await this.jobs.submit(command, [t], args, jobLabel(command, [t], args), by, placement);
+      first ??= job;
+    }
+    return first!;
+  }
+
+  async place(command: string): Promise<Placement> {
+    const prefs = await this.db.prefs();
+    const mode = prefs.routing?.[command] ?? 'local';
+    if (mode === 'local' || !this.remoteCommands.includes(command)) return LOCAL;
+    const placement: Placement = { pool: 'remote', requires: prefs.routing_labels?.[command] ?? [] };
+    if (mode === 'remote') return placement;
+    return (await this.runnerFor(command, placement.requires)) ? placement : LOCAL;
+  }
+
+  /** An online runner that would take this command, if there is one. */
+  async runnerFor(command: string, requires: string[]): Promise<RunnerRow | null> {
+    const since = now(new Date(Date.now() - RUNNER_ONLINE_MS));
+    const res = await this.db.pool.query<RunnerRow>('SELECT * FROM runners WHERE NOT revoked AND last_seen >= $1', [since]);
+    return res.rows.find((r) => runnerTakes(r, command, requires)) ?? null;
+  }
+
+  /** The topic directories at or under a target, e.g. KV7015/U01 -> KV7015/U01/T01, KV7015/U01/T02. */
+  topicsUnder(rel: string): string[] {
+    let level: string[][] = [rel === '.' ? [] : rel.split('/')];
+    for (let i = level[0].length; i < 3; i++) {
+      level = level.flatMap((p) => {
+        try {
+          return readdirSync(join(this.root, ...p), { withFileTypes: true })
+            .filter((e) => e.isDirectory() && LEVEL_RE[i].test(e.name)).map((e) => [...p, e.name]);
+        } catch { return []; }
+      });
+    }
+    return level.map((p) => p.join('/')).sort();
+  }
+
   /** Where a target lives on disk. */
   targetPath(rel: string): string { return rel === '.' ? this.root : join(this.root, rel); }
 
   async operator(): Promise<string> {
     return (await this.db.prefs()).operator || process.env.USER || '';
   }
+}
+
+/** Whether a runner takes a command: it lists the command (or lists none), and has every required label. */
+export function runnerTakes(r: Pick<RunnerRow, 'commands' | 'labels'>, command: string, requires: string[]): boolean {
+  const commands = JSON.parse(r.commands || '[]') as string[];
+  const labels = JSON.parse(r.labels || '[]') as string[];
+  return (!commands.length || commands.includes(command)) && requires.every((l) => labels.includes(l));
 }
 
 /** Like Python's Path.resolve(): symlinks resolved as far as the path exists. */

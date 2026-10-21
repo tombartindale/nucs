@@ -1,0 +1,39 @@
+# A remote runner: takes compose (and any other command routed to runners) off the server.
+# Runs on a separate, bigger machine; see deploy/RUNNER.md.
+#
+#   cp .env.example .env    # fill in NUCS_URL and the registration token
+#   docker compose up -d
+#   docker compose logs -f
+#
+# It only connects out to NUCS_URL and the media bucket: no ports, no database, no
+# programme volume, and no AWS keys (the server issues temporary ones for each job).
+# The image must be the same build as the server's, or the server refuses it jobs: after
+# deploying the server, `docker compose pull && docker compose up -d` here too.
+services:
+  runner:
+    image: ${BEACON_IMAGE:-ghcr.io/tombartindale/nucs}:${BEACON_IMAGE_TAG:-latest}
+    entrypoint: ["node", "/app/ui/server/dist/runner.js"]
+    environment:
+      NUCS_URL: ${NUCS_URL:?set NUCS_URL to the server's https address}
+      # Only needed for the first start; the runner token it is swapped for is kept in the volume.
+      RUNNER_REGISTRATION_TOKEN: ${RUNNER_REGISTRATION_TOKEN:-}
+      RUNNER_NAME: ${RUNNER_NAME:-}
+      RUNNER_SLOTS: ${RUNNER_SLOTS:-2}
+      RUNNER_THREADS: ${RUNNER_THREADS:-}
+      RUNNER_COMMANDS: ${RUNNER_COMMANDS:-compose}
+      RUNNER_LABELS: ${RUNNER_LABELS:-}
+      BCN_SCRATCH: /data/scratch
+    volumes:
+      - runner-scratch:/data/scratch
+    restart: unless-stopped
+    # SIGTERM stops the runner taking jobs and interrupts the ones it has; give bcn a moment
+    # to clean up before Docker kills it.
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          # Roughly 1–1.5 GB per slot for a 1080p compose; leave headroom for the OS.
+          memory: ${RUNNER_MEMORY:-8G}
+
+volumes:
+  runner-scratch:

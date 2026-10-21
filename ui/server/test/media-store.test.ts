@@ -91,3 +91,36 @@ describe('media job arguments', () => {
     expect(() => validateArgs('media', ['KV7015/U01/T01'], { apply: true })).toThrow();
   });
 });
+
+describe('runner job credentials', () => {
+  it('federates credentials scoped to the job\'s own topic', async () => {
+    let body = '';
+    const sts = createServer((req, res) => {
+      req.on('data', (b) => { body += b; });
+      req.on('end', () => {
+        res.setHeader('Content-Type', 'text/xml');
+        res.end(`<GetFederationTokenResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><GetFederationTokenResult>
+          <Credentials><AccessKeyId>ASIATEST</AccessKeyId><SecretAccessKey>secret</SecretAccessKey><SessionToken>token</SessionToken>
+          <Expiration>2030-01-01T00:00:00Z</Expiration></Credentials></GetFederationTokenResult></GetFederationTokenResponse>`);
+      });
+    });
+    await new Promise<void>((r) => sts.listen(0, '127.0.0.1', r));
+    try {
+      const port = (sts.address() as { port: number }).port;
+      const s = new MediaStore({ S3_MEDIA_BUCKET: 'media-bucket', S3_MEDIA_PREFIX: 'media', S3_MEDIA_STS_ENDPOINT: `http://127.0.0.1:${port}` });
+      const creds = await s.jobCredentials(42, 'KV7015/U01/T01');
+      expect(creds).toMatchObject({ access_key_id: 'ASIATEST', session_token: 'token' });
+      const params = new URLSearchParams(body);
+      expect(params.get('Action')).toBe('GetFederationToken');
+      expect(params.get('Name')).toBe('nucs-runner-42');
+      const policy = JSON.parse(params.get('Policy')!);
+      const [list, read, write] = policy.Statement;
+      expect(list.Condition.StringLike['s3:prefix']).toEqual(['media/KV7015/U01/T01/*']);
+      expect(read.Resource).toBe('arn:aws:s3:::media-bucket/media/KV7015/U01/T01/*');
+      expect(write.Action).toContain('s3:PutObject');
+      expect(write.Resource).toEqual(['arn:aws:s3:::media-bucket/media/KV7015/U01/T01/build/*',
+        'arn:aws:s3:::media-bucket/media/KV7015/U01/T01/*/build/*']);
+      expect(JSON.stringify(policy)).not.toContain('Delete');
+    } finally { sts.close(); }
+  });
+});

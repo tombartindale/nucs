@@ -18,7 +18,7 @@ import type {
   BcnDiagnosticsEnvelope, BcnDoceditEnvelope, BcnEditEnvelope, BcnReviewEnvelope, BcnStatusEnvelope, BcnSyncEnvelope, BcnThemecheckEnvelope,
   BootResponse, JobArgs, ModulePlanRemindResponse, ModulePlanRequest, ModulePlanResponse, PlansSummaryResponse, ShowEnvelope, TranslationItem, UnitPlanRequest,
 } from '@beacon/shared';
-import { jobLabel, type App } from './app.js';
+import type { App } from './app.js';
 import { SESSION_COOKIE } from './auth.js';
 import { Backups } from './backups.js';
 import { BadRequest, BcnError, Forbidden } from './errors.js';
@@ -26,6 +26,7 @@ import { buildIcs, type IcsEvent } from './ics.js';
 import { mimeType, withCharset } from './mime.js';
 import { MediaStore } from './media-store.js';
 import { computeModulePlan, moduleTopicsFor } from './planning.js';
+import { registerRunnerRoutes, RUNNER_PATH } from './runner-api.js';
 import { now, pyJson, sha256, stamp } from './util.js';
 
 const BODY_MAX = 5 * 1024 * 1024;
@@ -130,9 +131,11 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     // The ICS feed is fetched by calendar clients (Outlook, Apple Calendar), which cannot
     // send a session cookie. It carries its own per-module secret token instead, checked
     // inside the route handler itself — this carve-out is a single literal route shape and
-    // opens nothing else under /api/*.
+    // opens nothing else under /api/*. Runners (runner-api.ts) are machines, not people: every
+    // /api/runner/ route checks the runner's own bearer token instead.
     const guarded = !testDisableAuth
-      && (path.startsWith('/files/') || (path.startsWith('/api/') && !PUBLIC_PATHS.has(path) && !ICS_PATH.test(path)));
+      && (path.startsWith('/files/') || (path.startsWith('/api/') && !PUBLIC_PATHS.has(path) && !ICS_PATH.test(path)
+        && !path.startsWith(RUNNER_PATH)));
     if (guarded) {
       const session = await app.auth.session(req.cookies[SESSION_COOKIE]);
       if (!session) return reply.code(401).send({ error: 'Sign in required.' });
@@ -457,7 +460,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     if (command === 'review' || command === 'ack' || (command === 'cues' && (args.set || args.unset))) {
       args.by = operator || 'ui';
     }
-    return reply.code(202).send(await app.jobs.submit(command, targets, args, jobLabel(command, targets, args), operator));
+    return reply.code(202).send(await app.submitJob(command, targets, args, operator));
   });
 
   f.post('/api/jobs/:id(^\\d+$)/cancel', async (req: Req, reply) => {
@@ -679,6 +682,9 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     || ADMIN_EMAILS.has(String((req as FastifyRequest & { email?: string }).email ?? '').toLowerCase());
   const requireAdmin = (req: Req) => { if (!isAdmin(req)) throw new Forbidden('This is for administrators only.'); };
 
+  // -- remote runners ---------------------------------------------------------------------------
+  registerRunnerRoutes(f, app, media, readJson, (req) => requireAdmin(req as Req));
+
   f.get('/api/admin/backups', async (req: Req) => {
     requireAdmin(req);
     return { enabled: backups.enabled, items: await backups.list() };
@@ -844,6 +850,23 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     if ('jobs' in data) data.jobs = clamp(toInt(data.jobs, 'jobs'), 1, 16);
     if ('parallel_jobs' in data) data.parallel_jobs = clamp(toInt(data.parallel_jobs, 'parallel_jobs'), 1, 8);
     if ('poll_seconds' in data) data.poll_seconds = clamp(toInt(data.poll_seconds, 'poll_seconds'), 5, 600);
+    // Where jobs run is a server-wide setting: only an administrator changes it. Everyone
+    // else's Settings page sends the whole prefs object back, so it is dropped, not refused.
+    if (!isAdmin(req as Req)) { delete data.routing; delete data.routing_labels; }
+    if ('routing' in data || 'routing_labels' in data) {
+      const routing = (data.routing ?? {}) as Record<string, unknown>;
+      const labels = (data.routing_labels ?? {}) as Record<string, unknown>;
+      for (const [cmd, mode] of Object.entries(routing)) {
+        if (!['local', 'remote', 'auto'].includes(String(mode))) throw new BadRequest(`'${cmd}' must run local, remote or auto.`);
+        if (mode !== 'local' && !app.remoteCommands.includes(cmd)) throw new BadRequest(`'${cmd}' cannot run on a runner.`);
+      }
+      for (const [cmd, ls] of Object.entries(labels)) {
+        if (!app.remoteCommands.includes(cmd) || !Array.isArray(ls) || ls.length > 20
+          || !ls.every((l) => typeof l === 'string' && /^[a-z0-9][a-z0-9_-]{0,30}$/.test(l))) {
+          throw new BadRequest(`The labels for '${cmd}' must be a list of short lowercase names.`);
+        }
+      }
+    }
     return await app.db.setPrefs(data);
   });
 
