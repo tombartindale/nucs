@@ -3,30 +3,31 @@
 // (even on different hosts) can run this against the same DATABASE_URL/REDIS_URL safely:
 // dequeuing uses `SELECT ... FOR UPDATE SKIP LOCKED` so two workers never pick up the same
 // job, and the overlap check considers every currently-running row, not just this worker's
-// own, so two workers never run overlapping targets either.
+// own, so two workers never run overlapping targets either. A worker only takes jobs in
+// the 'local' pool; jobs routed to a remote runner are claimed over HTTPS instead (see
+// runner-api.ts), from the same table and under the same overlap rule (dispatch.ts).
 //
 // This is a direct port of the single-process JobQueue.run()/invoke()/schedule() logic
 // that used to live in jobs.ts, before the API and the job runner became separate
 // processes/containers.
-import { spawn, type ChildProcess } from 'node:child_process';
-import { constants } from 'node:os';
-import { join } from 'node:path';
-import { createInterface } from 'node:readline';
+import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { AnyEnvelope, BcnEvent, JobArgs, Prefs } from '@beacon/shared';
+import type { AnyEnvelope, JobArgs, Prefs } from '@beacon/shared';
+import { bcnArgv, invokeBcn, parseEvent } from './bcn-invoke.js';
 import type { Bcn } from './bcn.js';
 import type { EventBus } from './bus.js';
 import type { DB, JobRow } from './db.js';
-import { FLAG_ARGS, overlaps, PIPELINE, summaryFromRow, VALUE_ORDER } from './jobs.js';
+import { claimNext, finishJob, reapAbandonedLocal, reapExpiredLeases } from './dispatch.js';
+import { PIPELINE, summaryFromRow } from './jobs.js';
 import { now, pyJson, sleep } from './util.js';
 
-export const LOG_LINES = 400;
 const POLL_MS = 2000;
 const HEARTBEAT_MS = 5000;
 // A worker missing this many heartbeats in a row is presumed dead; its running jobs are
 // reclaimed. Generous relative to HEARTBEAT_MS so a slow GC pause never falsely reaps a
 // job that is, in fact, still running fine.
 const HEARTBEAT_DEAD_MS = HEARTBEAT_MS * 6;
+const REAP_MS = 15_000;
 
 interface RunningJob {
   id: number;
@@ -45,6 +46,7 @@ export class Scheduler {
   private wakePending = false;
   private wakeWaiters: Array<() => void> = [];
   private heartbeatTimer: NodeJS.Timeout | null = null;
+  private reapTimer: NodeJS.Timeout | null = null;
   private stopped = false;
 
   constructor(private db: DB, private bus: EventBus, private bcn: Bcn, private root: string,
@@ -55,12 +57,14 @@ export class Scheduler {
     void this.heartbeat();
     this.heartbeatTimer = setInterval(() => void this.heartbeat(), HEARTBEAT_MS);
     void this.reapAbandoned();
+    this.reapTimer = setInterval(() => void this.reapAbandoned(), REAP_MS);
     void this.loop();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    if (this.reapTimer) clearInterval(this.reapTimer);
     for (const j of this.running.values()) if (j.proc && j.proc.exitCode === null) j.proc.kill('SIGINT');
     // Let bcn's own SIGINT handling clean up partial output before this process exits.
     const deadline = Date.now() + 10_000;
@@ -76,16 +80,16 @@ export class Scheduler {
 
   /** Jobs left 'running' by a worker that stopped heartbeating (crashed, killed, OOM) are
    *  marked interrupted, the same way a restarted single-process backend used to recover
-   *  its own crashed jobs — except this also covers a *different* worker process dying. */
+   *  its own crashed jobs — except this also covers a *different* worker process dying.
+   *  Remote jobs whose runner's lease ran out are reaped here too, so a runner that
+   *  vanished is noticed even while no runner is polling. */
   private async reapAbandoned(): Promise<void> {
-    await this.db.pool.query(
-      `UPDATE jobs SET state='interrupted', finished=$1, worker_id=NULL
-       WHERE state='running' AND (
-         worker_id IS NULL
-         OR worker_id NOT IN (SELECT worker_id FROM worker_heartbeats)
-         OR worker_id IN (SELECT worker_id FROM worker_heartbeats WHERE last_seen < $2)
-       )`,
-      [now(), now(new Date(Date.now() - HEARTBEAT_DEAD_MS))]);
+    try {
+      await reapAbandonedLocal(this.db, now(new Date(Date.now() - HEARTBEAT_DEAD_MS)));
+      await reapExpiredLeases(this.db, this.bus);
+    } catch (e) {
+      process.stderr.write(`scheduler: reap failed: ${(e as Error).message}\n`);
+    }
   }
 
   private async loop(): Promise<void> {
@@ -128,35 +132,10 @@ export class Scheduler {
     const limit = Math.max(1, Math.trunc(Number(prefs.parallel_jobs) || 2));
     if (this.running.size >= limit) return;
 
-    const client = await this.db.pool.connect();
-    let row: JobRow | undefined;
-    try {
-      await client.query('BEGIN');
-      // Every currently-running row (from any worker) counts toward the overlap check, not
-      // just this process's own `this.running` map, so two worker processes never touch the
-      // same topic even though neither can see the other's in-memory state.
-      const busyRes = await client.query<{ targets: string }>("SELECT targets FROM jobs WHERE state='running'");
-      const busyTargets = busyRes.rows.flatMap((r) => JSON.parse(r.targets) as string[]);
-      const queuedRes = await client.query<JobRow>(
-        "SELECT * FROM jobs WHERE state='queued' ORDER BY id FOR UPDATE SKIP LOCKED");
-      row = queuedRes.rows.find((r) => {
-        const targets = JSON.parse(r.targets) as string[];
-        return !targets.some((a) => busyTargets.some((b) => overlaps(a, b)));
-      });
-      if (row) {
-        await client.query("UPDATE jobs SET state='running', started=$1, worker_id=$2 WHERE id=$3", [now(), this.workerId, row.id]);
-      }
-      await client.query('COMMIT');
-    } catch (e) {
-      await client.query('ROLLBACK');
-      throw e;
-    } finally {
-      client.release();
-    }
+    const row = await claimNext(this.db, { pool: 'local', id: this.workerId });
 
     if (row) {
-      const summary = summaryFromRow({ ...row, state: 'running', started: now(), worker_id: this.workerId });
-      this.bus.publish({ type: 'job', job: summary });
+      this.bus.publish({ type: 'job', job: summaryFromRow(row) });
       void this.run(row);
       // Immediately look for more capacity, in case parallel_jobs > 1 and several jobs
       // with disjoint targets are queued at once.
@@ -183,17 +162,10 @@ export class Scheduler {
       job.log.push(pyJson({ event: 'log', level: 'error', message: `worker error: ${(e as Error).message}` }));
       codes.push(-1);
     }
-    const finished = now();
-    const durationMs = Date.now() - job.t0;
     const exitCode = codes.length ? (codes.find((c) => c !== 0) ?? 0) : null;
     const state = job.cancelRequested ? 'cancelled' : (codes.length && codes.every((c) => c === 0) ? 'done' : 'failed');
-    await this.db.pool.query(
-      `UPDATE jobs SET finished=$1, state=$2, exit_code=$3, duration_ms=$4, envelope=$5, log=$6, worker_id=NULL WHERE id=$7`,
-      [finished, state, exitCode, durationMs, job.envelopes.length ? JSON.stringify(job.envelopes) : null,
-        this.trimmedLog(job.log).join('\n'), row.id]);
+    await finishJob(this.db, this.bus, row.id, { state, exitCode, durationMs: Date.now() - job.t0, envelopes: job.envelopes, log: job.log });
     this.running.delete(row.id);
-    const updated = await this.db.pool.query<JobRow>('SELECT * FROM jobs WHERE id=$1', [row.id]);
-    if (updated.rows[0]) this.bus.publish({ type: 'job', job: summaryFromRow(updated.rows[0]) });
     void this.tick();
   }
 
@@ -202,81 +174,45 @@ export class Scheduler {
     return res.rows[0]?.cancel_requested ?? false;
   }
 
-  private trimmedLog(log: string[]): string[] {
-    return log.length > LOG_LINES ? log.slice(log.length - LOG_LINES) : log;
-  }
-
-  private argv(command: string, args: JobArgs, target: string): string[] {
-    // docedit's job target is the specific document (e.g. "KV7016/course-map.md"), not the
-    // module -- see the comment at its submit() call in server.ts -- so the module directory
-    // bcn docedit actually takes positionally is only the target's first path segment here.
-    const resolved = command === 'docedit' ? target.split('/')[0] : target;
-    const path = resolved !== '.' ? join(this.root, resolved) : this.root;
-    const argv = [command, path];
-    if (command === 'media' && args.action) argv.push(String(args.action));  // bcn media <path> <action>
-    for (const k of VALUE_ORDER) {
-      if (k in args && args[k] !== null && args[k] !== '') argv.push(`--${k.replace(/_/g, '-')}`, String(args[k]));
-    }
-    const only = Array.isArray(args.only) ? args.only : args.only ? [args.only] : [];
-    for (const p of only) argv.push('--only', String(p));
-    const layout = Array.isArray(args.layout) ? args.layout : args.layout ? [args.layout] : [];
-    for (const l of layout) argv.push('--layout', String(l));
-    if ('import' in args) argv.push('--import', String(args.import));
-    for (const k of FLAG_ARGS) if (args[k]) argv.push(`--${k.replace(/_/g, '-')}`);
-    return argv;
-  }
-
   private async invoke(job: RunningJob, command: string, args: JobArgs, target: string): Promise<[number, AnyEnvelope | null]> {
-    const argv = this.argv(command, args, target);
+    const argv = bcnArgv(command, args, target, this.root);
     if (PIPELINE.has(command)) {
       const prefs = await this.prefs();
       argv.push('--jobs', String(Math.max(1, Math.trunc(Number(prefs.jobs) || 1))));
     }
-    const [file, ...prefixRest] = this.bcn.prefix;
     job.log.push(pyJson({ event: 'log', level: 'info', message: `$ bcn ${argv.join(' ')}` }));
-    return new Promise((resolve, reject) => {
-      const p = spawn(file, [...prefixRest, ...argv], { cwd: this.root, stdio: ['ignore', 'pipe', 'pipe'] });
-      job.proc = p;
-      const out: Buffer[] = [];
-      p.stdout.on('data', (b: Buffer) => out.push(b));
-      const lines = createInterface({ input: p.stderr });
-      lines.on('line', (line) => {
-        if (!line) return;
+    const { proc: p, done } = invokeBcn(this.bcn.prefix, argv, {
+      cwd: this.root,
+      onLine: (line) => {
         job.log.push(line);
-        let ev: BcnEvent;
-        try { ev = JSON.parse(line); } catch { ev = { event: 'log', level: 'info', message: line }; }
+        const ev = parseEvent(line);
         if (ev.event === 'progress') {
           void this.db.pool.query('UPDATE jobs SET progress=$1, last_event=$2 WHERE id=$3', [JSON.stringify(ev), now(), job.id]);
         } else {
           void this.db.pool.query('UPDATE jobs SET last_event=$1 WHERE id=$2', [now(), job.id]);
         }
         this.bus.publish({ type: 'job-event', job: job.id, target_index: job.targetIndex, target_count: job.targets.length, event: ev });
-      });
-      // run()'s own cancelRequested() check only runs between targets, before invoke() is
-      // called for the next one — it never re-checks while this process is actually running,
-      // so a single-target job (the common case) ignored Cancel entirely until it finished on
-      // its own. This polls the same flag while the process is alive and signals it directly.
-      const watchCancel = setInterval(() => {
-        void this.cancelRequested(job.id).then((requested) => {
-          if (!requested || job.proc !== p) return;
-          clearInterval(watchCancel);
-          job.cancelRequested = true;
-          p.kill('SIGINT');
-        });
-      }, 1000);
-      p.on('error', (e) => { clearInterval(watchCancel); reject(e); });
-      p.on('close', (code, signal) => {
-        clearInterval(watchCancel);
-        job.proc = null;
-        const text = Buffer.concat(out).toString('utf8');
-        let env: AnyEnvelope | null = null;
-        if (text.trim()) {
-          try { env = JSON.parse(text); } catch {
-            job.log.push(pyJson({ event: 'log', level: 'error', message: 'bcn printed no envelope' }));
-          }
-        }
-        resolve([code ?? (signal ? -(constants.signals[signal] ?? 1) : -1), env]);
-      });
+      },
+      onNoEnvelope: () => job.log.push(pyJson({ event: 'log', level: 'error', message: 'bcn printed no envelope' })),
     });
+    job.proc = p;
+    // run()'s own cancelRequested() check only runs between targets, before invoke() is
+    // called for the next one — it never re-checks while this process is actually running,
+    // so a single-target job (the common case) ignored Cancel entirely until it finished on
+    // its own. This polls the same flag while the process is alive and signals it directly.
+    const watchCancel = setInterval(() => {
+      void this.cancelRequested(job.id).then((requested) => {
+        if (!requested || job.proc !== p) return;
+        clearInterval(watchCancel);
+        job.cancelRequested = true;
+        p.kill('SIGINT');
+      });
+    }, 1000);
+    try {
+      return await done;
+    } finally {
+      clearInterval(watchCancel);
+      job.proc = null;
+    }
   }
 }

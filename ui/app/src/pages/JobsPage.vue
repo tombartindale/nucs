@@ -44,7 +44,7 @@ function view(j: JobSummary & { _seen?: number }) {
   const d = details.get(j.id);
   return {
     j, st, p, live, runPct,
-    meta: `#${j.id} · ${j.by || ''} · ${live ? (j.started ? `started ${fmtAgo(j.started, beacon.now)}` : 'waiting') : `finished ${fmtAgo(j.finished, beacon.now)} · ${fmtDuration(j.duration_ms)}`}`,
+    meta: `#${j.id} · ${j.by || ''} · ${live ? (j.started ? `started ${fmtAgo(j.started, beacon.now)}` : j.pool === 'remote' ? 'waiting for a runner' : 'waiting') : `finished ${fmtAgo(j.finished, beacon.now)} · ${fmtDuration(j.duration_ms)}`}${j.runner ? ` · on runner ${j.runner}` : ''}`,
     progress: [p.topic, p.message, p.items ? `topic ${p.item} of ${p.items}` : null,
       j.target_count > 1 ? `invocation ${j.target_index + 1} of ${j.target_count}` : null,
       p.elapsed_ms ? `elapsed ${fmtDuration(p.elapsed_ms)}` : null, p.eta_ms !== undefined ? `ETA ${fmtDuration(p.eta_ms)}` : null,

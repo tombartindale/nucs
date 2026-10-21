@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -57,6 +58,10 @@ def ffmpeg(tools: Tools, args: list[str], *, duration: float | None, on_pct: Cal
                 return
             on_pct(min(100.0, us / 1e6 / duration * 100))
 
+    # A runner sharing one machine between several encodes caps each one (ffmpeg otherwise takes every core).
+    threads = os.environ.get("BCN_FFMPEG_THREADS", "")
+    if threads.isdigit() and int(threads) > 0 and args:
+        args = ["-filter_complex_threads", threads, *args[:-1], "-threads", threads, args[-1]]
     cmd = [tools.ffmpeg or "ffmpeg", "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-progress", "pipe:1", "-nostats", *args]
     code, out, err = run_proc(cmd, on_stdout_line=on_line, timeout=timeout, cwd=cwd)
     if code != 0:

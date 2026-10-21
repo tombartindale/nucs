@@ -114,6 +114,10 @@ COPY deploy/default-programme/ /data/programme/
 
 ENV BCN=/app/tooling/.venv/bin/bcn
 ENV NODE_ENV=production
+# Which build this is (CI passes the commit). A remote runner must be on the same build as the
+# server before it is handed jobs (ui/server/src/runner-api.ts); "dev" turns that check off.
+ARG BEACON_VERSION=dev
+ENV BEACON_VERSION=$BEACON_VERSION
 
 EXPOSE 8420
 ENTRYPOINT ["node", "/app/ui/server/bin/beacon-ui"]
