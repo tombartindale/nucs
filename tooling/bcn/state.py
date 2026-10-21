@@ -456,6 +456,15 @@ class TopicState:
                 st.blockers.append({"code": "QA_ASSET_OUTSTANDING", "message": f"Asset request '{a.asset}' is {a.status}.",
                                     "file": f"{self.t.module}/assets.md"})
 
+    @staticmethod
+    def _step_counts(s: Step) -> dict[str, int]:
+        """This step's own error/warn findings, so a UI can say which step a warning came from."""
+        out = {"error": 0, "warn": 0}
+        for d in (s.env or {}).get("diagnostics", []):
+            if d.get("level") in out and not (d.get("level") == "error" and d.get("code") in TopicState.NOT_READY):
+                out[d["level"]] += 1
+        return out
+
     def _steps_json(self, lang: str) -> dict[str, dict[str, Any]]:
         out = {}
         for (name, l), s in self.steps.items():
@@ -463,7 +472,8 @@ class TopicState:
                 continue
             out[name] = {"exists": s.exists, "ok": s.ok if s.exists else None, "fresh": s.fresh if s.exists else None,
                          "time": _iso(s.mtime), "skipped": s.result.get("skipped") if s.exists else None,
-                         "draft": (s.result.get("mode") == "draft") if s.exists else None}
+                         "draft": (s.result.get("mode") == "draft") if s.exists else None,
+                         "counts": self._step_counts(s) if s.exists else None}
         return out
 
     def _manifest_intact(self, name: str) -> bool:

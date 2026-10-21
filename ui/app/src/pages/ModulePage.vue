@@ -59,6 +59,12 @@ function translated(r: TopicStatus, lang: 'en' | 'zh') {
 function issue(l: LangState): 'error' | 'warn' | null {
   return l.blocked || l.diagnostics.error ? 'error' : l.diagnostics.warn ? 'warn' : null;
 }
+// The draft script's own findings: validate's, not those of cues, subtitles or compose.
+function scriptIssue(l: LangState): 'error' | 'warn' | null {
+  const c = l.steps.validate?.counts;
+  return !c ? null : c.error || l.blockers.some((b) => b.step === 'validate') ? 'error' : c.warn ? 'warn' : null;
+}
+const scriptTip = (l: LangState) => { const c = l.steps.validate?.counts; return [c?.error ? plural(c.error, 'error') : '', c?.warn ? plural(c.warn, 'warning') : ''].filter(Boolean).join('\n'); };
 const issueTip = (l: LangState) => [...l.blockers.map((b) => b.message),
   l.diagnostics.error ? plural(l.diagnostics.error, 'error') : '', l.diagnostics.warn ? plural(l.diagnostics.warn, 'warning') : ''].filter(Boolean).join('\n');
 const waitingOn = computed(() => Object.fromEntries(AWAITING.map((a) => [a.key, rows.value.filter((r) => !have(r, a.key)).length])) as Record<AwaitKey, number>);
@@ -72,19 +78,21 @@ const stepKeys = (lang: 'en' | 'zh') => [...new Set(rows.value.flatMap((r) => Ob
 const STEP_ICON = {
   ok: ['check', 'positive'], failed: ['error', 'negative'], stale: ['update', 'warning'], draft: ['edit_note', 'warning'], none: ['remove', 'grey-5'],
 } as const;
-function stepStatus(s: StepState | undefined): keyof typeof STEP_ICON {
+// A step that refused because something earlier is missing has ok=false but is only waiting
+// (the server leaves it out of the blockers), so "failed" means a real finding from that step.
+function stepStatus(s: StepState | undefined, step?: string, l?: LangState): keyof typeof STEP_ICON {
   if (!s || !s.exists) return 'none';
-  if (s.ok === false) return 'failed';
+  if (s.ok === false) return l && step && l.blockers.some((b) => b.step === step) ? 'failed' : 'none';
   if (s.fresh === false) return 'stale';
   if (s.draft) return 'draft';
   return 'ok';
 }
-const STEP_WORD = { ok: 'up to date', failed: 'failed', stale: 'out of date (inputs changed since it ran)', draft: 'draft only, not delivered', none: 'not run yet' };
-const stepTip = (name: string, s: StepState | undefined) =>
-  `${name}: ${STEP_WORD[stepStatus(s)]}${s?.time ? `\nran ${fmtAgo(s.time)}` : ''}`;
+const STEP_WORD = { ok: 'up to date', failed: 'failed', stale: 'out of date (inputs changed since it ran)', draft: 'draft only, not delivered', none: "not run yet, or waiting on an earlier step" };
+const stepTip = (name: string, s: StepState | undefined, step?: string, l?: LangState) =>
+  `${name}: ${STEP_WORD[stepStatus(s, step, l)]}${s?.time ? `\nran ${fmtAgo(s.time)}` : ''}`;
 // Steps with a problem (failed or stale), for the compact view's single icon.
 function stepIssues(l: LangState) {
-  return Object.entries(l.steps).map(([k, s]) => [k, stepStatus(s)] as const).filter(([, st]) => st === 'failed' || st === 'stale');
+  return Object.entries(l.steps).map(([k, s]) => [k, stepStatus(s, k, l)] as const).filter(([, st]) => st === 'failed' || st === 'stale');
 }
 const pipelineTip = (r: TopicStatus) => [['en', r.en] as const, ...langs.value.map((l) => [l, r[l]] as const)]
   .flatMap(([l, st]) => stepIssues(st).map(([k, v]) => `${l.toUpperCase()} ${k}: ${v === 'failed' ? 'failed' : 'out of date'}`)).join('\n');
@@ -555,16 +563,16 @@ async function sendReminder() {
                   </a>
                 </td>
                 <td v-for="a in AWAITING" :key="a.key" class="c">
-                  <q-icon v-if="have(r, a.key)" :name="a.key === 'script' && issue(r.en) ? (issue(r.en) === 'error' ? 'error' : 'warning') : 'check_circle'"
-                    :color="a.key === 'script' && issue(r.en) ? (issue(r.en) === 'error' ? 'negative' : 'warning') : 'positive'" size="20px">
-                    <q-tooltip style="white-space: pre-line">{{ a.help }} received{{ a.key === 'script' && issue(r.en) ? '\n' + issueTip(r.en) : '' }}</q-tooltip>
+                  <q-icon v-if="have(r, a.key)" :name="a.key === 'script' && scriptIssue(r.en) ? (scriptIssue(r.en) === 'error' ? 'error' : 'warning') : 'check_circle'"
+                    :color="a.key === 'script' && scriptIssue(r.en) ? (scriptIssue(r.en) === 'error' ? 'negative' : 'warning') : 'positive'" size="20px">
+                    <q-tooltip style="white-space: pre-line">{{ a.help }} received{{ a.key === 'script' && scriptIssue(r.en) ? '\n' + scriptTip(r.en) : '' }}</q-tooltip>
                   </q-icon>
                   <q-icon v-else name="hourglass_empty" color="grey-6" size="20px"><q-tooltip>Waiting for {{ a.help }}</q-tooltip></q-icon>
                 </td>
                 <template v-if="detail">
                   <td v-for="k in stepKeys('en')" :key="`en-${k}`" :class="['c st', { sep: k === stepKeys('en')[0] }]">
-                    <q-icon :name="STEP_ICON[stepStatus(r.en.steps[k])][0]" :color="STEP_ICON[stepStatus(r.en.steps[k])][1]" size="18px">
-                      <q-tooltip style="white-space: pre-line">{{ stepTip(`EN ${k}`, r.en.steps[k]) }}</q-tooltip>
+                    <q-icon :name="STEP_ICON[stepStatus(r.en.steps[k], k, r.en)][0]" :color="STEP_ICON[stepStatus(r.en.steps[k], k, r.en)][1]" size="18px">
+                      <q-tooltip style="white-space: pre-line">{{ stepTip(`EN ${k}`, r.en.steps[k], k, r.en) }}</q-tooltip>
                     </q-icon>
                   </td>
                 </template>
@@ -583,8 +591,8 @@ async function sendReminder() {
                 </td>
                 <template v-if="detail">
                   <td v-for="k in stepKeys(l)" :key="`${l}-${k}`" class="c st">
-                    <q-icon :name="STEP_ICON[stepStatus(r[l].steps[k])][0]" :color="STEP_ICON[stepStatus(r[l].steps[k])][1]" size="18px">
-                      <q-tooltip style="white-space: pre-line">{{ stepTip(`${l.toUpperCase()} ${k}`, r[l].steps[k]) }}</q-tooltip>
+                    <q-icon :name="STEP_ICON[stepStatus(r[l].steps[k], k, r[l])][0]" :color="STEP_ICON[stepStatus(r[l].steps[k], k, r[l])][1]" size="18px">
+                      <q-tooltip style="white-space: pre-line">{{ stepTip(`${l.toUpperCase()} ${k}`, r[l].steps[k], k, r[l]) }}</q-tooltip>
                     </q-icon>
                   </td>
                 </template>

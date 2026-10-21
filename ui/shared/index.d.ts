@@ -27,11 +27,13 @@ export interface DiagnosticData {
   [k: string]: unknown;
 }
 export type Diagnostic = Omit<GenDiagnostic, 'data'> & { data?: DiagnosticData };
-export interface Blocker { code: string; message: string; file?: string | null }
+export interface Blocker { code: string; message: string; file?: string | null; step?: string }
 // `draft` is only ever non-null for compose: whether its last fresh run was `--draft` (a
 // preview, not delivered — see Step.delivered in state.py), so a draft run can be `ok` and
 // `fresh` while `next` still points back at compose until a non-draft run exists.
-export interface StepState { exists: boolean; ok: boolean | null; fresh: boolean | null; time: string | null; skipped: boolean | null; draft: boolean | null }
+export interface StepState { exists: boolean; ok: boolean | null; fresh: boolean | null; time: string | null; skipped: boolean | null; draft: boolean | null;
+  /** This step's own findings (not-ready refusals excluded); null if it has not run. */
+  counts: { error: number; warn: number } | null }
 type GenTopic = BcnStatusEnvelope['results'][number];
 export type LangState = Omit<NonNullable<GenTopic['en']>, 'blockers' | 'steps'> & {
   stage: string; stage_index: number; stages: string[]; stale: boolean; stale_steps: string[]; blocked: boolean;
