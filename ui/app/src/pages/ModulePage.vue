@@ -56,6 +56,29 @@ function translated(r: TopicStatus, lang: 'en' | 'zh') {
   const l = r[lang], at = l.stages.indexOf('returned');
   return at >= 0 && l.stage_index >= at;
 }
+
+// The default-layout compose output to show on the module grid: whichever file the step's
+// own last run actually wrote (steps.compose.draft, same flag TopicActions.vue reads — a
+// draft run writes build/draft.mp4, a delivered one writes build/composed.mp4; they're
+// separate files, not one file with a mode flag, so which artifact to point the player at
+// follows from which run was most recent, not from which files happen to exist).
+function composeOutput(r: TopicStatus, lang: 'en' | 'zh') {
+  const st = r[lang].steps.compose;
+  if (!st?.exists) return null;
+  const kind = st.draft ? 'draft' : 'composed';
+  const art = r.artifacts.find((a) => a.kind === kind && a.lang === lang && a.exists);
+  if (!art) return null;
+  return { path: art.path, mtime: art.mtime, draft: !!st.draft, stale: st.fresh === false };
+}
+const videoDialog = reactive({ open: false, title: '', src: '', draft: false });
+function openComposeVideo(r: TopicStatus, lang: 'en' | 'zh') {
+  const out = composeOutput(r, lang);
+  if (!out) return;
+  videoDialog.src = fileUrl(out.path, out.mtime);
+  videoDialog.title = `${r.code} · ${LANG_NAME[lang]}${out.draft ? ' · draft' : ''}`;
+  videoDialog.draft = out.draft;
+  videoDialog.open = true;
+}
 function issue(l: LangState): 'error' | 'warn' | null {
   return l.blocked || l.diagnostics.error ? 'error' : l.diagnostics.warn ? 'warn' : null;
 }
@@ -506,12 +529,14 @@ async function sendReminder() {
               <tr>
                 <th></th><th>Topic</th>
                 <th v-for="a in AWAITING" :key="a.key" class="c">{{ a.label }}<span class="n">{{ rows.length - waitingOn[a.key] }}/{{ rows.length }}</span></th>
+                <th class="c sep">Composed<span class="n">en</span></th>
                 <template v-if="detail">
                   <th v-for="k in stepKeys('en')" :key="`en-${k}`" :class="['c st', { sep: k === stepKeys('en')[0] }]">{{ k }}<span class="n">en</span></th>
                 </template>
                 <th v-if="!detail" class="c sep">Pipeline<span class="n">issues</span></th>
                 <template v-for="l in langs" :key="l">
                   <th class="c sep">{{ LANG_NAME[l] }}<span class="n">{{ rows.length - waitingTrans[l] }}/{{ rows.length }}</span></th>
+                  <th class="c sep">Composed<span class="n">{{ l }}</span></th>
                   <template v-if="detail"><th v-for="k in stepKeys(l)" :key="`${l}-${k}`" class="c st">{{ k }}<span class="n">{{ l }}</span></th></template>
                 </template>
               </tr>
@@ -569,6 +594,13 @@ async function sendReminder() {
                   </q-icon>
                   <q-icon v-else name="hourglass_empty" color="grey-6" size="20px"><q-tooltip>Waiting for {{ a.help }}</q-tooltip></q-icon>
                 </td>
+                <td class="c sep">
+                  <q-btn v-if="composeOutput(r, 'en')" round flat dense size="sm" icon="play_circle"
+                    :color="composeOutput(r, 'en')!.draft ? 'warning' : 'positive'" @click="openComposeVideo(r, 'en')">
+                    <q-tooltip style="white-space: pre-line">{{ composeOutput(r, 'en')!.draft ? 'Draft preview' : 'Final composed video' }}{{ composeOutput(r, 'en')!.stale ? ' (out of date)' : '' }} · {{ fmtAgo(composeOutput(r, 'en')!.mtime) }}</q-tooltip>
+                  </q-btn>
+                  <q-icon v-else name="remove" color="grey-5" size="20px"><q-tooltip>No composed video yet</q-tooltip></q-icon>
+                </td>
                 <template v-if="detail">
                   <td v-for="k in stepKeys('en')" :key="`en-${k}`" :class="['c st', { sep: k === stepKeys('en')[0] }]">
                     <q-icon :name="STEP_ICON[stepStatus(r.en.steps[k], k, r.en)][0]" :color="STEP_ICON[stepStatus(r.en.steps[k], k, r.en)][1]" size="18px">
@@ -589,6 +621,13 @@ async function sendReminder() {
                   <q-icon v-else-if="translated(r, l)" name="check_circle" color="positive" size="20px"><q-tooltip>{{ LANG_NAME[l] }} copy in the system</q-tooltip></q-icon>
                   <q-icon v-else name="hourglass_empty" color="grey-6" size="20px"><q-tooltip style="white-space: pre-line">{{ halfTip(r[l], l) }}</q-tooltip></q-icon>
                 </td>
+                <td class="c sep">
+                  <q-btn v-if="composeOutput(r, l)" round flat dense size="sm" icon="play_circle"
+                    :color="composeOutput(r, l)!.draft ? 'warning' : 'positive'" @click="openComposeVideo(r, l)">
+                    <q-tooltip style="white-space: pre-line">{{ composeOutput(r, l)!.draft ? 'Draft preview' : 'Final composed video' }}{{ composeOutput(r, l)!.stale ? ' (out of date)' : '' }} · {{ fmtAgo(composeOutput(r, l)!.mtime) }}</q-tooltip>
+                  </q-btn>
+                  <q-icon v-else name="remove" color="grey-5" size="20px"><q-tooltip>No composed video yet</q-tooltip></q-icon>
+                </td>
                 <template v-if="detail">
                   <td v-for="k in stepKeys(l)" :key="`${l}-${k}`" class="c st">
                     <q-icon :name="STEP_ICON[stepStatus(r[l].steps[k], k, r[l])][0]" :color="STEP_ICON[stepStatus(r[l].steps[k], k, r[l])][1]" size="18px">
@@ -607,8 +646,25 @@ async function sendReminder() {
         <q-icon name="hourglass_empty" color="grey-6" /> waiting ·
         <q-icon name="warning" color="warning" /> validation warnings ·
         <q-icon name="error" color="negative" /> errors, blocked or a failed step ·
-        <q-icon name="update" color="warning" /> a step is out of date. A ☁ topic has cloud-only files. Click a row to open it; ⌘-click or tick to select.
+        <q-icon name="update" color="warning" /> a step is out of date ·
+        <q-icon name="play_circle" color="positive" /> composed, final <q-icon name="play_circle" color="warning" /> composed, draft only.
+        A ☁ topic has cloud-only files. Click a row to open it; ⌘-click or tick to select.
       </p>
+
+      <q-dialog v-model="videoDialog.open">
+        <q-card style="width: 960px; max-width: 95vw;">
+          <q-card-section class="row items-center q-pb-sm">
+            <div class="text-subtitle1 text-weight-medium">{{ videoDialog.title }}</div>
+            <StateChip v-if="videoDialog.draft" kind="warn" label="draft only" class="q-ml-sm" />
+            <q-space />
+            <q-btn icon="close" flat round dense v-close-popup />
+          </q-card-section>
+          <q-card-section class="q-pa-none">
+            <video v-if="videoDialog.open" :src="videoDialog.src" controls autoplay
+              style="width: 100%; max-height: 75vh; display: block; background: black;" />
+          </q-card-section>
+        </q-card>
+      </q-dialog>
     </template>
   </q-page>
 </template>
