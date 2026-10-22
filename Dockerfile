@@ -47,21 +47,28 @@ RUN curl -fsSL -o ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VER
 # -- tooling: Python venv + pinned Marp toolchain + Chrome for Testing ------------------
 FROM base AS tooling
 WORKDIR /app
-COPY tooling/pyproject.toml tooling/pyproject.toml
-COPY tooling/bcn tooling/bcn
-RUN python3 -m venv tooling/.venv \
-    && tooling/.venv/bin/pip install --no-cache-dir -q -e "tooling[s3]"
-
+# Ordered so the slow, rarely-changing installs stay cached when only bcn's own code
+# changes: Node packages and Chrome first, then Python dependencies, then bcn itself.
 COPY tooling/node/package.json tooling/node/package-lock.json tooling/node/
 RUN cd tooling/node && npm ci --no-audit --no-fund
-COPY tooling/node/*.mjs tooling/node/
 
 # CHROME_VERSION is pinned in tooling/bcn/tools.py; installed by the same
-# @puppeteer/browsers tool scripts/setup.sh uses, to the same path tools.py expects.
-RUN CHROME_VERSION=$(python3 -c "import re;print(re.search(r'CHROME_VERSION = \"([^\"]+)\"', open('tooling/bcn/tools.py').read()).group(1))") \
+# @puppeteer/browsers tool scripts/setup.sh uses, to the same path tools.py expects. Only
+# tools.py is copied in for this, so a change elsewhere in bcn does not re-download Chrome.
+COPY tooling/bcn/tools.py /tmp/tools.py
+RUN CHROME_VERSION=$(python3 -c "import re;print(re.search(r'CHROME_VERSION = \"([^\"]+)\"', open('/tmp/tools.py').read()).group(1))") \
     && cd tooling/node \
     && npx --no-install @puppeteer/browsers install "chrome@${CHROME_VERSION}" --path /app/tooling/vendor/chrome
 
+# bcn's dependencies (the [s3] extra) before its source, so they install once; bcn itself
+# is then an editable install with nothing left to fetch.
+COPY tooling/pyproject.toml tooling/pyproject.toml
+RUN python3 -m venv tooling/.venv \
+    && tooling/.venv/bin/pip install --no-cache-dir -q "boto3>=1.34" "setuptools>=68"
+COPY tooling/bcn tooling/bcn
+RUN tooling/.venv/bin/pip install --no-cache-dir -q --no-deps --no-build-isolation -e "tooling[s3]"
+
+COPY tooling/node/*.mjs tooling/node/
 COPY tooling/themes tooling/themes
 
 # -- ui: build the Fastify server and the Quasar SPA ------------------------------------
