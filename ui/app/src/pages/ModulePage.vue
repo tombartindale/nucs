@@ -113,6 +113,24 @@ function stepStatus(s: StepState | undefined, step?: string, l?: LangState): key
 const STEP_WORD = { ok: 'up to date', failed: 'failed', stale: 'out of date (inputs changed since it ran)', draft: 'draft only, not delivered', none: "not run yet, or waiting on an earlier step" };
 const stepTip = (name: string, s: StepState | undefined, step?: string, l?: LangState) =>
   `${name}: ${STEP_WORD[stepStatus(s, step, l)]}${s?.time ? `\nran ${fmtAgo(s.time)}` : ''}`;
+// Bumpers isn't a pipeline step on the backend (no StepState, same as TopicActions.vue's own
+// 'bumpers' kind) — it's a tool derived from the bumper_card/bumper artifacts themselves, so it
+// never appears in stepKeys(). Spliced into the detail column list right before 'compose'
+// (which draws on it), the one place it actually sits in the pipeline.
+function bumperStatus(r: TopicStatus, lang: 'en' | 'zh'): 'ok' | 'stale' | 'none' {
+  const made = r.artifacts.filter((a) => a.kind.startsWith('bumper') && a.lang === lang && a.exists);
+  if (!made.length) return 'none';
+  return made.some((a) => a.stale) ? 'stale' : 'ok';
+}
+const BUMPER_WORD = { ok: 'made', stale: 'out of date (newer script than the bumpers)', none: 'not made yet (optional; compose can also run with --no-bumpers)' };
+const bumperTip = (name: string, r: TopicStatus, lang: 'en' | 'zh') => `${name}: ${BUMPER_WORD[bumperStatus(r, lang)]}`;
+function detailCols(lang: 'en' | 'zh') {
+  const keys = stepKeys(lang);
+  const out = [...keys];
+  const i = out.indexOf('compose');
+  out.splice(i === -1 ? out.length : i, 0, 'bumpers');
+  return out;
+}
 // Steps with a problem (failed or stale), for the compact view's single icon.
 function stepIssues(l: LangState) {
   return Object.entries(l.steps).map(([k, s]) => [k, stepStatus(s, k, l)] as const).filter(([, st]) => st === 'failed' || st === 'stale');
@@ -531,13 +549,13 @@ async function sendReminder() {
                 <th v-for="a in AWAITING" :key="a.key" class="c">{{ a.label }}<span class="n">{{ rows.length - waitingOn[a.key] }}/{{ rows.length }}</span></th>
                 <th class="c sep">Composed<span class="n">en</span></th>
                 <template v-if="detail">
-                  <th v-for="k in stepKeys('en')" :key="`en-${k}`" :class="['c st', { sep: k === stepKeys('en')[0] }]">{{ k }}<span class="n">en</span></th>
+                  <th v-for="k in detailCols('en')" :key="`en-${k}`" :class="['c st', { sep: k === detailCols('en')[0] }]">{{ k }}<span class="n">en</span></th>
                 </template>
                 <th v-if="!detail" class="c sep">Pipeline<span class="n">issues</span></th>
                 <template v-for="l in langs" :key="l">
                   <th class="c sep">{{ LANG_NAME[l] }}<span class="n">{{ rows.length - waitingTrans[l] }}/{{ rows.length }}</span></th>
                   <th class="c sep">Composed<span class="n">{{ l }}</span></th>
-                  <template v-if="detail"><th v-for="k in stepKeys(l)" :key="`${l}-${k}`" class="c st">{{ k }}<span class="n">{{ l }}</span></th></template>
+                  <template v-if="detail"><th v-for="k in detailCols(l)" :key="`${l}-${k}`" class="c st">{{ k }}<span class="n">{{ l }}</span></th></template>
                 </template>
               </tr>
             </thead>
@@ -602,8 +620,11 @@ async function sendReminder() {
                   <q-icon v-else name="remove" color="grey-5" size="20px"><q-tooltip>No composed video yet</q-tooltip></q-icon>
                 </td>
                 <template v-if="detail">
-                  <td v-for="k in stepKeys('en')" :key="`en-${k}`" :class="['c st', { sep: k === stepKeys('en')[0] }]">
-                    <q-icon :name="STEP_ICON[stepStatus(r.en.steps[k], k, r.en)][0]" :color="STEP_ICON[stepStatus(r.en.steps[k], k, r.en)][1]" size="18px">
+                  <td v-for="k in detailCols('en')" :key="`en-${k}`" :class="['c st', { sep: k === detailCols('en')[0] }]">
+                    <q-icon v-if="k === 'bumpers'" :name="STEP_ICON[bumperStatus(r, 'en')][0]" :color="STEP_ICON[bumperStatus(r, 'en')][1]" size="18px">
+                      <q-tooltip style="white-space: pre-line">{{ bumperTip('EN bumpers', r, 'en') }}</q-tooltip>
+                    </q-icon>
+                    <q-icon v-else :name="STEP_ICON[stepStatus(r.en.steps[k], k, r.en)][0]" :color="STEP_ICON[stepStatus(r.en.steps[k], k, r.en)][1]" size="18px">
                       <q-tooltip style="white-space: pre-line">{{ stepTip(`EN ${k}`, r.en.steps[k], k, r.en) }}</q-tooltip>
                     </q-icon>
                   </td>
@@ -629,8 +650,11 @@ async function sendReminder() {
                   <q-icon v-else name="remove" color="grey-5" size="20px"><q-tooltip>No composed video yet</q-tooltip></q-icon>
                 </td>
                 <template v-if="detail">
-                  <td v-for="k in stepKeys(l)" :key="`${l}-${k}`" class="c st">
-                    <q-icon :name="STEP_ICON[stepStatus(r[l].steps[k], k, r[l])][0]" :color="STEP_ICON[stepStatus(r[l].steps[k], k, r[l])][1]" size="18px">
+                  <td v-for="k in detailCols(l)" :key="`${l}-${k}`" class="c st">
+                    <q-icon v-if="k === 'bumpers'" :name="STEP_ICON[bumperStatus(r, l)][0]" :color="STEP_ICON[bumperStatus(r, l)][1]" size="18px">
+                      <q-tooltip style="white-space: pre-line">{{ bumperTip(`${l.toUpperCase()} bumpers`, r, l) }}</q-tooltip>
+                    </q-icon>
+                    <q-icon v-else :name="STEP_ICON[stepStatus(r[l].steps[k], k, r[l])][0]" :color="STEP_ICON[stepStatus(r[l].steps[k], k, r[l])][1]" size="18px">
                       <q-tooltip style="white-space: pre-line">{{ stepTip(`${l.toUpperCase()} ${k}`, r[l].steps[k], k, r[l]) }}</q-tooltip>
                     </q-icon>
                   </td>
