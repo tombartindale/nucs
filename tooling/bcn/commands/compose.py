@@ -141,10 +141,10 @@ def name_tag_box(c: dict, es: EncodeSpec, theme: Theme) -> tuple[int, int, int, 
     aligned side for inset and full_bleed_inset, or the presenter's own band for stacked),
     with its bottom edge clear of the subtitle safe area (or, for stacked, clear of the band's
     own bottom — there is no slide-with-subtitles below it to avoid). The tag's box sits at
-    its left or right per [name_tag] align, so "right" is against the frame's right edge,
-    inset by the margin — except full_bleed_inset, which instead anchors to the side opposite
-    the slide's inset_position, so the tag and the slide PiP box cannot land in the same
-    corner. The logo watermark lives inside the safe area at the bottom right, so the two
+    its left or right per [name_tag] align, flush against that edge ("right" is hard against
+    the frame's right edge; name_tag_margin only lifts it clear of the bottom) — except
+    full_bleed_inset, which instead anchors to the side opposite the slide's inset_position,
+    so the tag and the slide PiP box cannot land in the same corner. The logo watermark lives inside the safe area at the bottom right, so the two
     never meet.
     """
     W, H = _even(es.width), _even(es.height)
@@ -169,24 +169,24 @@ def name_tag_box(c: dict, es: EncodeSpec, theme: Theme) -> tuple[int, int, int, 
 
     if arrangement == "side_by_side":
         left = W - _even(W * theme.safe_right)
-        x, w = left + m, (W - left) - 2 * m
+        x, w = left, W - left
         font, h = sized(w)
         y = H - round(theme.safe_bottom * k) - h - m
     elif arrangement == "inset":
         w = _even(W * c["name_tag_width_scale"])
         font, h = sized(w)
-        x = W - w - m if nt.get("align", "right") == "right" else m
+        x = W - w if nt.get("align", "right") == "right" else 0
         y = H - round(theme.safe_bottom * k) - h - m
     elif arrangement == "stacked":
         w = _even(W * c["name_tag_width_scale"])
         font, h = sized(w)
         ph = _presenter_band_height(c, H)
-        x = W - w - m if nt.get("align", "right") == "right" else m
+        x = W - w if nt.get("align", "right") == "right" else 0
         y = ph - h - m
     elif arrangement == "full_bleed_inset":
         w = _even(W * c["name_tag_width_scale"])
         font, h = sized(w)
-        x = m if "right" in c["inset_position"] else W - w - m
+        x = 0 if "right" in c["inset_position"] else W - w
         y = H - round(theme.safe_bottom * k) - h - m
     elif arrangement == "full_bleed_text":
         # Hard against the right edge regardless of [name_tag] align: this arrangement's

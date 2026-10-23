@@ -64,7 +64,7 @@ def test_filter_graph_fades_tag_after_logo(tree):
     c = {**load(tree)["compose"]["layouts"]["widescreen"], "arrangement": "side_by_side"}
     x, y, w, h, _ = name_tag_box(c, es, theme)
     assert x >= 1920 * (1 - theme.safe_right) and y + h <= 1080 - theme.safe_bottom  # in the presenter's half, above the subtitles
-    assert 1920 - (x + w) < 1080 * 0.05  # its area reaches the frame's right edge, less the margin
+    assert x + w == 1920  # flush against the frame's right edge (align = "right"), no side margin
     tag = NameTag("3:v", x, y, 1.0, 5.0, 0.5)
     g = filter_graph(c, es, 60.0, None, "Helvetica", 16, None, logo_input="2:v", tag=tag)
     assert "fade=t=in:st=1.000:d=0.500:alpha=1" in g and "fade=t=out:st=5.500:d=0.500:alpha=1" in g

@@ -1,70 +1,165 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in — NUCS</title>
-<style>
-  :root { color-scheme: light dark; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0;
-    background: #f7f5f0; color: #12344d;
-  }
-  main { max-width: 360px; width: 100%; padding: 2rem; box-sizing: border-box; }
-  h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
-  p { color: #4a5a68; line-height: 1.4; }
-  input {
-    width: 100%; box-sizing: border-box; padding: 0.6rem 0.75rem; font-size: 1rem;
-    border: 1px solid #ccc; border-radius: 6px; margin: 0.75rem 0;
-  }
-  button {
-    width: 100%; padding: 0.6rem; font-size: 1rem; border: none; border-radius: 6px;
-    background: #12344d; color: white; cursor: pointer;
-  }
-  button:disabled { opacity: 0.6; cursor: default; }
-  #message { min-height: 1.5rem; font-size: 0.9rem; }
-  #message.error { color: #b3261e; }
-  #message.ok { color: #2e7d32; }
-</style>
-</head>
-<body>
-<main>
-  <h1>Sign in to NUCS</h1>
-  <p>Enter your email address and we'll send you a one-time sign-in link.</p>
-  <form id="form">
-    <input type="email" id="email" placeholder="you@northumbria.ac.uk" required autofocus>
-    <button type="submit" id="submit">Send sign-in link</button>
-  </form>
-  <p id="message" role="status"></p>
-</main>
-<script>
-  const form = document.getElementById('form');
-  const email = document.getElementById('email');
-  const submit = document.getElementById('submit');
-  const message = document.getElementById('message');
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sign in — NUCS</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0d1b26;
+        --panel: #142836;
+        --text: #eef3f7;
+        --muted: #9fb3c2;
+        --border: #2b4558;
+        --accent: #5fa8d3;
+        --error: #ff8a80;
+        --ok: #81c995;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        margin: 0;
+        background:
+          radial-gradient(ellipse at top, #18344a 0%, var(--bg) 60%) fixed,
+          var(--bg);
+        color: var(--text);
+      }
+      main {
+        max-width: 380px;
+        width: 100%;
+        padding: 2rem 16px;
+        box-sizing: border-box;
+      }
+      header {
+        text-align: center;
+        margin-bottom: 2rem;
+      }
+      .title {
+        font-size: 2.5rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        margin: 0;
+      }
+      .tagline {
+        color: var(--muted);
+        margin: 0.4rem 0 0;
+        font-size: 1rem;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 1.5rem;
+      }
+      h1 {
+        font-size: 1.1rem;
+        margin: 0 0 0.5rem;
+      }
+      p {
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.6rem 0.75rem;
+        font-size: 1rem;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        margin: 0.75rem 0;
+      }
+      input:focus {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      button {
+        width: 100%;
+        padding: 0.6rem;
+        font-size: 1rem;
+        border: none;
+        border-radius: 6px;
+        background: var(--accent);
+        color: #0d1b26;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      #message {
+        min-height: 1.5rem;
+        font-size: 0.9rem;
+        margin-bottom: 0;
+      }
+      #message.error {
+        color: var(--error);
+      }
+      #message.ok {
+        color: var(--ok);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="title">Northumbria University Content Studio</p>
+        <p class="tagline">From approved script to delivery package</p>
+      </header>
+      <div class="card">
+        <h1>Sign in</h1>
+        <p>
+          Enter your email address and we'll send you a one-time sign-in link.
+        </p>
+        <form id="form">
+          <input
+            type="email"
+            id="email"
+            placeholder="you@northumbria.ac.uk"
+            required
+            autofocus
+          />
+          <button type="submit" id="submit">Send sign-in link</button>
+        </form>
+        <p id="message" role="status"></p>
+      </div>
+    </main>
+    <script>
+      const form = document.getElementById("form");
+      const email = document.getElementById("email");
+      const submit = document.getElementById("submit");
+      const message = document.getElementById("message");
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    submit.disabled = true;
-    message.className = '';
-    message.textContent = 'Sending…';
-    try {
-      const res = await fetch('/api/auth/request-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.value }),
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        submit.disabled = true;
+        message.className = "";
+        message.textContent = "Sending…";
+        try {
+          const res = await fetch("/api/auth/request-link", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: email.value }),
+          });
+          if (!res.ok) throw new Error("Something went wrong. Try again.");
+          message.className = "ok";
+          message.textContent =
+            "If that address is allowed, a sign-in link is on its way. Check your inbox.";
+        } catch (err) {
+          message.className = "error";
+          message.textContent =
+            err.message || "Something went wrong. Try again.";
+        } finally {
+          submit.disabled = false;
+        }
       });
-      if (!res.ok) throw new Error('Something went wrong. Try again.');
-      message.className = 'ok';
-      message.textContent = 'If that address is allowed, a sign-in link is on its way. Check your inbox.';
-    } catch (err) {
-      message.className = 'error';
-      message.textContent = err.message || 'Something went wrong. Try again.';
-    } finally {
-      submit.disabled = false;
-    }
-  });
-</script>
-</body>
+    </script>
+  </body>
 </html>
