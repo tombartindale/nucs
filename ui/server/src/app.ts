@@ -59,6 +59,7 @@ export function jobLabel(command: string, targets: string[], args: JobArgs): str
   if (command === 'caption') what = `caption: cue ${args.cue}`;
   if (command === 'review') what = `review: ${args.accept ? 'accept' : args.correct ? 'correct' : 'clear'}`;
   if (command === 'ack') what = args.clear ? 'withdraw acknowledgement' : `acknowledge ${String(args.fingerprint ?? '').split('|')[0]}`;
+  if (command === 'mark') what = `${args.clear ? 'untick' : 'mark'} ${args.mark}`;
   if (command === 'sync') what = `${args.pull ? 'pull from OneDrive' : 'push to OneDrive'}${args.prefer ? ' (keep chosen version)' : ''}`;
   if (command === 'translation') what = args.export ? 'translation export' : 'translation import';
   const scope = targets.length === 1 ? targets[0] : `${targets.length} targets`;

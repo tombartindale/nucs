@@ -1,15 +1,34 @@
 <script setup lang="ts">
 import { computed, inject } from 'vue';
+import type { TopicMark } from '@beacon/shared';
 import PageHeader from '@/components/PageHeader.vue';
 import StateChip from '@/components/StateChip.vue';
+import { fmtAgo } from '@/format';
+import { useBeacon } from '@/stores/beacon';
 import { TOPIC } from './context';
 
 const showScript = defineModel<boolean>('showScript', { required: true });
 const showSlides = defineModel<boolean>('showSlides', { required: true });
 const showVideo = defineModel<boolean>('showVideo', { required: true });
 const t = inject(TOPIC)!;
+const beacon = useBeacon();
 const st = computed(() => t.status.value);
 const title = computed(() => st.value?.title || (t.show.value?.en?.front?.title as string | undefined) || '');
+const recordingIn = computed(() => !!st.value?.artifacts.some((a) => a.key === 'edit/master.mp4' && a.exists));
+// Same rules as the module grid: each mark implies the one before, a recording implies both.
+const MARKS = [
+  { key: 'filmed', label: 'Filmed', todo: 'Tick once the recording session has happened' },
+  { key: 'edited', label: 'Edited', todo: 'Tick once the edit is done, before it is uploaded' },
+] as const;
+function markImplied(key: TopicMark): string | null {
+  if (recordingIn.value) return 'Recording received';
+  if (key === 'filmed' && st.value?.marks.edited) return 'Marked edited, so it has been filmed';
+  return null;
+}
+function markTip(m: typeof MARKS[number]) {
+  const by = st.value?.marks[m.key];
+  return markImplied(m.key) ?? (by ? `Marked ${m.key} by ${by.by} ${fmtAgo(by.at)}` : m.todo);
+}
 const blockers = computed(() => (st.value ? [...st.value.en.blockers.map((b) => ({ ...b, lang: 'EN' })), ...st.value.zh.blockers.map((b) => ({ ...b, lang: 'ZH' }))] : []));
 </script>
 
@@ -20,6 +39,13 @@ const blockers = computed(() => (st.value ? [...st.value.en.blockers.map((b) => 
       <div v-if="st" class="row items-center gap-md">
         <StateChip v-if="st.hydration !== 'local' && st.hydration !== 'unknown'" kind="cloud" :label="`☁ ${st.hydration}`" />
         <span v-if="st.minutes" class="text-caption">{{ st.minutes }} min · {{ st.outcomes.join(', ') }}</span>
+        <template v-if="st.has_dir">
+          <q-checkbox v-for="mk in MARKS" :key="mk.key" dense size="sm" :label="mk.label"
+            :model-value="!!st.marks[mk.key] || !!markImplied(mk.key)" :disable="!!markImplied(mk.key)"
+            @update:model-value="(v: boolean) => beacon.runJob('mark', [st!.path], v ? { mark: mk.key } : { mark: mk.key, clear: true })">
+            <q-tooltip>{{ markTip(mk) }}</q-tooltip>
+          </q-checkbox>
+        </template>
       </div>
       <q-list v-if="blockers.length" dense class="q-mt-sm">
         <q-item v-for="(b, i) in blockers" :key="i" dense class="q-px-none">

@@ -17,7 +17,7 @@ from .tree import find_root, resolve
 
 COMMANDS = [
     "validate", "render", "script", "bumpers", "cues", "caption", "subtitles", "compose", "status", "package", "qa",
-    "show", "diagnostics", "review", "ack", "edit", "docedit", "intake", "translation", "transfer", "qti", "coursemap",
+    "show", "diagnostics", "review", "ack", "mark", "edit", "docedit", "intake", "translation", "transfer", "qti", "coursemap",
     "docpdf", "readinglist", "sync", "media", "bundle", "schema", "codes", "doctor", "themecheck",
 ]
 # Commands whose positional argument is not a tree path.

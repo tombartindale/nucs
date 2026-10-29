@@ -69,7 +69,11 @@ RESULT_EXTRAS: dict[str, dict[str, Any]] = {
                "title": _str_or_null, "minutes": _int_or_null, "outcomes": {"type": "array"},
                "in_course_map": {"type": "boolean"}, "has_dir": {"type": "boolean"},
                "hydration": {"enum": ["local", "cloud", "partial", "unknown"]},
-               "unreviewed_mistranscriptions": {"type": "integer"}, "en": LANG_STATE, "zh": LANG_STATE,
+               "unreviewed_mistranscriptions": {"type": "integer"},
+               "marks": {"type": "object", "properties": {
+                   m: {"type": "object", "properties": {"by": {"type": "string"}, "at": {"type": "string"}}}
+                   for m in ("filmed", "edited")}},
+               "en": LANG_STATE, "zh": LANG_STATE,
                "artifacts": {"type": "array", "items": {"type": "object"}},
                "active_layouts": {"type": "array", "items": {"type": "object", "properties": {
                    "name": {"type": "string"}, "arrangement": {"type": "string"},
@@ -88,6 +92,7 @@ RESULT_EXTRAS: dict[str, dict[str, Any]] = {
     "sync": {"copied": {"type": "integer"}, "to_copy": {"type": "integer"}, "conflict": {"type": "integer"},
              "one_side": {"type": "integer"}, "in_sync": {"type": "integer"}, "check": {"type": "integer"}},
     "ack": {"slides": {"type": "integer"}, "words": {"type": "integer"}, "target_words": {"type": "integer"}},
+    "mark": {"marks": {"type": "object"}},
     "script": {"slides": {"type": "integer"}, "words": {"type": "integer"}, "pdf": {"type": "string"}},
     "qti": {"title": {"type": "string"}, "questions": {"type": "integer"}, "multiple_response": {"type": "integer"},
             "package": _str_or_null},

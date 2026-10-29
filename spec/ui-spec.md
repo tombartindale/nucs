@@ -142,6 +142,8 @@ Two further axes sit on top of the stage, and both need to be visible rather tha
 - **Stale.** Outputs exist but are older than their inputs. A topic can be at Cued and stale because someone corrected the script afterwards. Stale is not the same as incomplete and should not look the same.
 - **Blocked.** An error diagnostic outstanding, an outstanding asset request, or a cloud-only file. A blocked topic needs a person; an incomplete one just needs the next command.
 
+**Filmed** and **Edited** are hand-ticked markers, not stages: `bcn mark` records in `review.json` that a topic's recording session has happened, or that its edit is done but not yet uploaded, so progress is visible in the gap before `edit/master.mp4` arrives. Recorded is still decided only by those files. Edited implies filmed, and an uploaded recording implies both. Planning counts a topic with either mark as recorded, since what is left is the editor's work.
+
 `compose` is deliberately absent. A draft is a checking aid, not a stage, and treating it as one would imply topics are unfinished without it.
 
 ---
