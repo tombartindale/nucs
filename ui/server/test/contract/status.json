@@ -525,7 +525,7 @@
     "topic": "KV7015-U01-T01",
     "unit": "U01",
     "unreviewed_mistranscriptions": 0,
-    "session": null,
+    "marks": {},
     "zh": {
      "blocked": false,
      "blockers": [],
@@ -1106,7 +1106,7 @@
     "topic": "KV7015-U01-T02",
     "unit": "U01",
     "unreviewed_mistranscriptions": 0,
-    "session": null,
+    "marks": {},
     "zh": {
      "blocked": false,
      "blockers": [],
@@ -1649,7 +1649,7 @@
     "topic": "KV7015-U02-T01",
     "unit": "U02",
     "unreviewed_mistranscriptions": 0,
-    "session": null,
+    "marks": {},
     "zh": {
      "blocked": false,
      "blockers": [],

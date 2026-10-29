@@ -236,8 +236,8 @@ class TopicState:
             "has_dir": has_dir,
             "hydration": self._hydration(),
             "unreviewed_mistranscriptions": unreviewed,
-            # Ticked by hand once filming has happened; not a stage (see reviewfile).
-            "session": reviewfile.load(t)["session"] if review.exists else None,
+            # Filmed / edited, ticked by hand before the files arrive; not stages (see reviewfile).
+            "marks": reviewfile.load(t)["marks"] if review.exists else {},
             "en": en.to_json(),
             "zh": zh.to_json(),
             "artifacts": self._artifacts(),

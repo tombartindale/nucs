@@ -70,7 +70,9 @@ RESULT_EXTRAS: dict[str, dict[str, Any]] = {
                "in_course_map": {"type": "boolean"}, "has_dir": {"type": "boolean"},
                "hydration": {"enum": ["local", "cloud", "partial", "unknown"]},
                "unreviewed_mistranscriptions": {"type": "integer"},
-               "session": {"type": ["object", "null"], "properties": {"by": {"type": "string"}, "at": {"type": "string"}}},
+               "marks": {"type": "object", "properties": {
+                   m: {"type": "object", "properties": {"by": {"type": "string"}, "at": {"type": "string"}}}
+                   for m in ("filmed", "edited")}},
                "en": LANG_STATE, "zh": LANG_STATE,
                "artifacts": {"type": "array", "items": {"type": "object"}},
                "active_layouts": {"type": "array", "items": {"type": "object", "properties": {
@@ -90,7 +92,7 @@ RESULT_EXTRAS: dict[str, dict[str, Any]] = {
     "sync": {"copied": {"type": "integer"}, "to_copy": {"type": "integer"}, "conflict": {"type": "integer"},
              "one_side": {"type": "integer"}, "in_sync": {"type": "integer"}, "check": {"type": "integer"}},
     "ack": {"slides": {"type": "integer"}, "words": {"type": "integer"}, "target_words": {"type": "integer"}},
-    "session": {"session": {"type": ["object", "null"]}},
+    "mark": {"marks": {"type": "object"}},
     "script": {"slides": {"type": "integer"}, "words": {"type": "integer"}, "pdf": {"type": "string"}},
     "qti": {"title": {"type": "string"}, "questions": {"type": "integer"}, "multiple_response": {"type": "integer"},
             "package": _str_or_null},

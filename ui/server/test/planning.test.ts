@@ -197,15 +197,16 @@ describe('computeModulePlan', () => {
 describe('moduleTopicsFor', () => {
   const stages = ['planned', 'drafted', 'validated', 'rendered', 'recorded', 'cued', 'packaged'];
   const zhStages = ['not_sent', 'out_for_translation', 'returned', 'parity_checked', 'rendered', 'packaged'];
-  const row = (topic: string, session: { by: string; at: string } | null) => ({
-    topic, module: 'KV7015', unit: 'U01', title: topic, minutes: 5, session,
+  const row = (topic: string, marks: Record<string, { by: string; at: string }>) => ({
+    topic, module: 'KV7015', unit: 'U01', title: topic, minutes: 5, marks,
     en: { stage_index: 1, stages }, zh: { stage_index: 0, stages: zhStages },
   });
 
-  it('counts a topic as recorded once its session is ticked, before the edit arrives', () => {
-    const status = { results: [row('KV7015-U01-T01', { by: 'tom', at: '2026-10-29T00:00:00Z' }), row('KV7015-U01-T02', null)] };
+  it('counts a topic as recorded once it is ticked filmed or edited, before the edit arrives', () => {
+    const by = { by: 'tom', at: '2026-10-29T00:00:00Z' };
+    const status = { results: [row('KV7015-U01-T01', { filmed: by }), row('KV7015-U01-T02', { edited: by }), row('KV7015-U01-T03', {})] };
     const topics = moduleTopicsFor(status as unknown as StatusEnvelope, 'KV7015');
-    expect(topics.map((t) => t.recorded)).toEqual([true, false]);
-    expect(computeModulePlan(topics, {}).tasks.find((t) => t.kind === 'recording')?.topics).toEqual(['KV7015-U01-T02']);
+    expect(topics.map((t) => t.recorded)).toEqual([true, true, false]);
+    expect(computeModulePlan(topics, {}).tasks.find((t) => t.kind === 'recording')?.topics).toEqual(['KV7015-U01-T03']);
   });
 });

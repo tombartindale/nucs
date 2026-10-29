@@ -44,11 +44,12 @@ export interface StatusArtifact {
   key: string; path: string; lang: Lang | null; kind: string; exists: boolean; bytes: number | null;
   mtime: string | null; hydration: 'local' | 'cloud' | 'partial' | 'unknown'; stale: boolean | null; count?: number;
 }
+export type TopicMark = 'filmed' | 'edited';
 export type TopicStatus = Omit<GenTopic, 'en' | 'zh' | 'artifacts' | 'outcomes'> & {
   module: string; unit: string; code: string; path: string; title: string; minutes: number | null; outcomes: string[];
   has_dir: boolean; hydration: StatusArtifact['hydration']; unreviewed_mistranscriptions: number;
-  /** Recording session ticked off by hand (bcn session); null until then. Not a stage. */
-  session: { by: string; at: string } | null;
+  /** Progress ticked off by hand (bcn mark) before the editor's files arrive. Not stages. */
+  marks: Partial<Record<TopicMark, { by: string; at: string }>>;
   en: LangState; zh: LangState; artifacts: StatusArtifact[];
 };
 /** A unit quiz (activity.md with type: quiz) and its QTI package from bcn qti. */

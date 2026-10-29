@@ -457,7 +457,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     for (const k of ['from', 'import', 'by']) delete args[k];  // server-supplied only
     const targets = (Array.isArray(data.targets) ? data.targets : []).map((t) => app.targetRel(String(t)));
     const operator = await app.operator();
-    if (command === 'review' || command === 'ack' || command === 'session' || (command === 'cues' && (args.set || args.unset))) {
+    if (command === 'review' || command === 'ack' || command === 'mark' || (command === 'cues' && (args.set || args.unset))) {
       args.by = operator || 'ui';
     }
     return reply.code(202).send(await app.submitJob(command, targets, args, operator));

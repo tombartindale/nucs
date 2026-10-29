@@ -18,7 +18,7 @@ export const STALL_MS = 10_000;
 
 // What the browser may ask for. Anything else is refused.
 export const COMMANDS = new Set(['validate', 'render', 'script', 'bumpers', 'cues', 'caption', 'subtitles', 'compose', 'package', 'qa',
-  'review', 'intake', 'translation', 'transfer', 'sync', 'ack', 'session', 'edit', 'docedit', 'qti', 'coursemap', 'docpdf', 'readinglist', 'media']);
+  'review', 'intake', 'translation', 'transfer', 'sync', 'ack', 'mark', 'edit', 'docedit', 'qti', 'coursemap', 'docpdf', 'readinglist', 'media']);
 export const FLAG_ARGS = ['force', 'no_bumpers', 'draft', 'dump_narration', 'accept', 'clear', 'applied', 'dry_run', 'export', 'pull', 'push', 'media', 'slides', 'nested', 'full', 'init', 'replace'];
 export const VALUE_ARGS: Record<string, RegExp> = {
   lang: /^(en|zh)$/,
@@ -41,6 +41,7 @@ export const VALUE_ARGS: Record<string, RegExp> = {
   expect_sha: /^[0-9a-f]{64}$/,
   fingerprint: /^[A-Z_]{3,40}\|(en|zh)\|s\d{1,3}\|[^\x00-\x1f]{0,300}$/,
   note: /^[^\x00-\x1f]{0,500}$/,
+  mark: /^(filmed|edited)$/,
   only: /^[A-Z]{2}\d{4}\/[^\x00-\x1f]{1,300}$/,  // a local path under the root; may be a list
   layout: /^[a-z][a-z0-9_]{0,39}$/,  // a [compose.layouts] name; may be a list (see scheduler.ts)
   // A module document's path relative to the module (e.g. course-map.md, U01/activity.md,
@@ -52,7 +53,7 @@ export const VALUE_ARGS: Record<string, RegExp> = {
   upload_key: /^[A-Za-z0-9_\/.-]{1,300}$/,  // an S3 staging key this server issued; bcn re-checks the prefix
 };
 // The order value arguments are passed to bcn in. Shared with the worker's argv builder.
-export const VALUE_ORDER = ['lang', 'theme', 'set', 'unset', 'item', 'correct', 'cue', 'caption_text', 'cues_json', 'from', 'assets', 'by', 'prefer', 'fingerprint', 'note', 'expect_sha', 'doc', 'upload_key'];
+export const VALUE_ORDER = ['lang', 'theme', 'set', 'unset', 'item', 'correct', 'cue', 'caption_text', 'cues_json', 'from', 'assets', 'by', 'prefer', 'fingerprint', 'note', 'mark', 'expect_sha', 'doc', 'upload_key'];
 export const PIPELINE = new Set(['validate', 'render', 'script', 'bumpers', 'cues', 'subtitles', 'compose', 'package', 'qa']);
 
 /** Two targets overlap when one contains the other ('.' is the whole programme). */

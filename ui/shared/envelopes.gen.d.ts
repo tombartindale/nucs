@@ -24,10 +24,16 @@ export interface BcnStatusEnvelope {
     has_dir?: boolean;
     hydration?: 'local' | 'cloud' | 'partial' | 'unknown';
     unreviewed_mistranscriptions?: number;
-    session?: {
-      by?: string;
-      at?: string;
-    } | null;
+    marks?: {
+      filmed?: {
+        by?: string;
+        at?: string;
+      };
+      edited?: {
+        by?: string;
+        at?: string;
+      };
+    };
     en?: {
       stage?: string;
       stage_index?: number;

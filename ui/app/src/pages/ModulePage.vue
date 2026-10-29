@@ -4,7 +4,7 @@
 // where the scope is visible, and say what they will do before they run.
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import type { LangState, ModulePlanResponse, StepState, TopicStatus } from '@beacon/shared';
+import type { LangState, ModulePlanResponse, StepState, TopicMark, TopicStatus } from '@beacon/shared';
 import PageHeader from '@/components/PageHeader.vue';
 import StagePips from '@/components/StagePips.vue';
 import StateChip from '@/components/StateChip.vue';
@@ -51,12 +51,26 @@ function have(r: TopicStatus, key: AwaitKey) {
   if (key === 'script' && r.en.stage === 'planned') return false;
   return r.artifacts.some((a) => a.key === file && a.exists);
 }
-// The recording session is ticked by hand (bcn session, kept in review.json) so we can see
-// where filming is up to before the editor sends anything. A recording on disk implies it.
-const sessionDone = (r: TopicStatus) => !!r.session || have(r, 'recording');
-const sessionsDone = computed(() => rows.value.filter(sessionDone).length);
-function toggleSession(r: TopicStatus, on: boolean) {
-  beacon.runJob('session', [r.path], on ? {} : { clear: true });
+// Filmed and edited are ticked by hand (bcn mark, kept in review.json) so we can see where
+// production is up to before the editor uploads anything. Each implies the one before it,
+// and a recording on disk implies both, so an implied mark shows ticked but can't be changed.
+const MARKS = [
+  { key: 'filmed', label: 'Filmed', todo: 'Tick once the recording session has happened' },
+  { key: 'edited', label: 'Edited', todo: 'Tick once the edit is done, before it is uploaded' },
+] as const;
+function markImplied(r: TopicStatus, key: TopicMark): string | null {
+  if (have(r, 'recording')) return 'Recording received';
+  if (key === 'filmed' && r.marks.edited) return 'Marked edited, so it has been filmed';
+  return null;
+}
+const markDone = (r: TopicStatus, key: TopicMark) => !!r.marks[key] || !!markImplied(r, key);
+const markTip = (r: TopicStatus, m: typeof MARKS[number]) => {
+  const by = r.marks[m.key];
+  return markImplied(r, m.key) ?? (by ? `Marked ${m.key} by ${by.by} ${fmtAgo(by.at)}` : m.todo);
+};
+const marksDone = computed(() => Object.fromEntries(MARKS.map((m) => [m.key, rows.value.filter((r) => markDone(r, m.key)).length])) as Record<TopicMark, number>);
+function toggleMark(r: TopicStatus, key: TopicMark, on: boolean) {
+  beacon.runJob('mark', [r.path], on ? { mark: key } : { mark: key, clear: true });
 }
 // Translated copy is "in the system" once the stage reaches 'returned' (script + subtitles on disk).
 function translated(r: TopicStatus, lang: 'en' | 'zh') {
@@ -158,12 +172,12 @@ watch([() => route.query.unit, () => units.value.length], async ([u]) => {
 const unitPlan = (unit: string) => plan.value?.plan.units.find((u) => u.unit === unit);
 const waitOptions = computed(() => [{ label: 'anything', value: '' },
   ...AWAITING.map((a) => ({ label: `waiting on ${a.label.toLowerCase()}`, value: a.key })),
-  { label: 'not yet filmed', value: 'session' },
+  ...MARKS.map((m) => ({ label: `not yet ${m.key}`, value: m.key })),
   ...langs.value.map((l) => ({ label: `waiting on ${LANG_NAME[l]}`, value: l }))]);
 
 function matches(r: TopicStatus) {
   const f = state.filter, sides = [r.en, ...langs.value.map((l) => r[l])];
-  if (f.wait === 'session') { if (sessionDone(r)) return false; }
+  if (f.wait === 'filmed' || f.wait === 'edited') { if (markDone(r, f.wait)) return false; }
   else if (f.wait && (f.wait in waitingOn.value ? have(r, f.wait as AwaitKey) : translated(r, f.wait as 'zh'))) return false;
   if (f.stale && !sides.some((s) => s.stale)) return false;
   if (f.blocked && !sides.some((s) => s.blocked)) return false;
@@ -557,7 +571,9 @@ async function sendReminder() {
                 <th></th><th>Topic</th>
                 <template v-for="a in AWAITING" :key="a.key">
                   <th class="c">{{ a.label }}<span class="n">{{ rows.length - waitingOn[a.key] }}/{{ rows.length }}</span></th>
-                  <th v-if="a.key === 'script'" class="c">Filmed<span class="n">{{ sessionsDone }}/{{ rows.length }}</span></th>
+                  <template v-if="a.key === 'script'">
+                    <th v-for="mk in MARKS" :key="mk.key" class="c">{{ mk.label }}<span class="n">{{ marksDone[mk.key] }}/{{ rows.length }}</span></th>
+                  </template>
                 </template>
                 <th class="c sep">Composed<span class="n">en</span></th>
                 <template v-if="detail">
@@ -625,13 +641,14 @@ async function sendReminder() {
                   </q-icon>
                   <q-icon v-else name="hourglass_empty" color="grey-6" size="20px"><q-tooltip>Waiting for {{ a.help }}</q-tooltip></q-icon>
                 </td>
-                <td v-if="a.key === 'script'" class="c">
-                  <q-checkbox v-if="r.has_dir" dense size="sm" :model-value="sessionDone(r)" :disable="have(r, 'recording')"
-                    :aria-label="`Recording session done for ${r.topic}`" @update:model-value="(v: boolean) => toggleSession(r, v)">
-                    <q-tooltip>{{ have(r, 'recording') ? 'Recording received, so the session has happened'
-                      : r.session ? `Session marked done by ${r.session.by} ${fmtAgo(r.session.at)}` : 'Tick once the recording session has happened' }}</q-tooltip>
+                <template v-if="a.key === 'script'">
+                <td v-for="mk in MARKS" :key="mk.key" class="c">
+                  <q-checkbox v-if="r.has_dir" dense size="sm" :model-value="markDone(r, mk.key)" :disable="!!markImplied(r, mk.key)"
+                    :aria-label="`${mk.label}: ${r.topic}`" @update:model-value="(v: boolean) => toggleMark(r, mk.key, v)">
+                    <q-tooltip>{{ markTip(r, mk) }}</q-tooltip>
                   </q-checkbox>
                 </td>
+                </template>
                 </template>
                 <td class="c sep">
                   <q-btn v-if="composeOutput(r, 'en')" round flat dense size="sm" icon="play_circle"
@@ -689,7 +706,7 @@ async function sendReminder() {
       <p class="text-caption text-grey-7 q-mt-md">
         <q-icon name="check_circle" color="positive" /> received / in the system ·
         <q-icon name="hourglass_empty" color="grey-6" /> waiting ·
-        <q-icon name="check_box" color="primary" /> filmed (ticked by hand once the recording session has happened) ·
+        <q-icon name="check_box" color="primary" /> filmed / edited, ticked by hand before the recording is uploaded ·
         <q-icon name="warning" color="warning" /> validation warnings ·
         <q-icon name="error" color="negative" /> errors, blocked or a failed step ·
         <q-icon name="update" color="warning" /> a step is out of date ·
