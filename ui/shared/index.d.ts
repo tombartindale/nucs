@@ -47,6 +47,8 @@ export interface StatusArtifact {
 export type TopicStatus = Omit<GenTopic, 'en' | 'zh' | 'artifacts' | 'outcomes'> & {
   module: string; unit: string; code: string; path: string; title: string; minutes: number | null; outcomes: string[];
   has_dir: boolean; hydration: StatusArtifact['hydration']; unreviewed_mistranscriptions: number;
+  /** Recording session ticked off by hand (bcn session); null until then. Not a stage. */
+  session: { by: string; at: string } | null;
   en: LangState; zh: LangState; artifacts: StatusArtifact[];
 };
 /** A unit quiz (activity.md with type: quiz) and its QTI package from bcn qti. */

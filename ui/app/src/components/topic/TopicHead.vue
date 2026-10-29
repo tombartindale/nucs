@@ -2,14 +2,18 @@
 import { computed, inject } from 'vue';
 import PageHeader from '@/components/PageHeader.vue';
 import StateChip from '@/components/StateChip.vue';
+import { fmtAgo } from '@/format';
+import { useBeacon } from '@/stores/beacon';
 import { TOPIC } from './context';
 
 const showScript = defineModel<boolean>('showScript', { required: true });
 const showSlides = defineModel<boolean>('showSlides', { required: true });
 const showVideo = defineModel<boolean>('showVideo', { required: true });
 const t = inject(TOPIC)!;
+const beacon = useBeacon();
 const st = computed(() => t.status.value);
 const title = computed(() => st.value?.title || (t.show.value?.en?.front?.title as string | undefined) || '');
+const recordingIn = computed(() => !!st.value?.artifacts.some((a) => a.key === 'edit/master.mp4' && a.exists));
 const blockers = computed(() => (st.value ? [...st.value.en.blockers.map((b) => ({ ...b, lang: 'EN' })), ...st.value.zh.blockers.map((b) => ({ ...b, lang: 'ZH' }))] : []));
 </script>
 
@@ -20,6 +24,11 @@ const blockers = computed(() => (st.value ? [...st.value.en.blockers.map((b) => 
       <div v-if="st" class="row items-center gap-md">
         <StateChip v-if="st.hydration !== 'local' && st.hydration !== 'unknown'" kind="cloud" :label="`☁ ${st.hydration}`" />
         <span v-if="st.minutes" class="text-caption">{{ st.minutes }} min · {{ st.outcomes.join(', ') }}</span>
+        <q-checkbox v-if="st.has_dir" dense size="sm" label="Filmed" :model-value="!!st.session || recordingIn" :disable="recordingIn"
+          @update:model-value="(v: boolean) => beacon.runJob('session', [st!.path], v ? {} : { clear: true })">
+          <q-tooltip>{{ recordingIn ? 'Recording received, so the session has happened'
+            : st.session ? `Session marked done by ${st.session.by} ${fmtAgo(st.session.at)}` : 'Tick once the recording session has happened' }}</q-tooltip>
+        </q-checkbox>
       </div>
       <q-list v-if="blockers.length" dense class="q-mt-sm">
         <q-item v-for="(b, i) in blockers" :key="i" dense class="q-px-none">

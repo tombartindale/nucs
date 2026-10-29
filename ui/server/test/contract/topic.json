@@ -688,6 +688,7 @@
    "topic": "KV7015-U01-T01",
    "unit": "U01",
    "unreviewed_mistranscriptions": 0,
+   "session": null,
    "zh": {
     "blocked": false,
     "blockers": [],

@@ -51,6 +51,13 @@ function have(r: TopicStatus, key: AwaitKey) {
   if (key === 'script' && r.en.stage === 'planned') return false;
   return r.artifacts.some((a) => a.key === file && a.exists);
 }
+// The recording session is ticked by hand (bcn session, kept in review.json) so we can see
+// where filming is up to before the editor sends anything. A recording on disk implies it.
+const sessionDone = (r: TopicStatus) => !!r.session || have(r, 'recording');
+const sessionsDone = computed(() => rows.value.filter(sessionDone).length);
+function toggleSession(r: TopicStatus, on: boolean) {
+  beacon.runJob('session', [r.path], on ? {} : { clear: true });
+}
 // Translated copy is "in the system" once the stage reaches 'returned' (script + subtitles on disk).
 function translated(r: TopicStatus, lang: 'en' | 'zh') {
   const l = r[lang], at = l.stages.indexOf('returned');
@@ -151,11 +158,13 @@ watch([() => route.query.unit, () => units.value.length], async ([u]) => {
 const unitPlan = (unit: string) => plan.value?.plan.units.find((u) => u.unit === unit);
 const waitOptions = computed(() => [{ label: 'anything', value: '' },
   ...AWAITING.map((a) => ({ label: `waiting on ${a.label.toLowerCase()}`, value: a.key })),
+  { label: 'not yet filmed', value: 'session' },
   ...langs.value.map((l) => ({ label: `waiting on ${LANG_NAME[l]}`, value: l }))]);
 
 function matches(r: TopicStatus) {
   const f = state.filter, sides = [r.en, ...langs.value.map((l) => r[l])];
-  if (f.wait && (f.wait in waitingOn.value ? have(r, f.wait as AwaitKey) : translated(r, f.wait as 'zh'))) return false;
+  if (f.wait === 'session') { if (sessionDone(r)) return false; }
+  else if (f.wait && (f.wait in waitingOn.value ? have(r, f.wait as AwaitKey) : translated(r, f.wait as 'zh'))) return false;
   if (f.stale && !sides.some((s) => s.stale)) return false;
   if (f.blocked && !sides.some((s) => s.blocked)) return false;
   return true;
@@ -546,7 +555,10 @@ async function sendReminder() {
             <thead>
               <tr>
                 <th></th><th>Topic</th>
-                <th v-for="a in AWAITING" :key="a.key" class="c">{{ a.label }}<span class="n">{{ rows.length - waitingOn[a.key] }}/{{ rows.length }}</span></th>
+                <template v-for="a in AWAITING" :key="a.key">
+                  <th class="c">{{ a.label }}<span class="n">{{ rows.length - waitingOn[a.key] }}/{{ rows.length }}</span></th>
+                  <th v-if="a.key === 'script'" class="c">Filmed<span class="n">{{ sessionsDone }}/{{ rows.length }}</span></th>
+                </template>
                 <th class="c sep">Composed<span class="n">en</span></th>
                 <template v-if="detail">
                   <th v-for="k in detailCols('en')" :key="`en-${k}`" :class="['c st', { sep: k === detailCols('en')[0] }]">{{ k }}<span class="n">en</span></th>
@@ -605,13 +617,22 @@ async function sendReminder() {
                     <span v-if="r.unreviewed_mistranscriptions" class="unrev">✎{{ r.unreviewed_mistranscriptions }}<q-tooltip>suspected mis-transcriptions to review</q-tooltip></span>
                   </a>
                 </td>
-                <td v-for="a in AWAITING" :key="a.key" class="c">
+                <template v-for="a in AWAITING" :key="a.key">
+                <td class="c">
                   <q-icon v-if="have(r, a.key)" :name="a.key === 'script' && scriptIssue(r.en) ? (scriptIssue(r.en) === 'error' ? 'error' : 'warning') : 'check_circle'"
                     :color="a.key === 'script' && scriptIssue(r.en) ? (scriptIssue(r.en) === 'error' ? 'negative' : 'warning') : 'positive'" size="20px">
                     <q-tooltip style="white-space: pre-line">{{ a.help }} received{{ a.key === 'script' && scriptIssue(r.en) ? '\n' + scriptTip(r.en) : '' }}</q-tooltip>
                   </q-icon>
                   <q-icon v-else name="hourglass_empty" color="grey-6" size="20px"><q-tooltip>Waiting for {{ a.help }}</q-tooltip></q-icon>
                 </td>
+                <td v-if="a.key === 'script'" class="c">
+                  <q-checkbox v-if="r.has_dir" dense size="sm" :model-value="sessionDone(r)" :disable="have(r, 'recording')"
+                    :aria-label="`Recording session done for ${r.topic}`" @update:model-value="(v: boolean) => toggleSession(r, v)">
+                    <q-tooltip>{{ have(r, 'recording') ? 'Recording received, so the session has happened'
+                      : r.session ? `Session marked done by ${r.session.by} ${fmtAgo(r.session.at)}` : 'Tick once the recording session has happened' }}</q-tooltip>
+                  </q-checkbox>
+                </td>
+                </template>
                 <td class="c sep">
                   <q-btn v-if="composeOutput(r, 'en')" round flat dense size="sm" icon="play_circle"
                     :color="composeOutput(r, 'en')!.draft ? 'warning' : 'positive'" @click="openComposeVideo(r, 'en')">
@@ -668,6 +689,7 @@ async function sendReminder() {
       <p class="text-caption text-grey-7 q-mt-md">
         <q-icon name="check_circle" color="positive" /> received / in the system ·
         <q-icon name="hourglass_empty" color="grey-6" /> waiting ·
+        <q-icon name="check_box" color="primary" /> filmed (ticked by hand once the recording session has happened) ·
         <q-icon name="warning" color="warning" /> validation warnings ·
         <q-icon name="error" color="negative" /> errors, blocked or a failed step ·
         <q-icon name="update" color="warning" /> a step is out of date ·

@@ -6,6 +6,8 @@ disposable and these are not reproducible from anything else. Holds:
   cue_overrides   slide -> timecode set by hand where cues could not place a boundary
   transcripts     divergence id -> accept (SRT is fine) or correct (SRT text should read ...)
   acknowledged    finding fingerprint -> a person has judged this validation finding acceptable
+  session         the recording session has happened (who ticked it, when); null until then.
+                  A progress marker only: the recorded stage still waits for the edited files.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ def load(t: Topic) -> dict[str, Any]:
     data.setdefault("cue_overrides", {})
     data.setdefault("transcripts", {})
     data.setdefault("acknowledged", {})
+    data.setdefault("session", None)
     return data
 
 
@@ -90,3 +93,15 @@ def unacknowledge(t: Topic, fingerprint: str) -> bool:
     found = data["acknowledged"].pop(fingerprint, None) is not None
     save(t, data)
     return found
+
+
+def set_session(t: Topic, who: str) -> None:
+    data = load(t)
+    data["session"] = {"by": who, "at": utcnow()}
+    save(t, data)
+
+
+def clear_session(t: Topic) -> None:
+    data = load(t)
+    data["session"] = None
+    save(t, data)

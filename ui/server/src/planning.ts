@@ -107,7 +107,8 @@ export function moduleTopicsFor(status: StatusEnvelope, module: string): Planned
         title: r.title,
         minutes: r.minutes,
         drafted: enAt('drafted'),
-        recorded: enAt('recorded'),
+        // The session ticked off by hand counts: what's left after it is the editor's, not ours.
+        recorded: enAt('recorded') || !!r.session,
         translated: zhAt('parity_checked'),
         packaged: enAt('packaged') && zhAt('packaged'),
       };
