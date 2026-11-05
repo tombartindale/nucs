@@ -2,13 +2,13 @@
 // Module: units down, topics across, one split cell per topic (English | Mandarin).
 // Stage is shown by position; colour marks only stale and blocked. Bulk actions live here,
 // where the scope is visible, and say what they will do before they run.
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router';
 import type { LangState, ModulePlanResponse, StepState, TopicMark, TopicStatus } from '@beacon/shared';
 import PageHeader from '@/components/PageHeader.vue';
 import StagePips from '@/components/StagePips.vue';
 import StateChip from '@/components/StateChip.vue';
-import { api, fileUrl } from '@/api';
+import { api, ApiError, fileUrl } from '@/api';
 import { confirm } from '@/composables/confirm';
 import { fmtAgo, fmtMinutes, LANG_NAME, plural, STAGE_LABEL, STEP_HELP, topicPath } from '@/format';
 import { useBeacon } from '@/stores/beacon';
@@ -305,7 +305,49 @@ function syncPlanForm() {
 async function loadPlan() {
   plan.value = await api<ModulePlanResponse>(`/api/module/${props.module}/plan`);
   syncPlanForm();
+  notes.draft = plan.value.notes;
+  notes.base = plan.value.notesUpdated;
 }
+
+// Production notes: free text about the process, saved whole. `base` is the save the draft
+// started from; if someone else has saved since, the server refuses (409) and sends theirs.
+const notes = reactive({ draft: '', base: null as string | null, saving: false, conflict: '' });
+const notesDirty = computed(() => !!plan.value && notes.draft !== plan.value.notes);
+async function saveNotes() {
+  notes.saving = true;
+  try {
+    plan.value = await api<ModulePlanResponse>(`/api/module/${props.module}/notes`, {
+      method: 'PUT', body: { notes: notes.draft, expectUpdated: notes.base },
+    });
+    notes.base = plan.value.notesUpdated;
+    notes.conflict = '';
+    beacon.toast('Production notes saved.');
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) {
+      // Keep the draft; show theirs alongside so it can be merged by hand, then saved over it.
+      plan.value = await api<ModulePlanResponse>(`/api/module/${props.module}/plan`);
+      notes.conflict = plan.value.notes;
+      notes.base = plan.value.notesUpdated;
+    }
+    beacon.toast((e as Error).message, true);
+  } finally {
+    notes.saving = false;
+  }
+}
+function discardNotes() {
+  if (!plan.value) return;
+  notes.draft = plan.value.notes;
+  notes.conflict = '';
+}
+async function leaveNotes() {
+  if (!notesDirty.value) return true;
+  return await confirm({ title: 'Production notes are not saved', lines: ['Leaving now loses your changes.'], ok: 'Leave without saving', danger: true }) === true;
+}
+onBeforeRouteLeave(leaveNotes);
+onBeforeRouteUpdate(leaveNotes);
+const onUnload = (e: BeforeUnloadEvent) => { if (notesDirty.value) e.preventDefault(); };
+window.addEventListener('beforeunload', onUnload);
+onBeforeUnmount(() => window.removeEventListener('beforeunload', onUnload));
 onMounted(loadPlan);
 watch(() => props.module, loadPlan);
 
@@ -538,6 +580,36 @@ async function sendReminder() {
         </q-card>
       </q-expansion-item>
 
+      <q-card v-if="plan" flat bordered class="q-mb-md">
+        <q-card-section class="row items-center q-pb-sm">
+          <q-icon name="sticky_note_2" size="24px" class="q-mr-md text-grey-7" />
+          <div>
+            <div class="text-body1">Production notes</div>
+            <div class="text-caption text-grey-7">
+              <template v-if="plan.notesUpdated">Last saved by {{ plan.notesBy }} {{ fmtAgo(plan.notesUpdated) }}</template>
+              <template v-else>Anything worth remembering about how this module is being made</template>
+            </div>
+          </div>
+          <q-space />
+          <template v-if="notesDirty">
+            <StateChip kind="warn" label="unsaved" class="q-mr-sm" />
+            <q-btn flat dense no-caps label="Discard" class="q-mr-sm" @click="discardNotes" />
+            <q-btn color="primary" dense no-caps label="Save" :loading="notes.saving" @click="saveNotes" />
+          </template>
+        </q-card-section>
+        <q-card-section class="q-pt-none">
+          <q-banner v-if="notes.conflict" dense rounded class="bg-warning text-black q-mb-sm">
+            {{ plan.notesBy || 'Someone' }} saved these notes while you were editing. Theirs are below; your text is still in the box.
+            Merge anything you need, then Save to replace theirs.
+            <pre class="notes-theirs q-mt-sm q-mb-none">{{ notes.conflict }}</pre>
+          </q-banner>
+          <q-input v-model="notes.draft" type="textarea" outlined autogrow :maxlength="20000"
+            placeholder="e.g. presenter unavailable until 12 Nov; U03 to be re-filmed after script changes"
+            aria-label="Production notes" input-style="min-height: 4.5em"
+            @keydown.meta.s.prevent="notesDirty && saveNotes()" @keydown.ctrl.s.prevent="notesDirty && saveNotes()" />
+        </q-card-section>
+      </q-card>
+
       <q-card flat bordered>
         <q-card-section class="row items-center gap-sm">
           <strong class="text-caption">Show</strong>
@@ -735,6 +807,7 @@ async function sendReminder() {
 <style scoped>
 body.body--dark .bulkbar { background: rgba(255, 255, 255, .04) !important; }
 body.body--dark .planning-card :deep(.bg-green-1) { background: rgba(76, 175, 80, .12) !important; }
+.notes-theirs { white-space: pre-wrap; font-family: inherit; max-height: 12em; overflow: auto; opacity: .85; }
 .plan-tasks { width: 100%; border-collapse: collapse; }
 .plan-tasks th { text-align: left; font-weight: normal; color: var(--q-grey-7, #757575); font-size: 12px; padding: 4px 8px; }
 .plan-tasks td { padding: 4px 8px; border-top: 1px solid rgba(0, 0, 0, .06); }

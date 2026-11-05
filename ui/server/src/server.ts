@@ -16,7 +16,7 @@ import extractZip from 'extract-zip';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type {
   BcnDiagnosticsEnvelope, BcnDoceditEnvelope, BcnEditEnvelope, BcnReviewEnvelope, BcnStatusEnvelope, BcnSyncEnvelope, BcnThemecheckEnvelope,
-  BootResponse, JobArgs, ModulePlanRemindResponse, ModulePlanRequest, ModulePlanResponse, PlansSummaryResponse, ShowEnvelope, TranslationItem, UnitPlanRequest,
+  BootResponse, JobArgs, ModuleNotesRequest, ModulePlanRemindResponse, ModulePlanRequest, ModulePlanResponse, PlansSummaryResponse, ShowEnvelope, TranslationItem, UnitPlanRequest,
 } from '@beacon/shared';
 import type { App } from './app.js';
 import { SESSION_COOKIE } from './auth.js';
@@ -91,6 +91,7 @@ function toInt(value: unknown, name: string): number {
   if (!Number.isFinite(n)) throw new BadRequest(`'${name}' must be a whole number.`);
   return Math.trunc(n);
 }
+const NOTES_MAX = 20_000;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 export interface ServerOptions {
@@ -350,7 +351,10 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const topics = status ? moduleTopicsFor(status, module) : [];
     const plan = computeModulePlan(topics, unitDates);
     const icsUrl = `${app.auth.baseUrl}/api/module/${module}/plan/${row.ics_token}/calendar.ics`;
-    return { module, ownerName: row.owner_name, ownerEmail: row.owner_email, icsUrl, plan };
+    return {
+      module, ownerName: row.owner_name, ownerEmail: row.owner_email, icsUrl, plan,
+      notes: row.notes, notesBy: row.notes_by, notesUpdated: row.notes_updated,
+    };
   }
 
   f.get(`/api/module/:name(${MODULE})/plan`, async (req: Req) => planFor(req.params.name));
@@ -366,6 +370,20 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     }
     await app.db.upsertPlan(req.params.name, fields);
     return planFor(req.params.name);
+  });
+
+  // Production notes: free text, saved whole. expectUpdated is the notesUpdated the editor
+  // started from; if someone else has saved since, refuse with 409 and their current notes.
+  f.put(`/api/module/:name(${MODULE})/notes`, async (req: Req, reply) => {
+    const data = await readJson(req) as unknown as ModuleNotesRequest;
+    if (typeof data.notes !== 'string') throw new BadRequest('notes must be a string.');
+    if (data.notes.length > NOTES_MAX) throw new BadRequest(`Notes are limited to ${NOTES_MAX} characters.`);
+    const expect = data.expectUpdated ?? null;
+    if (expect !== null && typeof expect !== 'string') throw new BadRequest('expectUpdated must be a string or null.');
+    const saved = await app.db.saveNotes(req.params.name, data.notes, (await app.operator()) || 'ui', expect);
+    const out = await planFor(req.params.name);
+    if (!saved) return reply.code(409).send({ ...out, error: `${out.notesBy || 'Someone'} saved these notes while you were editing.` });
+    return out;
   });
 
   // Each unit's own agreed delivery date, set independently of every other unit's.
