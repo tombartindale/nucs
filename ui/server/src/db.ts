@@ -82,6 +82,11 @@ CREATE TABLE IF NOT EXISTS module_plans (
     ics_token TEXT NOT NULL,     -- random per-module secret; grants read access to the .ics feed only
     updated TEXT NOT NULL
 );
+-- Free-text production notes for the module, edited on the module page. Process notes,
+-- not content, so they live here rather than in the tree (and are in the nightly dump).
+ALTER TABLE module_plans ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
+ALTER TABLE module_plans ADD COLUMN IF NOT EXISTS notes_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE module_plans ADD COLUMN IF NOT EXISTS notes_updated TEXT;
 -- Each unit's own agreed delivery date, independent of every other unit's — production
 -- is scheduled per unit (see planning.ts), so there is one date per unit, not one for
 -- the whole module. A unit with no row yet simply has no agreed date.
@@ -127,6 +132,7 @@ export interface RunnerRow {
 export interface ModulePlanRow {
   module: string; owner_name: string; owner_email: string;
   ics_token: string; updated: string;
+  notes: string; notes_by: string; notes_updated: string | null;
 }
 
 export interface UnitPlanRow {
@@ -168,17 +174,18 @@ export class DB {
    *  feed URL is stable from the first time it's viewed rather than only after a save. */
   async getPlan(module: string): Promise<ModulePlanRow> {
     const res = await this.pool.query<ModulePlanRow>(
-      'SELECT module, owner_name, owner_email, ics_token, updated FROM module_plans WHERE module=$1', [module]);
+      'SELECT module, owner_name, owner_email, ics_token, updated, notes, notes_by, notes_updated FROM module_plans WHERE module=$1', [module]);
     if (res.rows[0]) return res.rows[0];
     const row: ModulePlanRow = {
       module, owner_name: '', owner_email: '',
       ics_token: randomBytes(24).toString('base64url'), updated: now(),
+      notes: '', notes_by: '', notes_updated: null,
     };
     await this.pool.query(
       'INSERT INTO module_plans(module, owner_name, owner_email, ics_token, updated) VALUES($1, $2, $3, $4, $5) ON CONFLICT(module) DO NOTHING',
       [row.module, row.owner_name, row.owner_email, row.ics_token, row.updated]);
     const after = await this.pool.query<ModulePlanRow>(
-      'SELECT module, owner_name, owner_email, ics_token, updated FROM module_plans WHERE module=$1', [module]);
+      'SELECT module, owner_name, owner_email, ics_token, updated, notes, notes_by, notes_updated FROM module_plans WHERE module=$1', [module]);
     return after.rows[0] ?? row;
   }
 
@@ -194,6 +201,20 @@ export class DB {
          owner_email=excluded.owner_email, updated=excluded.updated`,
       [next.module, next.owner_name, next.owner_email, next.ics_token, next.updated]);
     return next;
+  }
+
+  /** Replaces the module's production notes, unless someone else saved since `expect`
+   *  (the notes_updated the editor started from): then nothing is written and null is
+   *  returned, so two people editing at once never silently overwrite each other. */
+  async saveNotes(module: string, notes: string, by: string, expect: string | null): Promise<ModulePlanRow | null> {
+    await this.getPlan(module);
+    const res = await this.pool.query<ModulePlanRow>(
+      `UPDATE module_plans SET notes=$2, notes_by=$3, notes_updated=$4
+       WHERE module=$1 AND notes_updated IS NOT DISTINCT FROM $5
+       RETURNING module, owner_name, owner_email, ics_token, updated, notes, notes_by, notes_updated`,
+      // Millisecond precision (unlike now()): two saves in the same second must still differ.
+      [module, notes, by, new Date().toISOString(), expect]);
+    return res.rows[0] ?? null;
   }
 
   /** This unit's own agreed delivery date, or null if none has been set. */

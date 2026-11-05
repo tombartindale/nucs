@@ -257,7 +257,12 @@ export interface ModulePlanComputed {
 export interface ModulePlanResponse {
   module: string; ownerName: string; ownerEmail: string; icsUrl: string;
   plan: ModulePlanComputed;
+  /** Free-text production notes for the module; who last saved them, and when (null if never). */
+  notes: string; notesBy: string; notesUpdated: string | null;
 }
+/** PUT /api/module/:name/notes. 409 (with the current ModulePlanResponse) if someone else
+ *  saved after expectUpdated. */
+export interface ModuleNotesRequest { notes: string; expectUpdated: string | null }
 export interface ModulePlanRequest { ownerName?: string; ownerEmail?: string }
 /** PUT /api/module/:name/plan/units/:unit — sets that one unit's own agreed date. */
 export interface UnitPlanRequest { deliveryDate: string | null }
