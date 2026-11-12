@@ -1,4 +1,5 @@
-"""bcn docpdf: assignment briefs and unit activities as PDFs, to share with collaborators.
+"""bcn docpdf: assignment briefs, unit activities and the published reading list as PDFs,
+to share with collaborators.
 
 Prints each in-scope assignment-N.md and unit activity.md the same way bcn coursemap prints
 course-map.md: plain markdown to styled HTML, via the pinned Chrome. A quiz activity
@@ -6,9 +7,10 @@ course-map.md: plain markdown to styled HTML, via the pinned Chrome. A quiz acti
 feedback shown — a reviewable copy for a collaborator, not the LMS package bcn qti makes.
 
 Once a document has been translated (bcn translation), its .zh.md counterpart gets its own
-PDF alongside the English one. Written to <module>/build/assignment-<n>[-zh].pdf and
-<module>/build/<unit>-activity[-zh].pdf; skipped if already newer than its source, unless
---force.
+PDF alongside the English one. The module's published reading list (reading-list.md, the
+checked copy uploaded after bcn readinglist's extract) is printed the same way. Written to
+<module>/build/assignment-<n>[-zh].pdf, <module>/build/<unit>-activity[-zh].pdf and
+<module>/build/reading-list.pdf; skipped if already newer than its source, unless --force.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from ..quiz import parse_quiz
 from ..tree import Target
 from .coursemap import document_html, quiz_html
 
-HELP = "assignment briefs and unit activities as PDFs"
+HELP = "assignment briefs, unit activities and the published reading list as PDFs"
 
 
 def add_args(p: argparse.ArgumentParser) -> None:
@@ -43,6 +45,11 @@ def assignment_pdf_path(root: Path, module: str, name: str) -> Path:
 
 def activity_pdf_path(root: Path, module: str, unit: str, lang: str) -> Path:
     return root / module / "build" / f"{unit}-activity{'-zh' if lang == 'zh' else ''}.pdf"
+
+
+def reading_list_pdf_path(root: Path, module: str) -> Path:
+    """The published reading list's PDF (not the extract, build/reading-list.md, which has none)."""
+    return root / module / "build" / "reading-list.pdf"
 
 
 def _front_type(lines: list[str]) -> str:
@@ -112,6 +119,7 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
             for a in sorted(mdir.glob("assignment-*.md")):
                 lang = "zh" if a.name.endswith(".zh.md") else "en"
                 render(a.name, lang, assignment_pdf_path(target.root, m, a.name))
+            render("reading-list.md", "en", reading_list_pdf_path(target.root, m))
 
         units = sorted({t.unit for t in target.topics if t.module == m})
         if target.level == "unit":
@@ -122,4 +130,4 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
             for name, lang in ((f"{u}/activity.md", "en"), (f"{u}/activity.zh.md", "zh")):
                 render(name, lang, activity_pdf_path(target.root, m, u, lang))
     if not env.results and not env.diagnostics:
-        env.diagnostics.append(Diagnostic("DOCPDF_NOTHING", f"No assignment or activity document was found under {target.rel}.", level="info"))
+        env.diagnostics.append(Diagnostic("DOCPDF_NOTHING", f"No assignment, activity or published reading list was found under {target.rel}.", level="info"))

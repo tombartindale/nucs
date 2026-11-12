@@ -24,7 +24,7 @@ from ..quiz import parse_quiz
 from ..media import probe
 from ..state import STAGES, TopicState, all_topics, module_context
 from ..tree import Target, Topic
-from .docpdf import activity_pdf_path, assignment_pdf_path
+from .docpdf import activity_pdf_path, assignment_pdf_path, reading_list_pdf_path
 from .qti import package_path
 from .validate import module_documents
 
@@ -253,12 +253,14 @@ def _quiz(root: Path, module: str, rel: str) -> dict[str, Any] | None:
 
 
 def _doc_pdf(root: Path, module: str, rel: str) -> dict[str, Any] | None:
-    """For course-map.md, an assignment brief, or a unit activity: its printed PDF
-    (bcn coursemap / bcn docpdf), if made."""
+    """For course-map.md, an assignment brief, a unit activity, or the published reading
+    list: its printed PDF (bcn coursemap / bcn docpdf), if made."""
     src = root / module / rel
     name = rel.rsplit("/", 1)[-1]
     if rel == "course-map.md":
         out = root / module / "build" / "course-map.pdf"
+    elif rel == "reading-list.md":
+        out = reading_list_pdf_path(root, module)
     elif name.startswith("assignment-") and name.endswith(".md"):
         out = assignment_pdf_path(root, module, name)
     elif name in ("activity.md", "activity.zh.md"):

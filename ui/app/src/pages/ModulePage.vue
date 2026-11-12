@@ -4,7 +4,7 @@
 // where the scope is visible, and say what they will do before they run.
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router';
-import type { LangState, ModulePlanResponse, StepState, TopicMark, TopicStatus } from '@beacon/shared';
+import type { JobSummary, LangState, ModulePlanResponse, StepState, TopicMark, TopicStatus } from '@beacon/shared';
 import PageHeader from '@/components/PageHeader.vue';
 import StagePips from '@/components/StagePips.vue';
 import StateChip from '@/components/StateChip.vue';
@@ -252,11 +252,58 @@ async function exportModuleMapPdf() {
   else beacon.toast('The module map PDF could not be made; see Jobs.', true);
 }
 
+// The reading list is two documents, in two steps. First bcn readinglist extracts every
+// unit's Reading paragraph from the module map into build/reading-list.md, for someone to
+// check and correct by hand. The corrected copy is then uploaded as the module's published
+// reading list, <module>/reading-list.md: a module document like any other (bcn docedit
+// saves it, keeping the replaced version in .history/, and bcn sync carries it).
 async function exportReadingList() {
   const job = await beacon.runJob('readinglist', [props.module], {});
   const result = await beacon.awaitJob(job.id);
-  if (result.state === 'done') beacon.toast('Reading list ready.');
-  else beacon.toast('The reading list could not be made; see Jobs.', true);
+  if (result.state === 'done') beacon.toast('Reading list extracted for checking.');
+  else beacon.toast('The reading list could not be extracted; see Jobs.', true);
+}
+
+// Printed with the same template as the assignment briefs and activities (bcn docpdf, which
+// also brings any of those that are out of date up to date while it's at it).
+async function exportReadingListPdf() {
+  const job = await beacon.runJob('docpdf', [props.module], {});
+  const result = await beacon.awaitJob(job.id);
+  if (result.state === 'done') beacon.toast('Reading list PDF ready.');
+  else beacon.toast('The reading list PDF could not be made; see Jobs.', true);
+}
+
+const publishedReadingList = computed(() => (m.value?.documents || []).find((d) => d.path === `${props.module}/reading-list.md`));
+const readingListMenu = ref(false);
+const publishingReadingList = ref(false);
+function onReadingListPicked(ev: Event) {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';  // so choosing the same file again still fires change
+  readingListMenu.value = false;
+  void uploadPublishedReadingList(file);
+}
+async function uploadPublishedReadingList(file: File | undefined) {
+  const doc = publishedReadingList.value;
+  if (!file || !doc) return;
+  if (doc.exists && !(await confirm({
+    title: `Replace the published reading list for ${props.module}?`,
+    lines: [`This replaces ${doc.path} with ${file.name}. The current version is kept in a .history folder next to it.`],
+    ok: 'Replace', danger: true,
+  }))) return;
+  publishingReadingList.value = true;
+  try {
+    const text = await file.text();
+    const job = await api<JobSummary>(`/api/moddoc/save?path=${encodeURIComponent(doc.path)}`, { body: { text, overwrite: true } });
+    beacon.trackJob(job);
+    const result = await beacon.awaitJob(job.id);
+    if (result.state === 'done') beacon.toast('Published reading list saved.');
+    else beacon.toast('The published reading list could not be saved; see Jobs.', true);
+  } catch (e) {
+    beacon.toast((e as Error).message, true);
+  } finally {
+    publishingReadingList.value = false;
+  }
 }
 
 // Assignment briefs and unit activities (quiz or task) — everything bcn docpdf prints,
@@ -268,17 +315,15 @@ async function exportAssessmentPdfs() {
   const ok = await confirm({
     title: `Make PDFs for ${plural(n, 'assessment document')}?`,
     lines: [
-      { text: `This runs bcn docpdf ${props.module}, writing one PDF per assignment brief and unit activity to ${props.module}/build/.`, strong: `bcn docpdf ${props.module}` },
+      { text: `This runs bcn docpdf ${props.module}, writing one PDF per assignment brief and unit activity (and the published reading list) to ${props.module}/build/.`, strong: `bcn docpdf ${props.module}` },
       'Documents whose PDF is already current are skipped.',
     ],
   });
   if (ok) await beacon.runJob('docpdf', [props.module], {});
 }
 
-// The only module-wide document that's actually in use today; assets.md is listed by
-// status but unused. reading-list.md is no longer hand-authored either — it's generated
-// from the module map's own per-unit Reading paragraphs (bcn readinglist) rather than
-// being a separate document someone writes.
+// The module map, the main module-wide document; assets.md is listed by status but unused.
+// reading-list.md is handled with the reading list's two steps (see exportReadingList).
 const moduleMap = computed(() => (m.value?.documents || []).find((d) => d.path.endsWith('/course-map.md')));
 
 // Delivery planning: fetched directly, not via the polled status store — it only changes
@@ -458,20 +503,67 @@ async function sendReminder() {
           <q-btn v-else flat dense no-caps disable label="Module map — missing">
             <q-tooltip>Not in the working copy yet</q-tooltip>
           </q-btn>
-          <q-btn-dropdown v-if="m.reading_list?.exists" split outline dense no-caps icon="menu_book"
-            :color="m.reading_list.stale ? 'warning' : undefined" :label="m.reading_list.stale ? 'Reading list (out of date)' : 'Reading list'"
-            :href="fileUrl(m.reading_list.path, null, 'download=1')">
-            <q-tooltip max-width="320px">Every unit's Reading paragraph from the module map, pulled into one list.</q-tooltip>
-            <q-list>
-              <q-item clickable v-close-popup @click="exportReadingList">
-                <q-item-section avatar><q-icon name="menu_book" /></q-item-section>
-                <q-item-section>Update reading list</q-item-section>
+          <!-- Two steps: extract the units' Reading paragraphs for checking, then upload the
+               checked copy as the published reading list (see exportReadingList). -->
+          <q-btn-dropdown v-if="publishedReadingList" v-model="readingListMenu" outline dense no-caps icon="menu_book" :loading="publishingReadingList"
+            :label="publishedReadingList.exists ? 'Reading list' : 'Reading list (not published)'">
+            <q-list style="min-width: 260px">
+              <q-item-label header>1 · Extract for verification</q-item-label>
+              <q-item v-if="m.reading_list?.exists" clickable v-close-popup :href="fileUrl(m.reading_list.path, null, `download=${module}-reading-list-extract.md`)">
+                <q-item-section avatar><q-icon name="download" :color="m.reading_list.stale ? 'warning' : 'primary'" /></q-item-section>
+                <q-item-section>{{ m.reading_list.stale ? 'Download extract (out of date)' : 'Download extract' }}</q-item-section>
               </q-item>
+              <q-item v-if="m.reading_list && (!m.reading_list.exists || m.reading_list.stale)" clickable v-close-popup @click="exportReadingList">
+                <q-item-section avatar><q-icon name="menu_book" /></q-item-section>
+                <q-item-section>
+                  <q-item-label>{{ m.reading_list.exists ? 'Extract again' : 'Extract reading list' }}</q-item-label>
+                  <q-item-label caption>Every unit's Reading paragraph from the module map</q-item-label>
+                </q-item-section>
+              </q-item>
+              <q-item v-if="!m.reading_list" disable>
+                <q-item-section>Needs a module map to extract from</q-item-section>
+              </q-item>
+              <q-separator />
+              <q-item-label header>2 · Published reading list</q-item-label>
+              <!-- The real file input sits invisibly over this item (as q-file does), so the click
+                   lands on it and the browser opens its picker natively; a script-triggered
+                   input.click() isn't honoured everywhere. No v-close-popup: the menu has to stay
+                   mounted until the picker returns, so it's closed from onReadingListPicked. -->
+              <q-item clickable class="relative-position">
+                <q-item-section avatar><q-icon name="upload_file" /></q-item-section>
+                <q-item-section>
+                  <q-item-label>{{ publishedReadingList.exists ? 'Replace published list…' : 'Upload published list…' }}</q-item-label>
+                  <q-item-label caption>The checked markdown; saved as reading-list.md</q-item-label>
+                </q-item-section>
+                <input type="file" class="file-overlay" accept=".md,.markdown,.txt,text/markdown,text/plain"
+                  :aria-label="publishedReadingList.exists ? 'Replace published reading list' : 'Upload published reading list'"
+                  @change="onReadingListPicked" @cancel="readingListMenu = false">
+              </q-item>
+              <template v-if="publishedReadingList.exists">
+                <q-item clickable v-close-popup :to="`/doc/${publishedReadingList.path}`">
+                  <q-item-section avatar><q-icon name="visibility" /></q-item-section>
+                  <q-item-section>View</q-item-section>
+                </q-item>
+                <q-item clickable v-close-popup :to="`/edit-doc/${publishedReadingList.path}`">
+                  <q-item-section avatar><q-icon name="edit" /></q-item-section>
+                  <q-item-section>Edit</q-item-section>
+                </q-item>
+                <q-item clickable v-close-popup :href="fileUrl(publishedReadingList.path, null, `download=${module}-reading-list.md`)">
+                  <q-item-section avatar><q-icon name="download" color="primary" /></q-item-section>
+                  <q-item-section>Download</q-item-section>
+                </q-item>
+                <q-item v-if="publishedReadingList.pdf?.exists" clickable v-close-popup
+                  :href="fileUrl(publishedReadingList.pdf.path, null, `download=${module}-reading-list.pdf`)">
+                  <q-item-section avatar><q-icon name="download" :color="publishedReadingList.pdf.stale ? 'warning' : 'primary'" /></q-item-section>
+                  <q-item-section>{{ publishedReadingList.pdf.stale ? 'Download PDF (out of date)' : 'Download PDF' }}</q-item-section>
+                </q-item>
+                <q-item v-if="publishedReadingList.pdf && (!publishedReadingList.pdf.exists || publishedReadingList.pdf.stale)" clickable v-close-popup @click="exportReadingListPdf">
+                  <q-item-section avatar><q-icon name="picture_as_pdf" /></q-item-section>
+                  <q-item-section>{{ publishedReadingList.pdf.exists ? 'Update PDF' : 'Export PDF' }}</q-item-section>
+                </q-item>
+              </template>
             </q-list>
           </q-btn-dropdown>
-          <q-btn v-else-if="m.reading_list" outline dense no-caps icon="menu_book" label="Build reading list" @click="exportReadingList">
-            <q-tooltip max-width="320px">Every unit's Reading paragraph from the module map, pulled into one list.</q-tooltip>
-          </q-btn>
         </template>
       </PageHeader>
 
@@ -807,6 +899,8 @@ async function sendReminder() {
 <style scoped>
 body.body--dark .bulkbar { background: rgba(255, 255, 255, .04) !important; }
 body.body--dark .planning-card :deep(.bg-green-1) { background: rgba(76, 175, 80, .12) !important; }
+/* The reading list's file input, invisible over its menu item, taking the click itself. */
+.file-overlay { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; }
 .notes-theirs { white-space: pre-wrap; font-family: inherit; max-height: 12em; overflow: auto; opacity: .85; }
 .plan-tasks { width: 100%; border-collapse: collapse; }
 .plan-tasks th { text-align: left; font-weight: normal; color: var(--q-grey-7, #757575); font-size: 12px; padding: 4px 8px; }

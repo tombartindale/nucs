@@ -66,7 +66,7 @@ CODES: dict[str, tuple[str, str]] = {
     "DOC_DUPLICATE_ID": ("error", "An id appears more than once."),
     "DOC_TOPIC_NOT_IN_MAP": ("error", "A topic is not listed in the course map."),
     "READINGLIST_EMPTY": ("info", "No unit in the course map has a Reading paragraph."),
-    "DOCPDF_NOTHING": ("info", "No assignment or activity document was found in scope."),
+    "DOCPDF_NOTHING": ("info", "No assignment, activity or published reading list was found in scope."),
     # --- render ----------------------------------------------------------
     "RENDER_FAILED": ("error", "Marp did not produce the expected output."),
     "RENDER_SLIDE_COUNT": ("error", "Rendered slide count differs from the parsed slide count."),
