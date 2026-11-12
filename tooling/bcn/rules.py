@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from pathlib import Path, PurePosixPath
 
+from . import crossmodule
 from .config import Config
 from .envelope import Diagnostic
 from .markdown import ParsedTopic, Slide, parse
@@ -49,7 +50,7 @@ NAME_STOPWORDS = {
 # (missing narration, parity, front matter, assets) can never be acknowledged.
 ACKABLE = {"MD_DATE", "MD_FORBIDDEN", "MD_DEICTIC", "MD_WORD_COUNT", "MD_SLIDE_WORDS", "MD_TITLE_LENGTH",
            "MD_SLIDE_COUNT", "MD_ZH_CHARS", "MD_SLIDE_TITLE_MISSING", "MD_ZH_UNTRANSLATED", "MD_LOCALIZATION",
-           "MD_PERSON_NAME"}
+           "MD_PERSON_NAME", "MD_MODULE_REFERENCE"}
 ZH_DATE_PATTERNS = [
     re.compile(r"\d{2,4}\s*年\s*\d{1,2}\s*月"),
     re.compile(r"\d{1,2}\s*月\s*\d{1,2}\s*[日号]"),
@@ -207,6 +208,9 @@ class RuleSet:
     def localization_list(self) -> list[str]:
         return list(self.cfg["validate"]["localization"])
 
+    def module_reference_list(self) -> list[str]:
+        return list(self.cfg["validate"].get("module_references", []))
+
     def date_patterns(self) -> list[re.Pattern[str]]:
         return EN_DATE_PATTERNS + ([EN_WEEKDAY_PATTERN] if self.cfg["validate"].get("date_weekdays") else [])
 
@@ -217,6 +221,8 @@ class RuleSet:
         out = []
         forbidden = [(w, _phrase_re(w)) for w in self.forbidden_list() if w.strip()]
         localized = [(w, _phrase_re(w)) for w in self.localization_list() if w.strip()]
+        others = crossmodule.other_modules(self.topic.root, self.topic.module)
+        extra = self.module_reference_list()
         for s in p.slides:
             for t in self.texts(s):
                 for rx in self.date_patterns():
@@ -235,6 +241,10 @@ class RuleSet:
                                           self.locate(p, s, rx), s.index,
                                           hint="Generalise the reference, or acknowledge it if this topic is deliberately local.",
                                           match=w))
+                for h in crossmodule.find(t, self.topic.module, others, self.lang, extra):
+                    out.append(self.d("MD_MODULE_REFERENCE", f"Slide {s.index} {crossmodule.describe(h)}.",
+                                      self.locate(p, s, re.compile(re.escape(h.match))), s.index,
+                                      hint=crossmodule.HINT, match=h.match))
         return out
 
 
@@ -318,6 +328,9 @@ class MandarinRules(RuleSet):
 
     def localization_list(self) -> list[str]:
         return list(self.cfg["validate_zh"]["localization"])
+
+    def module_reference_list(self) -> list[str]:
+        return list(self.cfg["validate_zh"].get("module_references", []))
 
     def date_patterns(self) -> list[re.Pattern[str]]:
         return ZH_DATE_PATTERNS

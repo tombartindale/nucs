@@ -167,3 +167,55 @@ def test_mandarin_untranslated_title_and_headings(tree):
     # Headings 2 and 3 contain Chinese; the other four were left in English.
     assert sorted(d.slide for d in flagged[1:]) == [1, 4, 5, 6]
     assert all((d.data or {}).get("fingerprint") for d in flagged), "must be acknowledgeable"
+
+
+def _module_refs(diags):
+    return [d for d in diags if d.code == "MD_MODULE_REFERENCE"]
+
+
+def test_module_references_back_forward_and_position(tree):
+    text = topic_md().replace("gives one example", "builds on the previous module, gives one example", 1)
+    text = text.replace("gives one example", "sets up the next module and module 3, gives one example", 1)
+    write(tree, text)
+    errs, diags = run(tree)
+    assert "MD_MODULE_REFERENCE" in errs
+    found = {d.data["match"].lower(): d.message for d in _module_refs(diags)}
+    assert set(found) == {"previous module", "next module", "module 3"}
+    assert "refers back" in found["previous module"] and "refers ahead" in found["next module"]
+
+
+def test_module_references_name_other_modules_not_this_one(tree):
+    other = tree / "KV7099"
+    other.mkdir()
+    (other / "course-map.md").write_text("# KV7099 — Ethics of Machine Learning\n")
+    text = topic_md().replace("gives one example", "in KV7015 gives one example, unlike Ethics of Machine Learning or KV7020", 1)
+    write(tree, text)
+    _, diags = run(tree)
+    assert sorted(d.data["match"] for d in _module_refs(diags)) == ["Ethics of Machine Learning", "KV7020"]
+
+
+def test_module_references_ignore_this_module_and_units(tree):
+    text = topic_md().replace("gives one example", "later in this module and in the previous unit, gives one example", 1)
+    write(tree, text)
+    assert _module_refs(run(tree)[1]) == []
+
+
+def test_module_references_mandarin(tree):
+    write(tree, topic_md())
+    zh = topic_md(lang="zh", say=False).replace("Point one", "正如上一个模块所述").replace("Point two", "第二个模块")
+    write(tree, zh, "topic.zh.md")
+    _, diags = run(tree, "zh")
+    assert {d.data["match"] for d in _module_refs(diags)} >= {"上一个模块", "第二个模块"}
+
+
+def test_module_document_references(tree):
+    from bcn.commands.validate import module_documents
+    from bcn.tree import resolve
+    (tree / "KV7015" / "U01" / "activity.md").write_text("# Activity\n\nRevisit what you did in the last module.\n")
+    diags = [d for d in module_documents(resolve(str(tree / "KV7015"))) if d.code == "DOC_MODULE_REFERENCE"]
+    assert [(d.file, d.line, d.level) for d in diags] == [("KV7015/U01/activity.md", 3, "error")]
+
+
+def test_module_references_course_means_programme(tree):
+    write(tree, topic_md().replace("gives one example", "as covered earlier in the course, gives one example", 1))
+    assert [d.data["match"] for d in _module_refs(run(tree)[1])] == ["earlier in the course"]
