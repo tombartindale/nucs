@@ -9,6 +9,9 @@ human skimming the result can tell the difference far more easily than bcn ever 
 the text alone.
 
 Written to <module>/build/reading-list.md; skipped if already newer than course-map.md.
+This is only the extract, for verification: once checked and corrected by hand, the
+published list is saved as <module>/reading-list.md (a module document, via bcn docedit),
+which this command never reads or writes.
 """
 
 from __future__ import annotations

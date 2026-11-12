@@ -71,9 +71,11 @@ export class StatusCache {
 }
 
 // Artefact times are included so that any new or rebuilt file (a recording script, a draft)
-// refreshes the views showing it, even when no stage changes.
+// refreshes the views showing it, even when no stage changes. The module summaries are too:
+// they carry each module document's existence and staleness (an uploaded reading list, a
+// rebuilt module map PDF), which no topic result reflects.
 function fingerprint(env: StatusEnv): string {
   const slim = (env.results || []).map((r) => [r.topic, r.en, r.zh, r.hydration, r.unreviewed_mistranscriptions,
     (r.artifacts || []).map((a) => [a.key, a.mtime])]);
-  return sha1(JSON.stringify([slim, env.diagnostics]));
+  return sha1(JSON.stringify([slim, env.diagnostics, env.summary?.modules]));
 }
