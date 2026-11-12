@@ -276,12 +276,13 @@ Checks:
 - No slide's narration under 30 words or over 200.
 - No date patterns, no strings from a configurable forbidden list (cohort names, tutor names, "semester", "deadline", "next week").
 - No deictic phrases in narration: "here on the left", "as you can see", "this arrow", "on screen now". Pattern list in config, since the presenter is recorded as a headshot with no slides in shot.
+- No references to other modules, in narration or on slides: another module's code or course-map title, "the previous module", "the next module", "module 3", "later in the programme" or "course". Modules can be taken in any order, so content must not assume one came before or comes after. Mentions of this module ("later in this module") and of units are fine. Extra names in `[validate].module_references`.
 - Slide title length under 60 characters.
 - Every referenced asset file exists.
 
 `--lang zh` applies the Mandarin rule set described in section 4a, and additionally compares the file against its English counterpart for slide parity.
 
-Also validates `course-map.md`, `activity.md` and `assignment-*.md` against their own lighter rules: required headings present, unit and topic ids well formed, outcome references resolvable against the course map.
+Also validates `course-map.md`, `activity.md` and `assignment-*.md` against their own lighter rules: required headings present, unit and topic ids well formed, outcome references resolvable against the course map. The same cross-module check runs over these documents.
 
 ### 5.2 `render`
 

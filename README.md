@@ -176,7 +176,7 @@ The packages validate against the IMS QTI 2.1 and Content Packaging schemas. Try
 
 ### Overriding a check
 
-Editorial checks (dates, forbidden words, deictic phrases, word counts, slide count, title length) can be overridden two ways. Structural checks (narration blocks, front matter, assets, Mandarin parity) cannot.
+Editorial checks (dates, forbidden words, deictic phrases, references to other modules, word counts, slide count, title length) can be overridden two ways. Structural checks (narration blocks, front matter, assets, Mandarin parity) cannot.
 
 - **One finding at a time:** **Acknowledge** on the topic or Diagnostics page, or `bcn ack <topic> --fingerprint FP --note "why"`. The decision is stored in the topic's `review.json` with who, when and why, and the finding becomes info, so validation passes. It is tied to the finding's text, so if the script changes and the text goes, it lapses and anything new is flagged again. **Undo**, or `--clear`, withdraws it.
 - **For the whole programme:** set a check's level in `programme.toml`. Warnings never block.

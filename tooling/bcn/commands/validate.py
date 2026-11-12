@@ -6,7 +6,7 @@ import argparse
 import re
 from pathlib import Path
 
-from .. import coursemap, fsutil
+from .. import coursemap, crossmodule, fsutil
 from ..config import Config, load
 from ..envelope import Diagnostic, Envelope, TopicResult
 from ..progress import TopicProgress
@@ -53,6 +53,14 @@ def module_documents(target: Target, override_path: Path | None = None, override
         cm_text = override_text if override_path == cm_path else None
         cm = coursemap.load_course_map(mdir, docs["course_map_headings"], text=cm_text)
         out.extend(cm.diagnostics)
+        others = crossmodule.other_modules(target.root, m)
+
+        def refs(path: Path, rel: str, lang: str, text: str | None) -> list[Diagnostic]:
+            extra = cfg["validate_zh" if lang == "zh" else "validate"].get("module_references", [])
+            return crossmodule.doc_diagnostics(path, rel, m, others, lang, extra, text=text)
+
+        if cm_path.is_file() or cm_text is not None:
+            out.extend(refs(cm_path, f"{m}/course-map.md", "en", cm_text))
         units = sorted({t.unit for t in target.topics if t.module == m} | ({u for u in cm.units} if target.level != "unit" else set()))
         if target.level == "unit":
             units = [target.rel.split("/")[1]]
@@ -64,6 +72,7 @@ def module_documents(target: Target, override_path: Path | None = None, override
                     out.extend(coursemap.validate_activity(act, f"{m}/{name}", docs["activity_headings"], cm.outcomes,
                                                            m, u, docs["activity_types"], text=act_text, lang=lang,
                                                            required_zh=docs["activity_headings_zh"]))
+                    out.extend(refs(act, f"{m}/{name}", lang, act_text))
         if target.level in ("root", "module"):
             names = {a.name for a in mdir.glob("assignment-*.md")}
             if override_path and override_path.parent == mdir and re.match(r"assignment-\d+(?:\.zh)?\.md", override_path.name):
@@ -74,6 +83,7 @@ def module_documents(target: Target, override_path: Path | None = None, override
                 lang = "zh" if name.endswith(".zh.md") else "en"
                 out.extend(coursemap.validate_doc(a, f"{m}/{name}", docs["assignment_headings"], cm.outcomes, text=a_text,
                                                    lang=lang, required_zh=docs["assignment_headings_zh"]))
+                out.extend(refs(a, f"{m}/{name}", lang, a_text))
     return out
 
 

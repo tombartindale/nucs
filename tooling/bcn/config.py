@@ -45,6 +45,10 @@ DEFAULTS: dict[str, Any] = {
         # Capitalised phrases the heuristic would otherwise flag: recurring product/brand names,
         # course titles, or anything else legitimately proper-cased in this programme.
         "names_allow": [],
+        # Built-in checks flag references to other modules (codes, course-map titles, "the next
+        # module", "module 2"), since modules can be taken in any order. Add other names a module
+        # goes by here: a short name, a former title.
+        "module_references": [],
         "deictic": [
             "here on the left",
             "here on the right",
@@ -62,6 +66,7 @@ DEFAULTS: dict[str, Any] = {
         "slide_chars_max": 220,
         "forbidden": [],
         "localization": [],
+        "module_references": [],
     },
     "documents": {
         # Extra headings to insist on. Units, topics and outcomes are always checked.
