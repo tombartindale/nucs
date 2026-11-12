@@ -6,7 +6,7 @@ import { computeModulePlan, moduleTopicsFor, type PlannedTopicInput } from '../s
 function topic(overrides: Partial<PlannedTopicInput> = {}): PlannedTopicInput {
   return {
     topic: 'KV7015-U01-T01', unit: 'U01', title: 'A topic', minutes: 12,
-    drafted: true, recorded: false, translated: false, packaged: false,
+    drafted: true, recorded: false, translated: false, published: false,
     ...overrides,
   };
 }
@@ -130,31 +130,31 @@ describe('computeModulePlan', () => {
 
   it('reports milestone remaining counts and done flags correctly', () => {
     const plan = computeModulePlan([
-      topic({ topic: 'KV7015-U01-T01', drafted: true, recorded: true, translated: true, packaged: true }),
-      topic({ topic: 'KV7015-U01-T02', drafted: false, recorded: false, translated: false, packaged: false }),
+      topic({ topic: 'KV7015-U01-T01', drafted: true, recorded: true, translated: true, published: true }),
+      topic({ topic: 'KV7015-U01-T02', drafted: false, recorded: false, translated: false, published: false }),
     ], dated('2026-12-01'));
     const byKind = Object.fromEntries(plan.milestones.map((m) => [m.kind, m]));
     expect(byKind.briefs_done.remaining).toBe(1);
     expect(byKind.briefs_done.done).toBe(false);
     expect(byKind.recorded.remaining).toBe(1);
     expect(byKind.translated.remaining).toBe(1);
-    expect(byKind.packaged.remaining).toBe(1);
+    expect(byKind.published.remaining).toBe(1);
   });
 
-  it('marks all milestones done when every topic is fully packaged', () => {
+  it('marks all milestones done when every topic is fully published', () => {
     const plan = computeModulePlan(
-      [topic({ drafted: true, recorded: true, translated: true, packaged: true })], dated('2026-12-01'));
+      [topic({ drafted: true, recorded: true, translated: true, published: true })], dated('2026-12-01'));
     expect(plan.milestones.every((m) => m.done)).toBe(true);
     expect(plan.tasks).toHaveLength(0);
   });
 
-  it('only projects dueDate for briefs_done/recorded, never for translated/packaged', () => {
+  it('only projects dueDate for briefs_done/recorded, never for translated/published', () => {
     const plan = computeModulePlan([topic({ drafted: false, recorded: false, minutes: 12 })], dated('2026-12-01'));
     const byKind = Object.fromEntries(plan.milestones.map((m) => [m.kind, m]));
     expect(byKind.briefs_done.dueDate).not.toBeNull();
     expect(byKind.recorded.dueDate).not.toBeNull();
     expect(byKind.translated.dueDate).toBeNull();
-    expect(byKind.packaged.dueDate).toBeNull();
+    expect(byKind.published.dueDate).toBeNull();
   });
 
   it('is on track when a far-future delivery date leaves plenty of runway', () => {
@@ -208,5 +208,19 @@ describe('moduleTopicsFor', () => {
     const topics = moduleTopicsFor(status as unknown as StatusEnvelope, 'KV7015');
     expect(topics.map((t) => t.recorded)).toEqual([true, true, false]);
     expect(computeModulePlan(topics, {}).tasks.find((t) => t.kind === 'recording')?.topics).toEqual(['KV7015-U01-T03']);
+  });
+  it('counts a topic as published once both languages have a final (non-draft) compose', () => {
+    const compose = (c: object) => ({ steps: { compose: { exists: true, ok: true, draft: false, ...c } } });
+    const at = (topic: string, en: object, zh: object) => {
+      const r = row(topic, {});
+      return { ...r, en: { ...r.en, ...en }, zh: { ...r.zh, ...zh } };
+    };
+    const status = { results: [
+      at('KV7015-U01-T01', compose({}), compose({})),
+      at('KV7015-U01-T02', compose({}), compose({ draft: true })),
+      at('KV7015-U01-T03', compose({ ok: false }), compose({})),
+      at('KV7015-U01-T04', compose({}), {}),
+    ] };
+    expect(moduleTopicsFor(status as unknown as StatusEnvelope, 'KV7015').map((t) => t.published)).toEqual([true, false, false, false]);
   });
 });

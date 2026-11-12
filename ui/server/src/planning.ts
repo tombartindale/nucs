@@ -54,7 +54,7 @@ function today(): string { return new Date().toISOString().slice(0, 10); }
 
 export interface PlannedTopicInput {
   topic: string; unit: string; title: string; minutes: number | null;
-  drafted: boolean; recorded: boolean; translated: boolean; packaged: boolean;
+  drafted: boolean; recorded: boolean; translated: boolean; published: boolean;
 }
 
 /** One outstanding batch of work against one unit: writing the scripts still missing in
@@ -76,7 +76,7 @@ export interface UnitPlan {
 }
 
 export interface Milestone {
-  kind: 'briefs_done' | 'recorded' | 'translated' | 'packaged';
+  kind: 'briefs_done' | 'recorded' | 'translated' | 'published';
   done: boolean; remaining: number; dueDate: string | null;
 }
 
@@ -95,6 +95,13 @@ export interface ModulePlanComputed {
  *  booleans this module needs. Stage boundaries are read from the stage list bcn ships
  *  (stages/stage_index) rather than hardcoded, so they track tooling/bcn/state.py's
  *  STAGES if it ever changes. */
+/** Published means composed: a full (non-draft) compose has run and passed. The same rule
+ *  as the front end's progress.ts `published`, which this must keep in step with. */
+function composed(l: { steps?: Record<string, { exists?: boolean; ok?: boolean | null; draft?: boolean | null } | undefined> }): boolean {
+  const c = l.steps?.compose;
+  return !!c?.exists && c.ok !== false && !c.draft;
+}
+
 export function moduleTopicsFor(status: StatusEnvelope, module: string): PlannedTopicInput[] {
   return status.results
     .filter((r) => r.module === module)
@@ -110,7 +117,7 @@ export function moduleTopicsFor(status: StatusEnvelope, module: string): Planned
         // Filmed or edited, ticked off by hand, counts: what's left after it is the editor's, not ours.
         recorded: enAt('recorded') || !!r.marks.filmed || !!r.marks.edited,
         translated: zhAt('parity_checked'),
-        packaged: enAt('packaged') && zhAt('packaged'),
+        published: composed(r.en) && composed(r.zh),
       };
     });
 }
@@ -192,7 +199,7 @@ export function computeModulePlan(topics: PlannedTopicInput[], unitDates: Record
   const topicsRecorded = topics.filter((t) => t.recorded).length;
   const topicsRemaining = topics.length - topicsRecorded;
   const topicsNotTranslated = topics.filter((t) => !t.translated).length;
-  const topicsNotPackaged = topics.filter((t) => !t.packaged).length;
+  const topicsNotPublished = topics.filter((t) => !t.published).length;
 
   const latestDeadline = (kind: UnitTask['kind']): string | null => {
     const ds = allTasks.filter((t) => t.kind === kind).map((t) => t.deadline).filter((d): d is string => d !== null);
@@ -203,7 +210,7 @@ export function computeModulePlan(topics: PlannedTopicInput[], unitDates: Record
     { kind: 'briefs_done', done: topicsNotDrafted === 0, remaining: topicsNotDrafted, dueDate: latestDeadline('scripts') },
     { kind: 'recorded', done: topicsRemaining === 0, remaining: topicsRemaining, dueDate: latestDeadline('recording') },
     { kind: 'translated', done: topicsNotTranslated === 0, remaining: topicsNotTranslated, dueDate: null },
-    { kind: 'packaged', done: topicsNotPackaged === 0, remaining: topicsNotPackaged, dueDate: null },
+    { kind: 'published', done: topicsNotPublished === 0, remaining: topicsNotPublished, dueDate: null },
   ];
 
   // Worst-unit-wins: the module is on track only if every unit with an agreed date is

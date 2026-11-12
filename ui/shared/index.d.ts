@@ -234,10 +234,10 @@ export interface UnitTask {
                               // only — the task always costs exactly one calendar day
   deadline: string | null;
 }
-export type MilestoneKind = 'briefs_done' | 'recorded' | 'translated' | 'packaged';
+export type MilestoneKind = 'briefs_done' | 'recorded' | 'translated' | 'published';
 /** One module-wide checkpoint: every topic reaching a given stage. dueDate is only
  *  projected for briefs_done/recorded (backward-chained from each unit's own delivery
- *  date); translated/packaged report current progress only, not a forecast. */
+ *  date); translated/published report current progress only, not a forecast. */
 export interface Milestone { kind: MilestoneKind; done: boolean; remaining: number; dueDate: string | null }
 /** One unit's own schedule: its agreed date (if set) and whether its own tasks fit
  *  before it, computed independently of every other unit's date. */
