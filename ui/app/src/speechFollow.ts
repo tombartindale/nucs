@@ -48,27 +48,73 @@ function lcs(heard: string[], words: string[], from: number, to: number) {
   return prev[m];
 }
 
-// The index of the script word the speaker has just said, or null if the heard words do not
-// match anywhere near the cursor well enough to move. Forward moves are cheap; going back
-// (a restarted sentence) or jumping far ahead (a skipped paragraph) needs a stronger match.
-export function locate(heard: string[], words: string[], cursor: number): number | null {
+// Where the speaker is, and how the prompter got there: 'ahead' is the normal case (the next
+// couple of sentences), 'skip' a stronger match further on (a skipped paragraph), 'back' an
+// unmistakable match behind the cursor (a restarted sentence). The caller should only act on
+// 'back' once a second hearing agrees, since a repeated phrase can look like one.
+export type Located = { index: number; kind: 'ahead' | 'skip' | 'back' };
+
+const SLACK = 3;           // a word or two behind is the recogniser revising itself, not a step back
+const NEXT = 8;            // words the speaker can plausibly be past the last match (an interim result can bring several)
+const AHEAD_MIN = 12;      // the near window is at least this long, even across short sentences…
+const AHEAD_MAX = 60;      // …and at most this, across very long ones
+const SKIP_MAX = 150;      // how far a skipped paragraph can be
+const BACK_MAX = 40;       // how far back a restarted sentence can be
+
+// The index of the script word the speaker has just said, or null if nothing matches well
+// enough to move. The next couple of sentences win whenever anything in them matches at all,
+// the nearest match first; a skip forward needs a strong match, and going back needs nearly
+// every heard word to match in order with nothing plausible ahead. sentenceEnds holds the
+// index of each sentence's last word, ascending; without it the near window is AHEAD_MIN*2.
+export function locate(heard: string[], words: string[], cursor: number, sentenceEnds: number[] = []): Located | null {
   const k = heard.length;
   if (k < 2) return null;
-  const lo = Math.max(0, cursor - 40);
-  const hi = Math.min(words.length, cursor + 150);
+  const heardWeight = heard.reduce((s, w) => s + weight(w), 0);
+
+  // The rest of the current sentence and the two after it.
+  const ends = sentenceEnds.filter((e) => e >= cursor);
+  const nearEnd = Math.min(words.length - 1, cursor + AHEAD_MAX,
+    Math.max(cursor + AHEAD_MIN, ends.length > 2 ? ends[2] : cursor + AHEAD_MIN * 2));
+
+  // The match must finish on one of the last two heard words; an ad-lib can end a phrase.
+  const scoreAt = (end: number) =>
+    (same(heard[k - 1], words[end]) || same(heard[k - 2], words[end]))
+      ? lcs(heard, words, Math.max(0, end - k - 3), end + 1) : 0;
+
+  // 1. Ahead: the nearest good-enough match wins over a slightly better one further on. The
+  // speaker can only be a few words past the last match, so beyond NEXT words a match must be
+  // firmer (otherwise a common phrase a sentence on pulls the prompter ahead of the speaker).
   let best: number | null = null;
   let bestScore = -Infinity;
-  for (let end = lo; end < hi; end++) {
-    // The match must finish on one of the last two heard words; an ad-lib can end a phrase.
-    if (!same(heard[k - 1], words[end]) && !same(heard[k - 2], words[end])) continue;
-    const score = lcs(heard, words, Math.max(0, end - k - 3), end + 1);
-    const jump = end < cursor - 3 || end > cursor + 40;
-    if (score < (jump ? 3.5 : 2.5)) continue;
-    const dist = end >= cursor ? end - cursor : (cursor - end) * 3;
-    const s = score - dist * 0.004;
+  for (let end = Math.max(0, cursor - SLACK); end <= nearEnd; end++) {
+    const score = scoreAt(end);
+    if (score < (end > cursor + NEXT ? 3.5 : 2.5)) continue;
+    const s = score - Math.abs(end - cursor) * 0.15;
     if (s > bestScore) { bestScore = s; best = end; }
   }
-  return best;
+  if (best !== null) return { index: best, kind: 'ahead' };
+
+  // 2. A skipped paragraph: a strong match further on.
+  const strong = Math.max(4.5, heardWeight * 0.7);
+  best = null; bestScore = -Infinity;
+  for (let end = nearEnd + 1; end < Math.min(words.length, cursor + SKIP_MAX); end++) {
+    const score = scoreAt(end);
+    if (score < strong) continue;
+    const s = score - (end - cursor) * 0.01;
+    if (s > bestScore) { bestScore = s; best = end; }
+  }
+  if (best !== null) return { index: best, kind: 'skip' };
+
+  // 3. A restarted sentence: only if it's unmistakable. Nearly every heard word, in order.
+  const obvious = Math.max(5, heardWeight * 0.85);
+  best = null; bestScore = -Infinity;
+  for (let end = Math.max(0, cursor - BACK_MAX); end < cursor - SLACK; end++) {
+    const score = scoreAt(end);
+    if (score < obvious) continue;
+    const s = score - (cursor - end) * 0.01;
+    if (s > bestScore) { bestScore = s; best = end; }
+  }
+  return best !== null ? { index: best, kind: 'back' } : null;
 }
 
 // --- recognition ------------------------------------------------------------------------------

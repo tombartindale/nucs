@@ -73,6 +73,8 @@ function goToSlide(i: number) {
 // spoken form of each (a written token can be several) and spans[] the span it sits in.
 let words: string[] = [];
 let spans: HTMLElement[] = [];
+let sentenceEnds: number[] = [];    // index into words of each sentence's last word
+let pendingBack: number | null = null;   // a step back heard once, waiting for a second hearing to agree
 let cursor = -1;                    // index into words of the last word said
 let target: number | null = null;   // scroll position that puts the last word said on the reading line
 let velocity = 0;                   // px/s, eased so speed changes are never a jump
@@ -80,7 +82,7 @@ let listener: Listener | null = null;
 const voiceNote = ref('');
 
 function wrapWords() {
-  words = []; spans = [];
+  words = []; spans = []; sentenceEnds = [];
   for (const p of textEl.value?.querySelectorAll('p') || []) {
     const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
     const texts: Text[] = [];
@@ -95,9 +97,13 @@ function wrapWords() {
         span.textContent = part;
         frag.append(span);
         for (const w of said) { words.push(w); spans.push(span); }
+        // "evidence." or "why?" or "said.”" ends a sentence (not "e.g", which has no full stop at its end).
+        if (/[.!?…]["'”’)\]]*$/.test(part)) sentenceEnds.push(words.length - 1);
       }
       t.replaceWith(frag);
     }
+    // A paragraph always ends a sentence, even without a full stop (a heading-like line).
+    if (words.length && sentenceEnds[sentenceEnds.length - 1] !== words.length - 1) sentenceEnds.push(words.length - 1);
   }
 }
 
@@ -123,12 +129,24 @@ function moved() {
   let lo = 0, hi = spans.length;    // first word whose centre is below the reading line
   while (lo < hi) { const mid = (lo + hi) >> 1; if (wordY(mid) <= y) lo = mid + 1; else hi = mid; }
   setCursor(lo - 1);
+  pendingBack = null;
   listener?.forget();
 }
 
+// The prompter prefers the next couple of sentences (see locate), and rolls back only when a
+// step back is heard twice running at about the same place, so a phrase that happens to
+// recur earlier in the script can't drag it backwards on its own.
 function heard(w: string[]) {
-  const i = locate(w, words, cursor + 1);
-  if (i === null || i === cursor) return;
+  const found = locate(w, words, cursor + 1, sentenceEnds);
+  if (!found) return;
+  if (found.kind === 'back') {
+    const confirmed = pendingBack !== null && Math.abs(found.index - pendingBack) <= 4;
+    pendingBack = found.index;
+    if (!confirmed) return;
+  }
+  pendingBack = null;
+  const i = found.index;
+  if (i === cursor) return;
   setCursor(i);
   const st = stage.value!;
   // Past the end of the scroll the browser clamps, which would look like a manual scroll.
