@@ -11,6 +11,7 @@ import StateChip from '@/components/StateChip.vue';
 import { api, ApiError, fileUrl } from '@/api';
 import { confirm } from '@/composables/confirm';
 import { fmtAgo, fmtMinutes, LANG_NAME, plural, STAGE_LABEL, STEP_HELP, topicPath } from '@/format';
+import { markDone, markImplied, translated } from '@/progress';
 import { useBeacon } from '@/stores/beacon';
 
 const BULK = ['validate', 'render', 'script', 'bumpers', 'cues', 'compose', 'package'];
@@ -58,12 +59,6 @@ const MARKS = [
   { key: 'filmed', label: 'Filmed', todo: 'Tick once the recording session has happened' },
   { key: 'edited', label: 'Edited', todo: 'Tick once the edit is done, before it is uploaded' },
 ] as const;
-function markImplied(r: TopicStatus, key: TopicMark): string | null {
-  if (have(r, 'recording')) return 'Recording received';
-  if (key === 'filmed' && r.marks.edited) return 'Marked edited, so it has been filmed';
-  return null;
-}
-const markDone = (r: TopicStatus, key: TopicMark) => !!r.marks[key] || !!markImplied(r, key);
 const markTip = (r: TopicStatus, m: typeof MARKS[number]) => {
   const by = r.marks[m.key];
   return markImplied(r, m.key) ?? (by ? `Marked ${m.key} by ${by.by} ${fmtAgo(by.at)}` : m.todo);
@@ -71,11 +66,6 @@ const markTip = (r: TopicStatus, m: typeof MARKS[number]) => {
 const marksDone = computed(() => Object.fromEntries(MARKS.map((m) => [m.key, rows.value.filter((r) => markDone(r, m.key)).length])) as Record<TopicMark, number>);
 function toggleMark(r: TopicStatus, key: TopicMark, on: boolean) {
   beacon.runJob('mark', [r.path], on ? { mark: key } : { mark: key, clear: true });
-}
-// Translated copy is "in the system" once the stage reaches 'returned' (script + subtitles on disk).
-function translated(r: TopicStatus, lang: 'en' | 'zh') {
-  const l = r[lang], at = l.stages.indexOf('returned');
-  return at >= 0 && l.stage_index >= at;
 }
 
 // The default-layout compose output to show on the module grid: whichever file the step's
@@ -329,7 +319,7 @@ const moduleMap = computed(() => (m.value?.documents || []).find((d) => d.path.e
 // Delivery planning: fetched directly, not via the polled status store — it only changes
 // on a manual edit (set delivery date/owner) and doesn't need SSE-driven refresh.
 const MILESTONE_LABEL: Record<string, string> = {
-  briefs_done: 'Briefs done', recorded: 'Recorded', translated: 'Translated', packaged: 'Packaged',
+  briefs_done: 'Briefs done', recorded: 'Recorded', translated: 'Translated', published: 'Published',
 };
 const plan = ref<ModulePlanResponse | null>(null);
 const planForm = reactive({ ownerName: '', ownerEmail: '' });

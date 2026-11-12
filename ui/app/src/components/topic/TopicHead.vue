@@ -4,6 +4,7 @@ import type { TopicMark } from '@beacon/shared';
 import PageHeader from '@/components/PageHeader.vue';
 import StateChip from '@/components/StateChip.vue';
 import { fmtAgo } from '@/format';
+import { markImplied as implied } from '@/progress';
 import { useBeacon } from '@/stores/beacon';
 import { TOPIC } from './context';
 
@@ -14,17 +15,12 @@ const t = inject(TOPIC)!;
 const beacon = useBeacon();
 const st = computed(() => t.status.value);
 const title = computed(() => st.value?.title || (t.show.value?.en?.front?.title as string | undefined) || '');
-const recordingIn = computed(() => !!st.value?.artifacts.some((a) => a.key === 'edit/master.mp4' && a.exists));
 // Same rules as the module grid: each mark implies the one before, a recording implies both.
 const MARKS = [
   { key: 'filmed', label: 'Filmed', todo: 'Tick once the recording session has happened' },
   { key: 'edited', label: 'Edited', todo: 'Tick once the edit is done, before it is uploaded' },
 ] as const;
-function markImplied(key: TopicMark): string | null {
-  if (recordingIn.value) return 'Recording received';
-  if (key === 'filmed' && st.value?.marks.edited) return 'Marked edited, so it has been filmed';
-  return null;
-}
+const markImplied = (key: TopicMark) => (st.value ? implied(st.value, key) : null);
 function markTip(m: typeof MARKS[number]) {
   const by = st.value?.marks[m.key];
   return markImplied(m.key) ?? (by ? `Marked ${m.key} by ${by.by} ${fmtAgo(by.at)}` : m.todo);
