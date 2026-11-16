@@ -317,9 +317,13 @@ async function exportAssessmentPdfs() {
 const moduleMap = computed(() => (m.value?.documents || []).find((d) => d.path.endsWith('/course-map.md')));
 
 // Delivery planning: fetched directly, not via the polled status store — it only changes
-// on a manual edit (set delivery date/owner) and doesn't need SSE-driven refresh.
+// on a manual edit (set a unit's date/owner) and doesn't need SSE-driven refresh. Each unit's
+// date is when its English subtitles must be in the system, ready for translation.
 const MILESTONE_LABEL: Record<string, string> = {
-  briefs_done: 'Briefs done', recorded: 'Recorded', translated: 'Translated', published: 'Published',
+  briefs_done: 'Briefs done', recorded: 'Recorded', ready: 'Ready for translation', translated: 'Translated', published: 'Published',
+};
+const TASK_LABEL: Record<string, string> = {
+  scripts: 'Write scripts', recording: 'Record (one session)', editing: 'Editor: edit + subtitles',
 };
 const plan = ref<ModulePlanResponse | null>(null);
 const planForm = reactive({ ownerName: '', ownerEmail: '' });
@@ -564,7 +568,7 @@ async function sendReminder() {
           <q-item-section>
             <q-item-label>Delivery planning</q-item-label>
             <q-item-label caption>
-              {{ plan.plan.units.some((u) => u.deliveryDate) ? `${plan.plan.units.filter((u) => u.deliveryDate).length} of ${plan.plan.units.length} units dated` : 'No delivery dates agreed yet' }}
+              {{ plan.plan.units.some((u) => u.deliveryDate) ? `${plan.plan.units.filter((u) => u.deliveryDate).length} of ${plan.plan.units.length} units dated` : 'No subtitle deadlines agreed yet' }}
               <span v-if="plan.ownerName || plan.ownerEmail"> · {{ plan.ownerName }}{{ plan.ownerName && plan.ownerEmail ? ' · ' : '' }}{{ plan.ownerEmail }}</span>
             </q-item-label>
           </q-item-section>
@@ -574,9 +578,13 @@ async function sendReminder() {
           </q-item-section>
         </template>
         <q-card flat bordered>
-          <!-- Each unit's delivery date is agreed independently — production runs one unit
+          <!-- Each unit's date is agreed independently — production runs one unit
                at a time, so there's no single module-wide date to infer the rest from. -->
           <q-card-section>
+            <div class="text-caption text-grey-7 q-mb-sm">
+              Each date is when that unit's English subtitles must be in the system, ready for translation.
+              Working back (Mon–Fri): the editor's day before it, the recording session before that, scripts before that.
+            </div>
             <div class="row q-col-gutter-md">
               <div v-for="u in plan.plan.units" :key="u.unit" class="col-12 col-sm-6 col-md-4">
                 <q-input v-model="unitDateForm[u.unit]" type="date" dense outlined class="unit-date-input"
@@ -587,7 +595,7 @@ async function sendReminder() {
                   <template v-slot:append>
                     <q-btn flat dense round size="sm" icon="save" color="primary"
                       :loading="savingUnit === u.unit" @click="saveUnitDate(u.unit)">
-                      <q-tooltip>Save delivery date</q-tooltip>
+                      <q-tooltip>Save the date this unit's subtitles must be ready for translation</q-tooltip>
                     </q-btn>
                   </template>
                 </q-input>
@@ -606,10 +614,10 @@ async function sendReminder() {
           </q-card-section>
           <q-separator />
 
-          <!-- Milestone strip: the producer's headline view, four module-wide checkpoints. -->
+          <!-- Milestone strip: the producer's headline view, five module-wide checkpoints. -->
           <q-card-section>
             <div class="row q-col-gutter-md">
-              <div v-for="ms in plan.plan.milestones" :key="ms.kind" class="col-6 col-md-3">
+              <div v-for="ms in plan.plan.milestones" :key="ms.kind" class="col-6 col-md">
                 <q-card flat bordered :class="{ 'bg-green-1': ms.done }">
                   <q-card-section class="q-pa-sm text-center">
                     <div class="text-caption text-grey-7">{{ MILESTONE_LABEL[ms.kind] }}</div>
@@ -626,27 +634,27 @@ async function sendReminder() {
           <!-- Task table: the content creator's detail view. Production runs one unit at a
                time — every topic's script in a unit must be ready before that unit's single
                recording session, where every topic in it is recorded together — so each row
-               is a whole unit's batch of outstanding scripts or its one recording session,
-               not a per-topic task. -->
+               is a whole unit's batch of outstanding scripts, its one recording session, or
+               the editor's day before its date, not a per-topic task. -->
           <q-card-section v-if="plan.plan.tasks.length">
             <table class="plan-tasks">
               <thead><tr><th>Unit</th><th>Task</th><th>Topics</th><th>Est.</th><th>Deadline</th></tr></thead>
               <tbody>
                 <tr v-for="t in plan.plan.tasks" :key="`${t.unit}-${t.kind}`">
                   <td>{{ t.unit }}<span v-if="m.unit_titles?.[t.unit]"> — {{ m.unit_titles[t.unit] }}</span></td>
-                  <td>{{ t.kind === 'scripts' ? 'Write scripts' : 'Record (one session)' }}</td>
+                  <td>{{ TASK_LABEL[t.kind] }}</td>
                   <td>
                     <template v-for="(code, i) in t.topics" :key="code">
                       <span v-if="i > 0">, </span><a :href="`#/topic/${code}`">{{ code.split('-').pop() }}</a>
                     </template>
                   </td>
-                  <td>{{ fmtMinutes(t.estimatedMinutes) }}{{ t.kind === 'recording' ? ' total' : '' }}</td>
+                  <td>{{ t.kind === 'editing' ? '1 day' : fmtMinutes(t.estimatedMinutes) + (t.kind === 'recording' ? ' total' : '') }}</td>
                   <td>{{ t.deadline || '—' }}</td>
                 </tr>
               </tbody>
             </table>
           </q-card-section>
-          <q-card-section v-else class="text-grey-7">Nothing outstanding — every topic is drafted and recorded.</q-card-section>
+          <q-card-section v-else class="text-grey-7">Nothing outstanding — every topic's subtitles are ready for translation.</q-card-section>
           <q-separator />
 
           <q-card-section class="row items-center gap-sm">
@@ -748,9 +756,9 @@ async function sendReminder() {
                   <span v-if="unitPlan(g.unit)?.deliveryDate" class="plan-tag"
                     :class="unitPlan(g.unit)!.onTrack === false ? 'text-negative' : 'text-positive'">
                     <q-icon name="schedule" size="18px" />
-                    due {{ unitPlan(g.unit)!.deliveryDate }}<template v-if="unitPlan(g.unit)!.onTrack !== null"> · {{ unitPlan(g.unit)!.onTrack ? 'on track' : `${plural(unitPlan(g.unit)!.daysBehind, 'day')} behind` }}</template>
+                    subtitles due {{ unitPlan(g.unit)!.deliveryDate }}<template v-if="unitPlan(g.unit)!.onTrack !== null"> · {{ unitPlan(g.unit)!.onTrack ? 'on track' : `${plural(unitPlan(g.unit)!.daysBehind, 'day')} behind` }}</template>
                   </span>
-                  <span v-else-if="plan" class="plan-tag text-grey-6">no delivery date</span>
+                  <span v-else-if="plan" class="plan-tag text-grey-6">no subtitles date</span>
                   <q-btn-dropdown v-if="g.activity?.exists" split outline dense no-caps size="sm" label="activity" class="q-ml-md" :to="`/edit-doc/${g.activity.path}`">
                     <q-badge v-if="g.activity.errors" color="negative" floating>{{ g.activity.errors }}</q-badge>
                     <q-badge v-else-if="g.activity.warnings" color="warning" floating>{{ g.activity.warnings }}</q-badge>

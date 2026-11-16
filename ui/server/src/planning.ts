@@ -1,7 +1,9 @@
-// Backward scheduling for a module's delivery: each unit has its own agreed delivery date
-// (set by the producer, not inferred), and prep/recording for that unit is scheduled
-// backward from its own date alone — independently of every other unit's. Pure functions
-// only — no DB, no HTTP — so the math is directly unit-testable against fixture data.
+// Backward scheduling for a module's delivery: each unit has its own agreed date (set by the
+// producer, not inferred) by which its English subtitles must be in the system, ready for
+// translation: through bcn subtitles with every suspected mishearing reviewed (or already
+// sent). Prep, recording and the editor's day for that unit are scheduled backward from its
+// own date alone — independently of every other unit's. Pure functions only — no DB, no
+// HTTP — so the math is directly unit-testable against fixture data.
 //
 // Production happens one unit at a time: every topic's script in a unit must be ready
 // before that unit's recording, and every topic in the unit is recorded together, in one
@@ -24,7 +26,10 @@ import type { StatusEnvelope } from '@beacon/shared';
 //   total is informational (how long the session will be), not a scheduling cost.
 // - A producer has about this many focused hours per day available for script-writing,
 //   before other duties. (Recording doesn't use this budget — see above.)
-// Dates are calendar days (no weekends/holiday calendar); treat as advisory, not a
+// - The editor needs the one working day before the deadline: edit, export the subtitles,
+//   and their proofreading (reviewing mishearings) all fit in it. Like recording, it is a
+//   fixed day, not a per-topic cost.
+// Dates are working days (Monday to Friday; no holiday calendar); treat as advisory, not a
 // hard commitment. Translation turnaround and packaging are not independently
 // estimated per topic in v1 (translation happens off-pipeline, by the partner;
 // packaging is fast once recorded) — their milestones report current progress only,
@@ -42,28 +47,50 @@ function rawDaysFor(minutes: number): number {
   return minutes / 60 / HOURS_PER_DAY;
 }
 
-/** Steps back by a whole number of days, rounding fractional accumulated offsets up
- *  (never down to 0) so a run of sub-day tasks still separates onto distinct dates. */
-function minusDays(date: string, days: number): string {
+const isWeekend = (d: Date): boolean => d.getUTCDay() === 0 || d.getUTCDay() === 6;
+
+/** Steps back by a whole number of working days (Saturdays and Sundays are skipped), rounding
+ *  fractional accumulated offsets up (never down to 0) so a run of sub-day tasks still
+ *  separates onto distinct dates. */
+export function minusWorkingDays(date: string, days: number): string {
   const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - Math.ceil(days));
+  for (let n = Math.ceil(days); n > 0; n--) {
+    do d.setUTCDate(d.getUTCDate() - 1); while (isWeekend(d));
+  }
   return d.toISOString().slice(0, 10);
+}
+
+/** Working days after `from` up to and including `to` (0 if `to` is not later). */
+export function workingDaysBetween(from: string, to: string): number {
+  const d = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  let n = 0;
+  while (d < end) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    if (!isWeekend(d)) n++;
+  }
+  return n;
 }
 
 function today(): string { return new Date().toISOString().slice(0, 10); }
 
 export interface PlannedTopicInput {
   topic: string; unit: string; title: string; minutes: number | null;
-  drafted: boolean; recorded: boolean; translated: boolean; published: boolean;
+  drafted: boolean; recorded: boolean;
+  /** English subtitles ready to hand to the translator (or already sent): what a unit's date is for. */
+  ready: boolean;
+  translated: boolean; published: boolean;
 }
 
 /** One outstanding batch of work against one unit: writing the scripts still missing in
- *  it, or recording it (every topic in the unit, in a single session). */
+ *  it, recording it (every topic in the unit, in a single session), or the editor's day
+ *  (edit, subtitles and their proofreading) that gets it ready for translation. */
 export interface UnitTask {
-  unit: string; kind: 'scripts' | 'recording';
+  unit: string; kind: 'scripts' | 'recording' | 'editing';
   topics: string[];           // the outstanding topic ids this batch covers
   estimatedMinutes: number;   // summed across topics; for 'recording' this is informational
-                              // only — the task always costs exactly one calendar day (below)
+                              // only — the task always costs exactly one working day (below);
+                              // 0 for 'editing', which is the editor's fixed day
   deadline: string | null;
 }
 
@@ -76,12 +103,12 @@ export interface UnitPlan {
 }
 
 export interface Milestone {
-  kind: 'briefs_done' | 'recorded' | 'translated' | 'published';
+  kind: 'briefs_done' | 'recorded' | 'ready' | 'translated' | 'published';
   done: boolean; remaining: number; dueDate: string | null;
 }
 
 export interface ModulePlanComputed {
-  topicsTotal: number; topicsRecorded: number; topicsRemaining: number; topicsNotDrafted: number;
+  topicsTotal: number; topicsRecorded: number; topicsRemaining: number; topicsNotDrafted: number; topicsReady: number;
   /** Worst-unit-wins: true only if every unit with an agreed date is itself on track; null
    *  if no unit has a date set yet, so there's nothing to judge against. */
   onTrack: boolean | null;
@@ -108,6 +135,9 @@ export function moduleTopicsFor(status: StatusEnvelope, module: string): Planned
     .map((r) => {
       const enAt = (stage: string) => r.en.stage_index >= r.en.stages.indexOf(stage);
       const zhAt = (stage: string) => r.zh.stage_index >= r.zh.stages.indexOf(stage);
+      // The same test as the topic page's "Ready for translation" tile: bcn says the next
+      // Mandarin step is sending it (subtitles done, nothing unreviewed), or it has gone.
+      const ready = r.zh.next === 'translation_export' || zhAt('out_for_translation');
       return {
         topic: r.topic,
         unit: r.unit,
@@ -115,7 +145,10 @@ export function moduleTopicsFor(status: StatusEnvelope, module: string): Planned
         minutes: r.minutes,
         drafted: enAt('drafted'),
         // Filmed or edited, ticked off by hand, counts: what's left after it is the editor's, not ours.
-        recorded: enAt('recorded') || !!r.marks.filmed || !!r.marks.edited,
+        // So do subtitles that have arrived (cues has run on them) or are ready: the English
+        // stage needs the video as well, which can come after the subtitles.
+        recorded: enAt('recorded') || !!r.marks.filmed || !!r.marks.edited || ready || !!r.en.steps?.cues?.exists,
+        ready,
         translated: zhAt('parity_checked'),
         published: composed(r.en) && composed(r.zh),
       };
@@ -141,10 +174,12 @@ export function computeModulePlan(topics: PlannedTopicInput[], unitDates: Record
     const deliveryDate = unitDates[unit] ?? null;
     const notDrafted = unitTopics.filter((t) => !t.drafted);
     const notRecorded = unitTopics.filter((t) => !t.recorded);
+    const notReady = unitTopics.filter((t) => !t.ready);
 
-    // One scripts batch and one recording batch for this unit, in that order — its prep
-    // must finish before its own recording session, matching how production actually
-    // happens: one unit at a time, not topic by topic.
+    // One scripts batch, one recording batch and the editor's day for this unit, in that
+    // order — its prep must finish before its own recording session, and the editor works
+    // from the recording, matching how production actually happens: one unit at a time,
+    // not topic by topic.
     const rawTasks: Omit<UnitTask, 'deadline'>[] = [];
     if (notDrafted.length) {
       rawTasks.push({ unit, kind: 'scripts', topics: notDrafted.map((t) => t.topic), estimatedMinutes: notDrafted.length * BRIEF_MINUTES });
@@ -153,13 +188,17 @@ export function computeModulePlan(topics: PlannedTopicInput[], unitDates: Record
       const minutes = notRecorded.reduce((sum, t) => sum + (t.minutes ?? DEFAULT_RECORDING_MINUTES) * RECORDING_MULTIPLIER, 0);
       rawTasks.push({ unit, kind: 'recording', topics: notRecorded.map((t) => t.topic), estimatedMinutes: minutes });
     }
+    if (notReady.length) {
+      rawTasks.push({ unit, kind: 'editing', topics: notReady.map((t) => t.topic), estimatedMinutes: 0 });
+    }
 
     // Walk this unit's own tasks backward from its own agreed date, independently of
     // every other unit: each unit's date is now externally agreed, not inferred relative
     // to the others, so there is no cross-unit chain any more — U01 and U05 are each
-    // scheduled purely against their own deadline. A recording task always costs exactly
-    // one day — the session happens on a single day however long it runs — while a
-    // scripts task costs its real proportional share of the daily hours budget.
+    // scheduled purely against their own deadline. A recording task and the editor's day
+    // each cost exactly one working day — the session happens on a single day however long
+    // it runs — while a scripts task costs its real proportional share of the daily hours
+    // budget.
     // Fractional days accumulate across the walk rather than being rounded away per task,
     // so a run of short scripts batches still separates onto distinct dates.
     const dated: UnitTask[] = [];
@@ -167,11 +206,11 @@ export function computeModulePlan(topics: PlannedTopicInput[], unitDates: Record
       let cursor = deliveryDate;
       let accrued = 0; // fractional days owed but not yet stepped off the calendar
       for (let i = rawTasks.length - 1; i >= 0; i--) {
-        const cost = rawTasks[i].kind === 'recording' ? 1 : rawDaysFor(rawTasks[i].estimatedMinutes);
+        const cost = rawTasks[i].kind === 'scripts' ? rawDaysFor(rawTasks[i].estimatedMinutes) : 1;
         accrued += cost;
         const wholeDays = Math.floor(accrued);
         if (wholeDays > 0) {
-          cursor = minusDays(cursor, wholeDays);
+          cursor = minusWorkingDays(cursor, wholeDays);
           accrued -= wholeDays;
         }
         dated[i] = { ...rawTasks[i], deadline: cursor };
@@ -187,8 +226,9 @@ export function computeModulePlan(topics: PlannedTopicInput[], unitDates: Record
     const deadlines = dated.map((t) => t.deadline).filter((d): d is string => d !== null);
     const earliestDeadline = deadlines.length ? deadlines.reduce((a, b) => (a < b ? a : b)) : null;
     const onTrack = deliveryDate === null ? null : (earliestDeadline === null || earliestDeadline >= today());
+    // Counted in working days, like the schedule itself.
     const daysBehind = earliestDeadline !== null && earliestDeadline < today()
-      ? Math.round((Date.parse(`${today()}T00:00:00Z`) - Date.parse(`${earliestDeadline}T00:00:00Z`)) / 86_400_000)
+      ? Math.max(1, workingDaysBetween(earliestDeadline, today()))
       : 0;
 
     units.push({ unit, deliveryDate, onTrack, daysBehind });
@@ -198,6 +238,7 @@ export function computeModulePlan(topics: PlannedTopicInput[], unitDates: Record
   const topicsNotDrafted = topics.filter((t) => !t.drafted).length;
   const topicsRecorded = topics.filter((t) => t.recorded).length;
   const topicsRemaining = topics.length - topicsRecorded;
+  const topicsReady = topics.filter((t) => t.ready).length;
   const topicsNotTranslated = topics.filter((t) => !t.translated).length;
   const topicsNotPublished = topics.filter((t) => !t.published).length;
 
@@ -209,6 +250,10 @@ export function computeModulePlan(topics: PlannedTopicInput[], unitDates: Record
   const milestones: Milestone[] = [
     { kind: 'briefs_done', done: topicsNotDrafted === 0, remaining: topicsNotDrafted, dueDate: latestDeadline('scripts') },
     { kind: 'recorded', done: topicsRemaining === 0, remaining: topicsRemaining, dueDate: latestDeadline('recording') },
+    // Due on the latest unit date still outstanding: the date itself is this milestone.
+    { kind: 'ready', done: topicsReady === topics.length, remaining: topics.length - topicsReady,
+      dueDate: units.filter((u) => u.deliveryDate && allTasks.some((t) => t.unit === u.unit && t.kind === 'editing'))
+        .map((u) => u.deliveryDate as string).reduce<string | null>((a, b) => (a === null || b > a ? b : a), null) },
     { kind: 'translated', done: topicsNotTranslated === 0, remaining: topicsNotTranslated, dueDate: null },
     { kind: 'published', done: topicsNotPublished === 0, remaining: topicsNotPublished, dueDate: null },
   ];
@@ -220,7 +265,7 @@ export function computeModulePlan(topics: PlannedTopicInput[], unitDates: Record
   const daysBehind = units.reduce((worst, u) => Math.max(worst, u.daysBehind), 0);
 
   return {
-    topicsTotal: topics.length, topicsRecorded, topicsRemaining, topicsNotDrafted,
+    topicsTotal: topics.length, topicsRecorded, topicsRemaining, topicsNotDrafted, topicsReady,
     onTrack, daysBehind, units, milestones, tasks: allTasks,
   };
 }

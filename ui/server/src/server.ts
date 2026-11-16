@@ -335,7 +335,8 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     return app.cachedQuery<BcnReviewEnvelope>(`review|${rel}`, 10_000, 'review', [app.targetPath(rel)]);
   });
 
-  // -- delivery planning: backward-scheduled unit scripts/recording, milestones, ICS, reminders -
+  // -- delivery planning: backward-scheduled unit scripts/recording/editing, milestones, ICS, reminders -
+  // Each unit's date is when its English subtitles must be ready for translation (planning.ts).
   const fmtMinutes = (min: number): string => {
     if (min < 60) return `${Math.round(min)} min`;
     const h = Math.floor(min / 60);
@@ -386,7 +387,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     return out;
   });
 
-  // Each unit's own agreed delivery date, set independently of every other unit's.
+  // Each unit's own agreed date (subtitles ready for translation), set independently of every other unit's.
   f.put(`/api/module/:name(${MODULE})/plan/units/:unit(^U\\d{2}$)`, async (req: Req) => {
     const data = await readJson(req) as unknown as UnitPlanRequest;
     const d = data.deliveryDate;
@@ -411,16 +412,20 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const status = await app.status.get();
     const topics = status ? moduleTopicsFor(status, module) : [];
     const plan = computeModulePlan(topics, unitDates);
+    const SUMMARY = { scripts: 'Scripts ready', recording: 'Record', editing: 'Edit + subtitles' } as const;
     const events: IcsEvent[] = plan.tasks.filter((t) => t.deadline).map((t) => ({
       uid: `${module}-${t.unit}-${t.kind}@beacon-ui`,
       date: t.deadline as string,
-      summary: t.kind === 'scripts' ? `Scripts ready: ${module} ${t.unit}` : `Record: ${module} ${t.unit}`,
+      summary: `${SUMMARY[t.kind]}: ${module} ${t.unit}`,
       description: t.kind === 'scripts'
         ? `${plural(t.topics.length, 'script')} to write.`
-        : `${plural(t.topics.length, 'topic')}, ~${fmtMinutes(t.estimatedMinutes)} total, in one session.`,
+        : t.kind === 'recording'
+          ? `${plural(t.topics.length, 'topic')}, ~${fmtMinutes(t.estimatedMinutes)} total, in one session.`
+          : `The editor: ${plural(t.topics.length, 'topic')} edited, subtitles exported and proofread, ready for translation.`,
     }));
     for (const u of plan.units) {
-      if (u.deliveryDate) events.push({ uid: `${module}-${u.unit}-delivery@beacon-ui`, date: u.deliveryDate, summary: `Delivery: ${module} ${u.unit}` });
+      // uid kept as -delivery so calendars that already subscribed update the event in place.
+      if (u.deliveryDate) events.push({ uid: `${module}-${u.unit}-delivery@beacon-ui`, date: u.deliveryDate, summary: `Subtitles ready for translation: ${module} ${u.unit}` });
     }
     const ics = buildIcs(module, events);
     reply.header('Content-Type', 'text/calendar; charset=utf-8');
@@ -436,9 +441,9 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const dated = plan.units.filter((u) => u.deliveryDate);
     const lines = [
       `Hi ${ownerName || 'there'},`, '',
-      `Progress on ${module}: ${plan.topicsRecorded}/${plan.topicsTotal} recorded, ${plan.topicsNotDrafted} not yet drafted.`,
-      dated.length ? `Delivery dates: ${dated.map((u) => `${u.unit} ${u.deliveryDate}`).join(', ')}.` : 'No delivery dates agreed yet.', '',
-      ...(upcoming.length ? ['Upcoming:', ...upcoming.map((t) => `- ${t.deadline}: ${t.kind === 'scripts' ? `write ${plural(t.topics.length, 'script')} for` : 'record'} ${module} ${t.unit}`)] : []),
+      `Progress on ${module}: ${plan.topicsReady}/${plan.topicsTotal} ready for translation, ${plan.topicsRecorded}/${plan.topicsTotal} recorded, ${plan.topicsNotDrafted} not yet drafted.`,
+      dated.length ? `Subtitles due ready for translation: ${dated.map((u) => `${u.unit} ${u.deliveryDate}`).join(', ')}.` : 'No subtitle deadlines agreed yet.', '',
+      ...(upcoming.length ? ['Upcoming:', ...upcoming.map((t) => `- ${t.deadline}: ${t.kind === 'scripts' ? `write ${plural(t.topics.length, 'script')} for` : t.kind === 'recording' ? 'record' : 'editor: edit and subtitles for'} ${module} ${t.unit}`)] : []),
       '', `${app.auth.baseUrl}/#/module/${module}`,
     ];
     await app.auth.mailer.send(ownerEmail, `NUCS: progress on ${module}`, lines.join('\n'));
