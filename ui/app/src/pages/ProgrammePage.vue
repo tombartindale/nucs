@@ -6,7 +6,7 @@ import { api } from '@/api';
 import PageHeader from '@/components/PageHeader.vue';
 import StateChip from '@/components/StateChip.vue';
 import { plural } from '@/format';
-import { markDone, published, publishedStale, recordingIn, scripted, translated } from '@/progress';
+import { markDone, published, publishedStale, readyToTranslate, recordingIn, scripted, subtitlesIn, translated } from '@/progress';
 import { useBeacon } from '@/stores/beacon';
 
 const beacon = useBeacon();
@@ -88,6 +88,10 @@ const STEPS = computed<Step[]>(() => [
   { key: 'edited', label: 'Edited', help: 'Edit done (Edited ticked, or the recording is in)',
     done: (r) => markDone(r, 'edited'), next: (r) => markDone(r, 'filmed') && !markDone(r, 'edited'), nextLabel: 'to edit',
     also: { test: (r) => !!r.marks.edited && !recordingIn(r), label: 'to upload' } },
+  // What each unit's delivery date is for (planning.ts): subtitles in, proofread, ready to send.
+  { key: 'ready', label: 'Ready to translate', help: 'English subtitles in, prepared and every mishearing reviewed (or already sent)',
+    done: readyToTranslate, next: (r) => subtitlesIn(r) && !readyToTranslate(r), nextLabel: 'to check',
+    also: { test: (r) => !readyToTranslate(r) && r.unreviewed_mistranscriptions > 0, label: 'to proofread' } },
   ...(showZh.value ? [{ key: 'translated', label: 'Translated', lang: 'zh' as Lang, help: 'Mandarin script and subtitles back from translation',
     done: (r: TopicStatus) => translated(r, 'zh'), next: (r: TopicStatus) => r.zh.next === 'translation_export', nextLabel: 'to send',
     also: { test: (r: TopicStatus) => r.zh.stage === 'out_for_translation', label: 'out' } }] : []),
