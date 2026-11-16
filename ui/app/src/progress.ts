@@ -19,6 +19,17 @@ export function markImplied(r: TopicStatus, key: TopicMark): string | null {
 }
 export const markDone = (r: TopicStatus, key: TopicMark) => !!r.marks[key] || !!markImplied(r, key);
 
+/** The English subtitles are ready to hand to the translator: bcn says sending them is
+ *  Mandarin's next step (through bcn subtitles, every mishearing reviewed), or they have
+ *  gone. The same rule as the topic page's "Ready for translation" tile and the delivery
+ *  planner (ui/server/src/planning.ts), which schedules against it. */
+export function readyToTranslate(r: TopicStatus) {
+  const at = r.zh.stages.indexOf('out_for_translation');
+  return r.zh.next === 'translation_export' || (at >= 0 && r.zh.stage_index >= at);
+}
+/** The editor's English subtitles are in the system (they can arrive before the video). */
+export const subtitlesIn = (r: TopicStatus) => hasArtifact(r, 'edit/master.srt');
+
 /** The translated copy is in the system once the stage reaches 'returned'. */
 export function translated(r: TopicStatus, lang: Lang = 'zh') {
   const l = r[lang], at = l.stages.indexOf('returned');
