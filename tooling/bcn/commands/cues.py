@@ -41,7 +41,8 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--by", default=None, help="who is setting a timecode (default: login name)")
 
 
-def pair_checks(t: Topic, cues: list[srt.Cue], duration: float, cfg: Config) -> list[Diagnostic]:
+def pair_checks(t: Topic, cues: list[srt.Cue], duration: float | None, cfg: Config) -> list[Diagnostic]:
+    """Check the SRT on its own, and against the video when there is one (duration is None without)."""
     c = cfg["cues"]
     out: list[Diagnostic] = []
     rel = "edit/master.srt"
@@ -55,6 +56,8 @@ def pair_checks(t: Topic, cues: list[srt.Cue], duration: float, cfg: Config) -> 
         if cue.end < cue.start:
             out.append(Diagnostic("CUE_SRT_ORDER", f"Cue {cue.index} ends before it starts.", topic=t.id, file=rel, line=cue.line))
             break
+    if duration is None:
+        return out
     if cues:
         last = cues[-1]
         if last.end > duration + 0.5:
@@ -79,7 +82,11 @@ def cues_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: a
     src, srt_path, video = t.src("en"), t.srt("en"), t.video
     require_input(t, src)
     require_input(t, srt_path, stable=True)
-    require_input(t, video, stable=True)
+    # The video is optional: the alignment is script against SRT. When it is there, the SRT is
+    # also checked against it (duration, modification time), which a later video arrival triggers.
+    has_video = video.exists() or storage.read_pointer(video) is not None
+    if has_video:
+        require_input(t, video, stable=True)
     require_step(t, "validate", "en", [src], "bcn validate")
 
     who = args.by or getpass.getuser()
@@ -99,23 +106,30 @@ def cues_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: a
     prev = fsutil.read_json(t.step_file("cues"))
     prev_ov = ((prev or {}).get("results") or [{}])[0].get("overrides", {})
     changed_ov = prev is not None and prev_ov != current_ov
-    if try_skip(t, r, "cues", "en", outputs, inputs, args.force or changed_ov or args.dump_narration):
+    prev_video = ((prev or {}).get("results") or [{}])[0].get("video_checked", True)
+    changed_video = prev is not None and prev_video != has_video
+    if try_skip(t, r, "cues", "en", outputs, inputs, args.force or changed_ov or changed_video or args.dump_narration):
         return
+    r.extra["video_checked"] = has_video
 
-    tl = tools.require(cfg, "ffprobe")
-    tp.update(5, "reading SRT and video")
+    tp.update(5, "reading SRT and video" if has_video else "reading SRT")
     cues = srt.parse_file(srt_path, "edit/master.srt")
-    cached = None if video.is_file() else storage.duration(video)
-    if cached is not None:
-        info = types.SimpleNamespace(duration=cached)
-    elif video.is_file():
-        info = probe(tl, video, "edit/master.mp4")
-    else:  # in the bucket with no cached duration (a pointer written by hand): fetch and probe
-        with storage.workspace(t.root, [video], t.build) as local:
-            info = probe(tl, local[video], "edit/master.mp4")
-    if info.duration <= 0:
-        raise Fail("FS_CORRUPT", "edit/master.mp4 reports no duration.", file="edit/master.mp4")
-    pair = pair_checks(t, cues, info.duration, cfg)
+    duration: float | None = None
+    if has_video:
+        cached = None if video.is_file() else storage.duration(video)
+        if cached is not None:
+            info = types.SimpleNamespace(duration=cached)
+        else:
+            tl = tools.require(cfg, "ffprobe")
+            if video.is_file():
+                info = probe(tl, video, "edit/master.mp4")
+            else:  # in the bucket with no cached duration (a pointer written by hand): fetch and probe
+                with storage.workspace(t.root, [video], t.build) as local:
+                    info = probe(tl, local[video], "edit/master.mp4")
+        if info.duration <= 0:
+            raise Fail("FS_CORRUPT", "edit/master.mp4 reports no duration.", file="edit/master.mp4")
+        duration = info.duration
+    pair = pair_checks(t, cues, duration, cfg)
     r.diagnostics.extend(pair)
     if any(d.level == "error" for d in pair):
         # A mismatched pair makes every timecode meaningless. Stop before writing any.
@@ -142,7 +156,7 @@ def cues_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: a
                                         topic=t.id, file="review.json", level="warn"))
         ov.pop(1)
     for k, v in ov.items():
-        if v > info.duration:
+        if duration is not None and v > duration:
             r.diagnostics.append(Diagnostic("CUE_SHEET_INVALID", f"Hand-set timecode for slide {k} is after the end of the video.",
                                             topic=t.id, file="review.json", slide=k))
     al = align(narration, cues, window=c["window"], mis_max_tokens=c["mistranscription_max_tokens"],
@@ -243,7 +257,7 @@ def cues_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: a
         "topic": t.id,
         "generated": utcnow(),
         "srt": {"path": "edit/master.srt", "cues": len(cues), "sha256": sha256_file(srt_path)},
-        "video": {"path": "edit/master.mp4", "duration": info.duration},
+        "video": {"path": "edit/master.mp4", "duration": duration} if duration is not None else None,
         "thresholds": {"min_confidence": thr, "max_divergence": c["max_divergence"]},
         "script_tokens": al.script_tokens,
         "srt_tokens": al.srt_tokens,

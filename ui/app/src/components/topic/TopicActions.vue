@@ -1,8 +1,10 @@
 <script setup lang="ts">
-// The topic's pipeline in both languages: English steps on one row, Mandarin on the row below,
-// branching off between English cues and subtitles. Each step shows whether bcn says it is done,
-// out of date, failed or not run, with the next step marked. Clicking a step runs it in its
-// row's language.
+// The topic's pipeline in both languages. English forks after validate into two tracks: the video
+// track (the edited video, render, bumpers, compose, package) and, below it, the subtitle track
+// (the editor's SRT, cues, subtitles, ready for translation), because the subtitle side needs
+// neither render nor the video. Mandarin is the row below, branching off the subtitle track.
+// Each step shows whether bcn says it is done, out of date, failed or not run, with the next step
+// marked. Clicking a step runs it in its row's language.
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { StepState } from '@beacon/shared';
 import { fmtAgo, LANG_NAME, STEP_HELP } from '@/format';
@@ -15,29 +17,49 @@ type Item =
   | { kind: 'bumpers' };
 
 // The order bcn works through (tooling/bcn/state.py). The waits are what a person does
-// between steps: the editor delivers the recording, the translator returns the Mandarin.
+// between steps: the editor delivers the SRT and the video, the translator returns the Mandarin.
 // bumpers is its own kind, not a 'step': bcn tracks it as a tool with its own artifacts
 // (intro/outro card + video), not a pipeline step with a StepState, so it needs compose's
 // --no-bumpers to have something to draw from before compose runs.
-const FLOW: Record<'en' | 'zh', Item[]> = {
-  en: [
-    { kind: 'step', name: 'validate' }, { kind: 'step', name: 'render' },
-    { kind: 'wait', name: 'recording', label: 'Recording', icon: 'videocam' },
-    { kind: 'step', name: 'cues' }, { kind: 'step', name: 'subtitles' },
-    { kind: 'wait', name: 'translation_ready', label: 'Ready for translation', icon: 'translate',
-      to: (id) => `/caption/${id}?lang=en` },
-    { kind: 'bumpers' },
-    { kind: 'step', name: 'compose', optional: true }, { kind: 'step', name: 'package' },
-  ],
-  zh: [
-    { kind: 'wait', name: 'translation', label: 'Translation', icon: 'translate' },
-    { kind: 'step', name: 'validate' }, { kind: 'step', name: 'subtitles' }, { kind: 'step', name: 'render' },
-    { kind: 'bumpers' },
-    { kind: 'step', name: 'compose', optional: true }, { kind: 'step', name: 'package' },
-  ],
+// head runs first; each lane then follows it, one grid row per lane.
+const FLOW: Record<'en' | 'zh', { head: Item[]; lanes: Item[][] }> = {
+  en: {
+    head: [{ kind: 'step', name: 'validate' }],
+    lanes: [
+      // render and bumpers need only validate, not the video; nothing here waits on the one
+      // before it except compose, which needs all three (and cues). The video leads because
+      // it is the editor's delivery, the long wait on this track.
+      [{ kind: 'wait', name: 'video', label: 'Video in', icon: 'videocam' },
+        { kind: 'step', name: 'render' },
+        { kind: 'bumpers' },
+        { kind: 'step', name: 'compose', optional: true }, { kind: 'step', name: 'package' }],
+      [{ kind: 'wait', name: 'subtitles_in', label: 'Subtitles in', icon: 'closed_caption' },
+        { kind: 'step', name: 'cues' }, { kind: 'step', name: 'subtitles' },
+        { kind: 'wait', name: 'translation_ready', label: 'Ready for translation', icon: 'translate',
+          to: (id) => `/caption/${id}?lang=en` }],
+    ],
+  },
+  zh: {
+    head: [],
+    lanes: [[
+      { kind: 'wait', name: 'translation', label: 'Translation', icon: 'translate' },
+      { kind: 'step', name: 'validate' }, { kind: 'step', name: 'subtitles' }, { kind: 'step', name: 'render' },
+      { kind: 'bumpers' },
+      { kind: 'step', name: 'compose', optional: true }, { kind: 'step', name: 'package' },
+    ]],
+  },
+};
+// The editor's two deliveries, each its own wait: which one bcn is waiting on, and the file
+// that ends the wait (status artifacts carry an exists flag for each).
+const ARRIVAL: Record<string, { next: string; key: string }> = {
+  subtitles_in: { next: 'await_subtitles', key: 'edit/master.srt' },
+  video: { next: 'await_video', key: 'edit/master.mp4' },
 };
 const WAIT_HELP: Record<string, string> = {
-  recording: 'The editor delivers edit/master.mp4 and its subtitles. Upload them in the Video pane; nothing to run here.',
+  subtitles_in: 'The editor delivers the English subtitles, edit/master.srt. Upload them in the Video pane; nothing to run here. '
+    + 'They are all that cues, subtitles and sending for translation need: no render, no video.',
+  video: 'The editor delivers the edited video, edit/master.mp4. Upload it in the Video pane; nothing to run here. '
+    + 'Compose needs it; once it is in, cues runs again to check the subtitles against it.',
   translation: 'The English SRT and slides go to the translator from the Translation page. The returned files come back either there, '
     + 'or dropped straight into the Slides pane above if the translator sent them loose under the wrong names. '
     + 'A topic can be sent once its English subtitles step is done, so any corrected mishearings reach the translator.',
@@ -93,12 +115,13 @@ function view(item: Item, lang: 'en' | 'zh') {
       return { cls: ['wait', status], icon: ICON[status], color: COLOR[status], cap: CAP[status],
         clickable: status !== 'todo', tip: WAIT_HELP.translation_ready };
     }
-    const current = item.name === 'recording' ? next === 'await_recording'
+    const arrival = ARRIVAL[item.name];
+    const current = arrival ? next === arrival.next
       : next === 'translation_export' || next === 'await_translation';
-    const reached = !!s && (item.name === 'recording'
-      ? s.stage_index >= s.stages.indexOf('recorded')
-      : s.stage_index >= s.stages.indexOf('returned'));
-    const cap = current ? (next === 'translation_export' ? 'ready to send' : next === 'await_translation' ? 'with the translator' : 'waiting for the edit')
+    const reached = arrival
+      ? !!t.status.value?.artifacts?.some((a) => a.key === arrival.key && a.exists)
+      : !!s && s.stage_index >= s.stages.indexOf('returned');
+    const cap = current ? (next === 'translation_export' ? 'ready to send' : next === 'await_translation' ? 'with the translator' : 'waiting for the editor')
       : reached ? 'arrived' : item.name === 'translation' ? 'after English subtitles' : 'not yet';
     return { cls: ['wait', { current }], icon: reached && !current ? 'check_circle' : item.icon, color: current ? 'white' : reached ? 'positive' : undefined,
       cap, tip: WAIT_HELP[item.name] };
@@ -139,12 +162,17 @@ function view(item: Item, lang: 'en' | 'zh') {
   // (Step.delivered in state.py). Without this, a fresh draft run would show "done" right
   // next to "next: compose", which looks like a contradiction rather than "preview only."
   const draftOnly = item.name === 'compose' && !!st?.exists && st.ok && st.fresh && !!st.draft;
-  const status = !st?.exists ? 'todo' : !st.ok ? 'failed' : draftOnly ? 'draft' : st.fresh ? 'done' : 'stale';
-  const ICON = { done: 'check_circle', stale: 'update', failed: 'error', todo: 'radio_button_unchecked', draft: 'visibility' } as const;
-  const COLOR = { done: 'positive', stale: 'warning', failed: 'negative', todo: 'grey-6', draft: 'warning' } as const;
+  // cues failed on slide timings alone: the subtitle track and translation go ahead (bcn
+  // subtitles ignores those errors), only a full compose waits, so this is amber, not red.
+  const toPlace = st?.slides_to_place ?? null;
+  const slides = toPlace !== null && !!st?.fresh;
+  const status = !st?.exists ? 'todo' : slides ? 'slides' : !st.ok ? 'failed' : draftOnly ? 'draft' : st.fresh ? 'done' : 'stale';
+  const ICON = { done: 'check_circle', stale: 'update', failed: 'error', todo: 'radio_button_unchecked', draft: 'visibility', slides: 'pin_drop' } as const;
+  const COLOR = { done: 'positive', stale: 'warning', failed: 'negative', todo: 'grey-6', draft: 'warning', slides: 'warning' } as const;
   // A finished step says when it ran, not "done": the green tick already says that.
   const CAP = { done: st?.time ? fmtAgo(st.time, beacon.now) : '', stale: 'out of date', failed: 'failed',
-    todo: item.optional ? 'optional check' : 'not run', draft: `draft only${st?.time ? ` · ${fmtAgo(st.time, beacon.now)}` : ''}` };
+    todo: item.optional ? 'optional check' : 'not run', draft: `draft only${st?.time ? ` · ${fmtAgo(st.time, beacon.now)}` : ''}`,
+    slides: toPlace ? `${toPlace} slide${toPlace > 1 ? 's' : ''} to place` : 'slide timings to fix' };
   return {
     cls: ['step-btn', status, { current, optional: item.optional, disabled: waitingForTranslation }],
     icon: current && status === 'todo' ? 'play_circle' : ICON[status],
@@ -153,18 +181,43 @@ function view(item: Item, lang: 'en' | 'zh') {
     disable: waitingForTranslation,
     tip: `${lang === 'zh' ? 'Mandarin. ' : ''}${STEP_HELP[item.name]}${current ? ' This is the next step for this topic.' : ''}`
       + (waitingForTranslation ? ' Needs topic.zh.md and the Mandarin SRT back from the translator first.' : '')
-      + (draftOnly ? ' The last run was a draft preview, not delivered — run it without --draft before package can use it.' : ''),
+      + (draftOnly ? ' The last run was a draft preview, not delivered — run it without --draft before package can use it.' : '')
+      + (slides ? ' A slide break needs a person: watch a draft compose and set it in the Video pane. Subtitles and '
+        + 'translation can go ahead meanwhile; a full compose waits for it.' : '')
+      + (item.name === 'compose' && lang === 'en' ? ' A full compose also needs cues to have passed, with the video in; '
+        + 'a draft accepts a best-guess cue sheet.' : ''),
   };
 }
-const rows = computed(() => LANGS.map((lang) => ({
-  lang, complete: !!stateOf(lang)?.complete,
-  items: FLOW[lang].map((item) => ({ item, v: view(item, lang) })),
-})));
 
-// Two connectors drawn over the rows: English, after subtitles, down to the start of the
-// Mandarin row (that is when a topic can go out for translation); and the end of the Mandarin
-// row back up to English package, which delivers both languages together. Measured from the
-// blocks themselves, so they follow the layout at any width.
+// Each row is a grid: the label, then head, then every lane on its own grid row with an arrow
+// before each item. A lane after a head starts with an arrow out of the head (the fork).
+type Cell = { key: string; row: string; col: number } & (
+  | { kind: 'label' } | { kind: 'arrow' } | { kind: 'item'; item: Item; v: ReturnType<typeof view> });
+const itemKey = (item: Item) => (item.kind === 'bumpers' ? 'bumpers' : item.name);
+const rows = computed(() => LANGS.map((lang) => {
+  const { head, lanes } = FLOW[lang];
+  const span = `1 / span ${lanes.length}`;
+  const cells: Cell[] = [{ key: 'label', kind: 'label', row: span, col: 1 }];
+  let col = 2;
+  head.forEach((item, i) => {
+    if (i > 0) cells.push({ key: `h-arrow-${i}`, kind: 'arrow', row: span, col: col++ });
+    cells.push({ key: itemKey(item), kind: 'item', item, v: view(item, lang), row: span, col: col++ });
+  });
+  lanes.forEach((lane, li) => {
+    let c = col;
+    lane.forEach((item, i) => {
+      if (i > 0 || head.length) cells.push({ key: `l${li}-arrow-${i}`, kind: 'arrow', row: String(li + 1), col: c++ });
+      cells.push({ key: itemKey(item), kind: 'item', item, v: view(item, lang), row: String(li + 1), col: c++ });
+    });
+  });
+  return { lang, complete: !!stateOf(lang)?.complete, cells };
+}));
+
+// Two connectors drawn over the rows: English "Ready for translation", at the end of the subtitle
+// track, down to the start of the Mandarin row (that is when a topic can go out for translation);
+// and the end of the Mandarin row round the right-hand side and into English package, which
+// delivers both languages together. Measured from the blocks themselves, so they follow the
+// layout at any width.
 const wrap = ref<HTMLElement | null>(null);
 const links = ref<{ d: string; key: string }[]>([]);
 const size = ref({ w: 0, h: 0 });
@@ -184,15 +237,16 @@ function measure() {
   if (!subs || !pkg || !first || !last) { links.value = []; return; }
   const gapTop = Math.max(subs.b, pkg.b);
   const gapBottom = Math.min(first.t, last.t);
-  const y1 = gapTop + (gapBottom - gapTop) * 0.35;   // two lanes, so the lines never overlap
-  const y2 = gapTop + (gapBottom - gapTop) * 0.7;
-  const out = subs.r + 11;                           // just after subtitles, in the arrow gap
+  const y1 = gapTop + (gapBottom - gapTop) * 0.5;
+  const outX = subs.l + (subs.r - subs.l) / 2;       // straight down out of the tile
   const inX = first.l + 26;
-  const back = last.r + 11;
-  const upX = pkg.l + (pkg.r - pkg.l) / 2;
+  // Package sits on the upper (video) track, so the way back goes round the right of
+  // everything and enters it from the side, never crossing the subtitle track.
+  const back = Math.max(last.r, pkg.r, subs.r) + 14;
+  const pkgY = pkg.t + (pkg.b - pkg.t) / 2;
   links.value = [
-    { key: 'out', d: `M ${out} ${subs.b - 6} V ${y1} H ${inX} V ${first.t - 2}` },  // below the arrow glyph
-    { key: 'back', d: `M ${last.r + 1} ${last.t + (last.b - last.t) / 2} H ${back} V ${y2} H ${upX} V ${pkg.b + 2}` },
+    { key: 'out', d: `M ${outX} ${subs.b + 1} V ${y1} H ${inX} V ${first.t - 2}` },
+    { key: 'back', d: `M ${last.r + 1} ${last.t + (last.b - last.t) / 2} H ${back} V ${pkgY} H ${pkg.r + 2}` },
   ];
 }
 let ro: ResizeObserver | null = null;
@@ -230,47 +284,42 @@ async function bumpers(lang: 'en' | 'zh') {
       <div class="row items-center q-mb-sm">
         <div class="text-subtitle2">Steps</div>
         <q-space />
-        <span class="text-caption text-grey-7">Click a step to run it in that row's language</span>
+        <span class="text-caption text-grey-7 q-mr-sm">Click a step to run it in that row's language</span>
+        <q-btn flat dense no-caps icon="fact_check" label="qa" aria-label="Run qa" @click="run('qa', 'en')">
+          <q-tooltip max-width="340px">{{ STEP_HELP.qa }}</q-tooltip>
+        </q-btn>
       </div>
       <div class="stepscroll">
         <div ref="wrap" class="stepwrap">
-          <div v-for="r in rows" :key="r.lang" :class="['stepflow', 'steprow', r.lang]">
-            <div class="row-label">
-              {{ r.lang.toUpperCase() }}
-              <q-icon v-if="r.complete" name="task_alt" color="positive" size="14px"><q-tooltip>{{ LANG_NAME[r.lang] }} complete</q-tooltip></q-icon>
-            </div>
-            <template v-for="({ item, v }, i) in r.items" :key="r.lang + (item.kind === 'bumpers' ? 'bumpers' : item.name)">
-              <q-icon v-if="i > 0" name="arrow_forward" size="18px" class="arrow" />
-              <router-link v-if="item.kind === 'wait' && item.to && v.clickable" :to="item.to(t.id)"
-                :class="['step', 'wait', 'link', v.cls[1]]" :data-step="`${r.lang}-${item.name}`">
-                <div class="name"><q-icon :name="v.icon" :color="v.color" size="16px" />{{ item.label }}</div>
-                <div class="cap">{{ v.cap }}</div>
-                <q-tooltip max-width="320px">{{ v.tip }}</q-tooltip>
-              </router-link>
-              <div v-else-if="item.kind === 'wait'" :class="['step', ...v.cls]" :data-step="`${r.lang}-${item.name}`">
-                <div class="name"><q-icon :name="v.icon" :color="v.color" size="16px" />{{ item.label }}</div>
-                <div class="cap">{{ v.cap }}</div>
-                <q-tooltip max-width="320px">{{ v.tip }}</q-tooltip>
+          <div v-for="r in rows" :key="r.lang" :class="['stepflow', 'steprow', 'stepgrid', r.lang]">
+            <template v-for="c in r.cells" :key="r.lang + c.key">
+              <div v-if="c.kind === 'label'" class="row-label" :style="{ gridRow: c.row, gridColumn: c.col }">
+                {{ r.lang.toUpperCase() }}
+                <q-icon v-if="r.complete" name="task_alt" color="positive" size="14px"><q-tooltip>{{ LANG_NAME[r.lang] }} complete</q-tooltip></q-icon>
               </div>
-              <q-btn v-else-if="item.kind === 'bumpers'" no-caps flat :class="['step', ...v.cls]" :data-step="`${r.lang}-bumpers`" :disable="v.disable"
-                :aria-label="`Make intro/outro (${LANG_NAME[r.lang]})`" @click="bumpers(r.lang)">
-                <div class="name"><q-icon :name="v.icon" :color="v.color" size="16px" />bumpers</div>
-                <div class="cap">{{ v.cap }}</div>
-                <q-tooltip max-width="340px">{{ v.tip }}</q-tooltip>
+              <q-icon v-else-if="c.kind === 'arrow'" name="arrow_forward" size="18px" class="arrow" :style="{ gridRow: c.row, gridColumn: c.col }" />
+              <router-link v-else-if="c.item.kind === 'wait' && c.item.to && c.v.clickable" :to="c.item.to(t.id)"
+                :class="['step', 'wait', 'link', c.v.cls[1]]" :data-step="`${r.lang}-${c.item.name}`" :style="{ gridRow: c.row, gridColumn: c.col }">
+                <div class="name"><q-icon :name="c.v.icon" :color="c.v.color" size="16px" />{{ c.item.label }}</div>
+                <div class="cap">{{ c.v.cap }}</div>
+                <q-tooltip max-width="320px">{{ c.v.tip }}</q-tooltip>
+              </router-link>
+              <div v-else-if="c.item.kind === 'wait'" :class="['step', ...c.v.cls]" :data-step="`${r.lang}-${c.item.name}`" :style="{ gridRow: c.row, gridColumn: c.col }">
+                <div class="name"><q-icon :name="c.v.icon" :color="c.v.color" size="16px" />{{ c.item.label }}</div>
+                <div class="cap">{{ c.v.cap }}</div>
+                <q-tooltip max-width="320px">{{ c.v.tip }}</q-tooltip>
+              </div>
+              <q-btn v-else-if="c.item.kind === 'bumpers'" no-caps flat :class="['step', ...c.v.cls]" :data-step="`${r.lang}-bumpers`" :disable="c.v.disable"
+                :style="{ gridRow: c.row, gridColumn: c.col }" :aria-label="`Make intro/outro (${LANG_NAME[r.lang]})`" @click="bumpers(r.lang)">
+                <div class="name"><q-icon :name="c.v.icon" :color="c.v.color" size="16px" />bumpers</div>
+                <div class="cap">{{ c.v.cap }}</div>
+                <q-tooltip max-width="340px">{{ c.v.tip }}</q-tooltip>
               </q-btn>
-              <q-btn v-else no-caps flat :class="['step', ...v.cls]" :data-step="`${r.lang}-${item.name}`" :disable="v.disable"
-                :aria-label="`Run ${item.name} (${LANG_NAME[r.lang]})`" @click="run(item.name, r.lang)">
-                <div class="name"><q-icon :name="v.icon" :color="v.color" size="16px" />{{ item.name }}</div>
-                <div class="cap">{{ v.cap }}</div>
-                <q-tooltip max-width="340px">{{ v.tip }}</q-tooltip>
-              </q-btn>
-            </template>
-            <template v-if="r.lang === 'en'">
-              <q-separator vertical class="q-mx-sm" />
-              <q-btn no-caps flat class="step" aria-label="Run qa" @click="run('qa', 'en')">
-                <div class="name"><q-icon name="fact_check" size="16px" />qa</div>
-                <div class="cap">check everything</div>
-                <q-tooltip max-width="340px">{{ STEP_HELP.qa }}</q-tooltip>
+              <q-btn v-else no-caps flat :class="['step', ...c.v.cls]" :data-step="`${r.lang}-${c.item.name}`" :disable="c.v.disable"
+                :style="{ gridRow: c.row, gridColumn: c.col }" :aria-label="`Run ${c.item.name} (${LANG_NAME[r.lang]})`" @click="run(c.item.name, r.lang)">
+                <div class="name"><q-icon :name="c.v.icon" :color="c.v.color" size="16px" />{{ c.item.name }}</div>
+                <div class="cap">{{ c.v.cap }}</div>
+                <q-tooltip max-width="340px">{{ c.v.tip }}</q-tooltip>
               </q-btn>
             </template>
           </div>

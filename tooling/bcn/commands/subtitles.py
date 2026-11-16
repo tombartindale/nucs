@@ -17,6 +17,7 @@ from ..envelope import Diagnostic, Envelope, TopicResult
 from ..progress import TopicProgress
 from ..runner import require_input, require_step, run_topics, try_skip
 from ..tree import Target, Topic
+from ..codes import SHEET_CODES
 
 HELP = "convert or normalise the supplied SRT"
 TIME_TOL = 0.0015  # seconds; SRT has millisecond resolution
@@ -103,7 +104,7 @@ def subtitles_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, la
     inputs = [src, t.root / "programme.toml"]
     if lang == "en":
         inputs.append(t.src("en"))
-        require_step(t, "cues", "en", [t.src("en"), t.srt("en"), t.video], "bcn cues")
+        require_step(t, "cues", "en", [t.src("en"), t.srt("en"), t.video], "bcn cues", ignore=SHEET_CODES)
     else:
         require_input(t, t.srt("en"), "en")
         inputs.append(t.srt("en"))

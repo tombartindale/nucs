@@ -247,6 +247,11 @@ body.captioning { background: #111; overflow: hidden; }
 .stepwrap { position: relative; width: max-content; min-width: 100%; }
 .steprow { overflow: visible; }
 .steprow.zh { margin-top: 34px; }            /* room between the rows for the connectors */
+/* English forks after validate into two tracks (video above, subtitles below), laid out as a grid
+   so the tracks' steps line up in columns; Mandarin is one track on the same grid. */
+.steprow.stepgrid { display: grid; grid-auto-columns: max-content; align-items: center; column-gap: 4px; row-gap: 8px; }
+.stepgrid .arrow { justify-self: center; }
+.stepflow .step.slides { border-color: var(--q-warning); }
 .steprow .row-label {
   width: 30px; flex: none; font-size: 11px; font-weight: 700; color: #87919a;
   display: flex; align-items: center; gap: 3px;

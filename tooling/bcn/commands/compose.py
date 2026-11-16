@@ -455,10 +455,24 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
     require_input(t, t.video, stable=True)
     if not t.cues_csv.is_file():
         raise Fail("STEP_PREREQUISITE", "There is no cue sheet.", topic=t.id, hint="Run bcn cues first.")
-    # A draft is how a low-confidence cue sheet gets checked, so compose accepts a
+    # A draft is how a low-confidence cue sheet gets checked, so --draft accepts a
     # cue sheet whose cues run failed, as long as it is current.
     if not fsutil.is_fresh([t.cues_csv], [t.src("en"), t.srt("en"), t.video]):
         raise Fail("STEP_PREREQUISITE", "The cue sheet is older than the script, SRT or video.", hint="Run bcn cues again.")
+    if not draft:
+        # A full compose is the one meant for delivery, so its slide timings must be settled:
+        # cues passed (every boundary placed with confidence or by hand), and with the video
+        # in, so the SRT was checked against it. cues can run on the SRT alone, and a video
+        # copied in with an old mtime would not make the sheet look stale.
+        prev = fsutil.read_json(t.step_file("cues", "en"))
+        if prev is not None and not prev.get("ok"):
+            raise Fail("STEP_PREREQUISITE", "The last cues run failed, so the slide timings are not settled.", topic=t.id,
+                       hint=f"Fix its diagnostics: watch bcn compose {t.rel} --draft and place any doubtful break "
+                            f"with bcn cues {t.rel} --set SLIDE=HH:MM:SS.mmm, then compose again.")
+        cues_env = require_step(t, "cues", "en", [t.src("en"), t.srt("en"), t.video], "bcn cues")
+        if not (cues_env.get("results") or [{}])[0].get("video_checked", True):
+            raise Fail("STEP_PREREQUISITE", "cues ran before the video was in, so the SRT was never checked against it.",
+                       topic=t.id, hint=f"Run bcn cues {t.rel} --force.")
     require_step(t, "render", lang, [t.src(lang)], f"bcn render{' --lang ' + lang if lang != 'en' else ''}")
     p: ParsedTopic = parse(t.src(lang), t.src(lang).name, t.id)
     n = len(p.slides)

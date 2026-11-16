@@ -179,3 +179,9 @@ def level_of(code: str) -> str:
 
 def describe(code: str) -> str:
     return CODES[code][1]
+
+
+# Errors about where slides change. Only compose and package use slide timings, so these
+# fail cues without holding up the subtitle side (subtitles, then sending for translation),
+# which needs only the script-against-SRT comparison. An error about the SRT itself still does.
+SHEET_CODES = frozenset({"CUE_LOW_CONFIDENCE", "CUE_CUT_AT_BOUNDARY", "CUE_SHEET_INVALID"})

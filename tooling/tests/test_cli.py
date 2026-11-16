@@ -230,3 +230,109 @@ def test_edit_dry_run_save_history_and_conflict(tree, capsys):
     code, env = bcn(capsys, "edit", str(t), "--from", str(draft), "--expect-sha", sha)
     assert code == 1 and env["diagnostics"][-1]["code"] == "EDIT_CONFLICT"
     assert "Point uno" in (t / "topic.md").read_text()
+
+
+def test_translation_ready_without_video(tree, capsys):
+    """The English SRT alone is enough to cue, prepare subtitles and send for translation;
+    the video can arrive later, and its arrival puts cues out of date for the pair checks."""
+    t = tree / "KV7015/U01/T01"
+    from bcn.markdown import parse
+    p = parse(t / "topic.md")
+    blocks, time_ = [], 0.5
+    for s in p.slides:
+        for sentence in [x.strip() + "." for x in s.say_text.split(".") if x.strip()]:
+            dur = len(sentence.split()) / 2.5
+            a, b = time_, time_ + dur
+            blocks.append(f"{len(blocks) + 1}\n00:{int(a // 60):02d}:{a % 60:06.3f} --> 00:{int(b // 60):02d}:{b % 60:06.3f}\n{sentence}\n")
+            time_ = b + 0.1
+    srt_text = "\n".join(
+        "\n".join(ln.replace(".", ",") if "-->" in ln else ln for ln in blk.splitlines()) + "\n" for blk in blocks)
+    (t / "edit").mkdir()
+    (t / "edit/master.srt").write_text(srt_text)
+    for f in ("topic.md", "edit/master.srt"):
+        age(t / f, 30)
+    bcn(capsys, "validate", str(t))
+    _, env = bcn(capsys, "status", str(t))
+    assert env["results"][0]["en"]["next"] == "cues"   # not render: cues does not need slides
+    code, env = bcn(capsys, "cues", str(t))
+    assert code == 0, env["diagnostics"]
+    assert env["results"][0]["video_checked"] is False
+    assert json.loads((t / "build/cues-report.json").read_text())["video"] is None
+    code, env = bcn(capsys, "subtitles", str(t))
+    assert code == 0, env["diagnostics"]
+    _, env = bcn(capsys, "status", str(t))
+    res = env["results"][0]
+    assert res["zh"]["next"] == "translation_export"
+    assert res["en"]["steps"]["cues"]["fresh"] is True
+    assert res["en"]["next"] == "render"   # render was never run, and the subtitle side did not wait for it
+
+    # A slide-timing error fails cues (compose needs it resolved) but does not hold up the
+    # subtitle side: subtitles still runs and the topic can still be sent for translation.
+    code, env = bcn(capsys, "cues", str(t), "--set", "99=00:00:01.000")
+    assert code != 0 and {d["code"] for d in env["diagnostics"] if d["level"] == "error"} == {"CUE_SHEET_INVALID"}
+    code, env = bcn(capsys, "subtitles", str(t), "--force")
+    assert code == 0, env["diagnostics"]
+    _, env = bcn(capsys, "status", str(t))
+    res = env["results"][0]
+    assert res["zh"]["next"] == "translation_export" and res["en"]["next"] == "cues"
+    assert res["en"]["steps"]["cues"]["slides_to_place"] == 0   # amber in the UI, not red
+    bcn(capsys, "cues", str(t), "--unset", "99")
+
+    make_video(t / "edit/master.mp4", time_ + 2)
+    age(t / "edit/master.mp4", 60)   # even an old video (copied with its mtime) makes cues re-run
+    _, env = bcn(capsys, "status", str(t))
+    assert env["results"][0]["en"]["steps"]["cues"]["fresh"] is False
+
+
+def test_subtitles_ignores_only_slide_timing_errors():
+    from bcn.codes import SHEET_CODES
+    from bcn.runner import passed
+    err = lambda code: {"code": code, "level": "error"}  # noqa: E731
+    assert passed({"ok": False, "diagnostics": [err("CUE_LOW_CONFIDENCE"), err("CUE_CUT_AT_BOUNDARY")]}, SHEET_CODES)
+    # An error in the SRT itself still blocks, alone or alongside a slide-timing one.
+    assert not passed({"ok": False, "diagnostics": [err("CUE_SRT_ORDER")]}, SHEET_CODES)
+    assert not passed({"ok": False, "diagnostics": [err("CUE_LOW_CONFIDENCE"), err("CUE_SRT_PAST_END")]}, SHEET_CODES)
+    assert not passed({"ok": False, "diagnostics": []}, SHEET_CODES)
+    assert not passed({"ok": False, "diagnostics": [err("CUE_LOW_CONFIDENCE")]})
+
+
+def test_full_compose_requires_cues_to_pass(tree, capsys):
+    """--draft accepts a doubtful cue sheet (watching it is how it gets fixed); a full compose
+    needs cues to have passed, and to have run with the video in."""
+    t = tree / "KV7015/U01/T01"
+    from bcn.markdown import parse
+    p = parse(t / "topic.md")
+    blocks, time_ = [], 0.5
+    for s in p.slides:
+        for sentence in [x.strip() + "." for x in s.say_text.split(".") if x.strip()]:
+            a, b = time_, time_ + len(sentence.split()) / 2.5
+            blocks.append(f"{len(blocks) + 1}\n00:{int(a // 60):02d}:{a % 60:06.3f} --> 00:{int(b // 60):02d}:{b % 60:06.3f}\n{sentence}\n".replace(".", ",", 2))
+            time_ = b + 0.1
+    (t / "edit").mkdir()
+    (t / "edit/master.srt").write_text("\n".join(blocks))
+    for f in ("topic.md", "edit/master.srt"):
+        age(t / f, 30)
+    bcn(capsys, "validate", str(t))
+    code, env = bcn(capsys, "cues", str(t))
+    assert code == 0, env["diagnostics"]
+    make_video(t / "edit/master.mp4", time_ + 2)
+    age(t / "edit/master.mp4", 60)   # older than the cue sheet, so only video_checked catches it
+
+    def compose_error(*extra):
+        _, env = bcn(capsys, "compose", str(t), *extra)
+        return next(d for d in env["diagnostics"] if d["level"] == "error")
+
+    assert "before the video was in" in compose_error()["message"]
+
+    step = t / "build/cues.json"
+    m = step.stat().st_mtime
+    env = json.loads(step.read_text())
+    env["ok"] = False
+    env["results"][0]["video_checked"] = True
+    env["diagnostics"].append({"code": "CUE_LOW_CONFIDENCE", "level": "error", "message": "x"})
+    step.write_text(json.dumps(env))
+    import os
+    os.utime(step, (m, m))
+    assert "cues run failed" in compose_error()["message"]
+    # --draft gets past the cue sheet and stops at the next thing it needs (render was never run).
+    assert "render" in compose_error("--draft")["message"]
