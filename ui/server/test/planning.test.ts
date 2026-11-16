@@ -1,12 +1,12 @@
 // Pure math: no DB, no bcn, no App — fixture topic arrays straight into computeModulePlan.
 import { describe, expect, it } from 'vitest';
 import type { StatusEnvelope } from '@beacon/shared';
-import { computeModulePlan, moduleTopicsFor, type PlannedTopicInput } from '../src/planning.js';
+import { computeModulePlan, minusWorkingDays, moduleTopicsFor, workingDaysBetween, type PlannedTopicInput } from '../src/planning.js';
 
 function topic(overrides: Partial<PlannedTopicInput> = {}): PlannedTopicInput {
   return {
     topic: 'KV7015-U01-T01', unit: 'U01', title: 'A topic', minutes: 12,
-    drafted: true, recorded: false, translated: false, published: false,
+    drafted: true, recorded: false, ready: false, translated: false, published: false,
     ...overrides,
   };
 }
@@ -31,10 +31,10 @@ describe('computeModulePlan', () => {
       topic({ topic: 'KV7015-U01-T02', unit: 'U01', drafted: false, recorded: true }),
       topic({ topic: 'KV7015-U01-T03', unit: 'U01', drafted: true, recorded: true }), // already drafted: excluded
     ], dated('2026-12-01'));
-    expect(plan.tasks).toHaveLength(1);
-    expect(plan.tasks[0].kind).toBe('scripts');
-    expect(plan.tasks[0].topics).toEqual(['KV7015-U01-T01', 'KV7015-U01-T02']);
-    expect(plan.tasks[0].estimatedMinutes).toBe(40); // 2 topics x 20 min
+    const scripts = plan.tasks.filter((t) => t.kind === 'scripts');
+    expect(scripts).toHaveLength(1);
+    expect(scripts[0].topics).toEqual(['KV7015-U01-T01', 'KV7015-U01-T02']);
+    expect(scripts[0].estimatedMinutes).toBe(40); // 2 topics x 20 min
   });
 
   it('batches every not-yet-recorded topic in a unit into one recording task, listing them all', () => {
@@ -43,39 +43,50 @@ describe('computeModulePlan', () => {
       topic({ topic: 'KV7015-U01-T02', unit: 'U01', drafted: true, recorded: false, minutes: 40 }),
       topic({ topic: 'KV7015-U01-T03', unit: 'U01', drafted: true, recorded: true }), // already recorded: excluded
     ], dated('2026-12-01'));
-    expect(plan.tasks).toHaveLength(1);
-    expect(plan.tasks[0].kind).toBe('recording');
-    expect(plan.tasks[0].topics).toEqual(['KV7015-U01-T01', 'KV7015-U01-T02']);
-    expect(plan.tasks[0].estimatedMinutes).toBe(75); // (10 + 40) x 1.5
+    const recording = plan.tasks.filter((t) => t.kind === 'recording');
+    expect(recording).toHaveLength(1);
+    expect(recording[0].topics).toEqual(['KV7015-U01-T01', 'KV7015-U01-T02']);
+    expect(recording[0].estimatedMinutes).toBe(75); // (10 + 40) x 1.5
   });
 
-  it('gives a unit both a scripts and a recording task, scripts first, when neither is done', () => {
+  it('gives a unit scripts, recording and the editor\'s day, in that order, when none is done', () => {
     const plan = computeModulePlan([topic({ drafted: false, recorded: false, minutes: 12 })], dated('2026-12-01'));
-    expect(plan.tasks.map((t) => t.kind)).toEqual(['scripts', 'recording']);
+    expect(plan.tasks.map((t) => t.kind)).toEqual(['scripts', 'recording', 'editing']);
   });
 
-  it('gives a unit with already-drafted topics only a recording task', () => {
+  it('gives a unit with already-drafted topics only recording and editing', () => {
     const plan = computeModulePlan([topic({ drafted: true, recorded: false })], dated('2026-12-01'));
-    expect(plan.tasks.map((t) => t.kind)).toEqual(['recording']);
+    expect(plan.tasks.map((t) => t.kind)).toEqual(['recording', 'editing']);
+  });
+
+  it('leaves only the editor\'s day once a unit is recorded but its subtitles are not ready', () => {
+    const plan = computeModulePlan([topic({ drafted: true, recorded: true, ready: false })], dated('2026-12-01'));
+    expect(plan.tasks.map((t) => [t.kind, t.deadline])).toEqual([['editing', '2026-11-30']]);
+  });
+
+  it('counts a unit done (no tasks, on track) once its subtitles are ready, even past its date', () => {
+    const plan = computeModulePlan([topic({ drafted: true, recorded: true, ready: true })], dated('2020-01-06'));
+    expect(plan.tasks).toHaveLength(0);
+    expect(plan.units[0].onTrack).toBe(true);
+    expect(plan.milestones.find((m) => m.kind === 'ready')!.done).toBe(true);
   });
 
   it('costs a recording session exactly one day regardless of total minutes, unlike scripts\' proportional cost', () => {
     // Scripts: 5 topics not drafted, 20 min each = 100 min, under the 180-minute daily
-    // budget, so its deadline is the delivery date itself.
+    // budget, so its deadline is the date itself (ready: true, so no editor's day after it).
     const scriptsOnly = Array.from({ length: 5 }, (_, i) =>
-      topic({ topic: `KV7015-U01-T${i + 1}`, drafted: false, recorded: true }));
+      topic({ topic: `KV7015-U01-T${i + 1}`, drafted: false, recorded: true, ready: true }));
     const scriptsPlan = computeModulePlan(scriptsOnly, dated('2026-12-01'));
     expect(scriptsPlan.tasks).toHaveLength(1);
     expect(scriptsPlan.tasks[0].deadline).toBe('2026-12-01');
 
     // Recording: same five topics, same small total length — but a recording session
-    // always reserves a whole day, so its deadline sits one day before delivery even
-    // though the work itself would fit in well under a day.
+    // always reserves a whole working day, as does the editor's day after it. The date is
+    // Tue 1 Dec, so the editor has Mon 30 Nov and recording skips the weekend to Fri 27 Nov.
     const recordingOnly = Array.from({ length: 5 }, (_, i) =>
       topic({ topic: `KV7015-U01-T${i + 1}`, drafted: true, recorded: false, minutes: 10 }));
     const recordingPlan = computeModulePlan(recordingOnly, dated('2026-12-01'));
-    expect(recordingPlan.tasks).toHaveLength(1);
-    expect(recordingPlan.tasks[0].deadline).toBe('2026-11-30');
+    expect(recordingPlan.tasks.map((t) => [t.kind, t.deadline])).toEqual([['recording', '2026-11-27'], ['editing', '2026-11-30']]);
   });
 
   it('schedules each unit independently against its own agreed date, not relative to other units', () => {
@@ -83,12 +94,13 @@ describe('computeModulePlan', () => {
       topic({ topic: 'KV7015-U01-T01', unit: 'U01', drafted: false, recorded: false, minutes: 10 }),
       topic({ topic: 'KV7015-U02-T01', unit: 'U02', drafted: false, recorded: false, minutes: 10 }),
     ], { U01: '2026-11-01', U02: '2026-12-01' });
-    expect(plan.tasks.map((t) => `${t.unit}-${t.kind}`)).toEqual(['U01-scripts', 'U01-recording', 'U02-scripts', 'U02-recording']);
-    const u01Recording = plan.tasks[1].deadline!;
-    const u02Recording = plan.tasks[3].deadline!;
-    // Each sits one day before its OWN unit's date — U01's is unaffected by U02 existing.
-    expect(u01Recording).toBe('2026-10-31');
-    expect(u02Recording).toBe('2026-11-30');
+    expect(plan.tasks.map((t) => `${t.unit}-${t.kind}`)).toEqual(
+      ['U01-scripts', 'U01-recording', 'U01-editing', 'U02-scripts', 'U02-recording', 'U02-editing']);
+    const at = (unit: string, kind: string) => plan.tasks.find((t) => t.unit === unit && t.kind === kind)!.deadline;
+    // Each is counted back from its OWN unit's date — U01's is unaffected by U02 existing.
+    // U01's date is Sun 1 Nov: the editor has Fri 30 Oct, recording Thu 29 Oct.
+    expect([at('U01', 'editing'), at('U01', 'recording')]).toEqual(['2026-10-30', '2026-10-29']);
+    expect([at('U02', 'editing'), at('U02', 'recording')]).toEqual(['2026-11-30', '2026-11-27']);
   });
 
   it('leaves a unit undated (null deadlines) when only some units have an agreed date', () => {
@@ -114,7 +126,7 @@ describe('computeModulePlan', () => {
       topic({ topic: 'KV7015-U01-T01', unit: 'U01', drafted: true, recorded: false, minutes: 10 }),
       topic({ topic: 'KV7015-U02-T01', unit: 'U02', drafted: true, recorded: false, minutes: 40 }),
     ], { U01: '2026-12-01', U02: '2026-12-01' });
-    const byUnit = Object.fromEntries(plan.tasks.map((t) => [t.unit, t]));
+    const byUnit = Object.fromEntries(plan.tasks.filter((t) => t.kind === 'recording').map((t) => [t.unit, t]));
     expect(byUnit.U01.estimatedMinutes).toBe(15);   // 10 * 1.5
     expect(byUnit.U02.estimatedMinutes).toBe(60);   // 40 * 1.5
   });
@@ -130,29 +142,31 @@ describe('computeModulePlan', () => {
 
   it('reports milestone remaining counts and done flags correctly', () => {
     const plan = computeModulePlan([
-      topic({ topic: 'KV7015-U01-T01', drafted: true, recorded: true, translated: true, published: true }),
+      topic({ topic: 'KV7015-U01-T01', drafted: true, recorded: true, ready: true, translated: true, published: true }),
       topic({ topic: 'KV7015-U01-T02', drafted: false, recorded: false, translated: false, published: false }),
     ], dated('2026-12-01'));
     const byKind = Object.fromEntries(plan.milestones.map((m) => [m.kind, m]));
     expect(byKind.briefs_done.remaining).toBe(1);
     expect(byKind.briefs_done.done).toBe(false);
     expect(byKind.recorded.remaining).toBe(1);
+    expect(byKind.ready.remaining).toBe(1);
     expect(byKind.translated.remaining).toBe(1);
     expect(byKind.published.remaining).toBe(1);
   });
 
   it('marks all milestones done when every topic is fully published', () => {
     const plan = computeModulePlan(
-      [topic({ drafted: true, recorded: true, translated: true, published: true })], dated('2026-12-01'));
+      [topic({ drafted: true, recorded: true, ready: true, translated: true, published: true })], dated('2026-12-01'));
     expect(plan.milestones.every((m) => m.done)).toBe(true);
     expect(plan.tasks).toHaveLength(0);
   });
 
-  it('only projects dueDate for briefs_done/recorded, never for translated/published', () => {
+  it('only projects dueDate for briefs_done/recorded/ready, never for translated/published', () => {
     const plan = computeModulePlan([topic({ drafted: false, recorded: false, minutes: 12 })], dated('2026-12-01'));
     const byKind = Object.fromEntries(plan.milestones.map((m) => [m.kind, m]));
     expect(byKind.briefs_done.dueDate).not.toBeNull();
     expect(byKind.recorded.dueDate).not.toBeNull();
+    expect(byKind.ready.dueDate).toBe('2026-12-01');   // the unit's date itself
     expect(byKind.translated.dueDate).toBeNull();
     expect(byKind.published.dueDate).toBeNull();
   });
@@ -222,5 +236,41 @@ describe('moduleTopicsFor', () => {
       at('KV7015-U01-T04', compose({}), {}),
     ] };
     expect(moduleTopicsFor(status as unknown as StatusEnvelope, 'KV7015').map((t) => t.published)).toEqual([true, false, false, false]);
+  });
+});
+
+describe('working days', () => {
+  it('steps back over weekends', () => {
+    expect(minusWorkingDays('2026-11-30', 1)).toBe('2026-11-27');   // Mon -> Fri
+    expect(minusWorkingDays('2026-12-01', 2)).toBe('2026-11-27');   // Tue -> Fri
+    expect(minusWorkingDays('2026-11-29', 1)).toBe('2026-11-27');   // Sun -> Fri
+    expect(minusWorkingDays('2026-12-01', 0.3)).toBe('2026-11-30'); // a part day still costs one
+  });
+  it('counts working days between two dates', () => {
+    expect(workingDaysBetween('2026-11-27', '2026-11-30')).toBe(1); // Fri -> Mon
+    expect(workingDaysBetween('2026-11-23', '2026-11-30')).toBe(5);
+    expect(workingDaysBetween('2026-11-30', '2026-11-27')).toBe(0);
+  });
+});
+
+describe('moduleTopicsFor: ready for translation', () => {
+  const stages = ['planned', 'drafted', 'validated', 'rendered', 'recorded', 'cued', 'packaged'];
+  const zhStages = ['not_sent', 'out_for_translation', 'returned', 'parity_checked', 'rendered', 'packaged'];
+  const row = (topic: string, zh: object, en: object = {}) => ({
+    topic, module: 'KV7015', unit: 'U01', title: topic, minutes: 5, marks: {},
+    en: { stage_index: 3, stages, ...en }, zh: { stage_index: 0, stages: zhStages, next: null, ...zh },
+  });
+
+  it('is ready when Mandarin is next to be sent, or has been, and counts as recorded without the video', () => {
+    const status = { results: [
+      row('KV7015-U01-T01', { next: 'translation_export' }),
+      row('KV7015-U01-T02', { stage_index: 1, next: 'await_translation' }),
+      row('KV7015-U01-T03', {}, { steps: { cues: { exists: true } } }),
+      row('KV7015-U01-T04', {}),
+    ] };
+    const topics = moduleTopicsFor(status as unknown as StatusEnvelope, 'KV7015');
+    expect(topics.map((t) => t.ready)).toEqual([true, true, false, false]);
+    // The English stage stops at rendered without the video; the subtitles say it was recorded.
+    expect(topics.map((t) => t.recorded)).toEqual([true, true, true, false]);
   });
 });

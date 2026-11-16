@@ -14,7 +14,7 @@ const beacon = useBeacon();
 // Delivery planning: the next at-risk milestone per module, for a producer scanning
 // across every module at once. Full per-topic detail lives on each module's own page.
 const MILESTONE_LABEL: Record<string, string> = {
-  briefs_done: 'briefs', recorded: 'recorded', translated: 'translated', published: 'published',
+  briefs_done: 'briefs', recorded: 'recorded', ready: 'ready for translation', translated: 'translated', published: 'published',
 };
 const plans = ref<PlansSummaryResponse>({});
 const loadPlans = () => api<PlansSummaryResponse>('/api/plans').then((d) => { plans.value = d; }).catch(() => {});

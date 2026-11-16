@@ -224,23 +224,25 @@ export interface TranslationImportRequest { source: string; path?: string }
 export interface TransferListResponse { exports: TranslationItem[] }
 export interface TransferImportRequest { source: string; path?: string; dry_run?: boolean }
 
-// -- delivery planning: backward-scheduled unit scripts/recording, milestones, ICS, reminders ---
+// -- delivery planning: backward-scheduled unit scripts/recording/editing, milestones, ICS, reminders ---
+// Each unit's date is when its English subtitles must be in the system, ready for translation.
 // Batched per unit, not per topic: production happens one unit at a time, every topic's
 // script in it must be ready before its single recording session, and every topic in the
-// unit is recorded together in that one session.
+// unit is recorded together in that one session. Dates are working days (Mon-Fri).
 /** One outstanding batch of work against one unit: writing the scripts still missing in
- *  it, or recording it (every outstanding topic in the unit, in a single session). */
+ *  it, recording it (every outstanding topic in the unit, in a single session), or the
+ *  editor's day (edit, subtitles and their proofreading) the working day before the date. */
 export interface UnitTask {
-  unit: string; kind: 'scripts' | 'recording';
+  unit: string; kind: 'scripts' | 'recording' | 'editing';
   topics: string[];          // the outstanding topic ids this batch covers
   estimatedMinutes: number;  // summed across topics; for 'recording' this is informational
-                              // only — the task always costs exactly one calendar day
+                              // only — the task always costs exactly one working day; 0 for 'editing'
   deadline: string | null;
 }
-export type MilestoneKind = 'briefs_done' | 'recorded' | 'translated' | 'published';
+export type MilestoneKind = 'briefs_done' | 'recorded' | 'ready' | 'translated' | 'published';
 /** One module-wide checkpoint: every topic reaching a given stage. dueDate is only
- *  projected for briefs_done/recorded (backward-chained from each unit's own delivery
- *  date); translated/published report current progress only, not a forecast. */
+ *  projected for briefs_done/recorded/ready (backward-chained from, or equal to, each unit's
+ *  own date); translated/published report current progress only, not a forecast. */
 export interface Milestone { kind: MilestoneKind; done: boolean; remaining: number; dueDate: string | null }
 /** One unit's own schedule: its agreed date (if set) and whether its own tasks fit
  *  before it, computed independently of every other unit's date. */
@@ -250,12 +252,12 @@ export interface UnitPlan {
   daysBehind: number;        // 0 if on track or no date set
 }
 export interface ModulePlanComputed {
-  topicsTotal: number; topicsRecorded: number; topicsRemaining: number; topicsNotDrafted: number;
+  topicsTotal: number; topicsRecorded: number; topicsRemaining: number; topicsNotDrafted: number; topicsReady: number;
   onTrack: boolean | null;       // worst-unit-wins: null if no unit has a date set yet
   daysBehind: number;            // the worst (largest) daysBehind across all units
   units: UnitPlan[];             // one per unit, in course-map order
-  milestones: Milestone[];       // always 4, in pipeline order — the producer's headline view
-  tasks: UnitTask[];             // outstanding scripts/recording batches, one per unit, in course-map order
+  milestones: Milestone[];       // always 5, in pipeline order — the producer's headline view
+  tasks: UnitTask[];             // outstanding scripts/recording/editing batches, one per unit, in course-map order
 }
 export interface ModulePlanResponse {
   module: string; ownerName: string; ownerEmail: string; icsUrl: string;
