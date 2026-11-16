@@ -333,8 +333,8 @@ Outputs:
 
 Failure conditions, each with a message that says what to do:
 
-- A slide marker cannot be located with confidence above a configurable threshold. Usually means the edit removed the passage the break sat in; a human picks the timecode.
-- Cue timecodes not strictly ascending, or the final cue ending after the video duration, which means the SRT and the video are not a matching pair.
+- A slide marker cannot be located with confidence above a configurable threshold. Usually means the edit removed the passage the break sat in; a human picks the timecode. This, like any error about slide placement, blocks only compose and package, never `subtitles` or sending for translation: slide timings are not needed for those.
+- Cue timecodes not strictly ascending, or the final cue ending after the video duration, which means the SRT and the video are not a matching pair. The video is optional: without it the duration checks are skipped, so the SRT can be cued, prepared and sent for translation before the edited video arrives. When the video does arrive, `cues` is out of date and runs again with the pair checks.
 - More than a configurable proportion of the script absent from or differing from the SRT. Set this tight, because heavy divergence almost always means the wrong SRT, the wrong topic, or a recording that needs redoing rather than an unusual edit.
 
 **The divergence list is not a by-product.** Because the recording is meant to track the script closely, every divergence means something, and the report should say which kind it looks like:

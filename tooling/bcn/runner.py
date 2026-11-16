@@ -46,20 +46,32 @@ def require_input(t: Topic, path: Path, lang: str | None = None, step_hint: str 
                    topic=t.id, lang=lang, file=rel, level="error", hint="Run again in a moment.")
 
 
-def require_step(t: Topic, step: str, lang: str, inputs: list[Path], run_hint: str) -> dict:
-    """The named step must have run, passed, and be newer than its inputs."""
+def require_step(t: Topic, step: str, lang: str, inputs: list[Path], run_hint: str,
+                 ignore: frozenset[str] = frozenset()) -> dict:
+    """The named step must have run, passed, and be newer than its inputs.
+
+    Errors whose codes are in `ignore` do not count: the caller does not depend on what they
+    are about (subtitles needs cues' transcript check, not its slide timings)."""
     f = t.step_file(step, lang)
     env = fsutil.read_json(f)
     if env is None:
         raise Fail("STEP_PREREQUISITE", f"{step} has not been run{' for ' + lang if lang != 'en' else ''}.",
                    topic=t.id, lang=lang, hint=f"Run {run_hint} first.")
-    if not env.get("ok"):
+    if not passed(env, ignore):
         raise Fail("STEP_PREREQUISITE", f"The last {step} run failed.", topic=t.id, lang=lang,
                    hint=f"Fix its diagnostics and run {run_hint} again.")
     if not fsutil.is_fresh([f], inputs):
         raise Fail("STEP_PREREQUISITE", f"{step} output is older than its inputs.", topic=t.id, lang=lang,
                    hint=f"Run {run_hint} again.")
     return env
+
+
+def passed(env: dict, ignore: frozenset[str] = frozenset()) -> bool:
+    """The step ran ok, or failed only on errors whose codes are in `ignore`."""
+    if env.get("ok"):
+        return True
+    errors = [d for d in env.get("diagnostics", []) if d.get("level") == "error"]
+    return bool(ignore) and bool(errors) and all(d.get("code") in ignore for d in errors)
 
 
 def restore(r: TopicResult, prev: dict) -> None:

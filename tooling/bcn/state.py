@@ -15,7 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import coursemap, fsutil, reviewfile, storage
+from . import coursemap, fsutil, reviewfile, runner, storage
+from .codes import SHEET_CODES
 from .config import Config, load, load_theme, resolve_theme_name
 from .envelope import Diagnostic, Fail
 from .tree import DEFAULT_LAYOUT, Topic, scan_topic
@@ -282,6 +283,10 @@ class TopicState:
         cur_ov = {str(k): v for k, v in sorted(_overrides(rv).items())}
         if cues.exists and cues.result.get("overrides", {}) != cur_ov:
             cues.inputs_newest = float("inf")
+        # cues runs on the SRT alone; once the video arrives (or goes), its SRT/video pair checks
+        # need running, so a result from before then is out of date.
+        if cues.exists and cues.result.get("video_checked", True) != video.exists:
+            cues.inputs_newest = float("inf")
         cur_corr = sorted(k for k, v in rv["transcripts"].items() if v.get("decision") == "correct")
         if subtitles.exists and sorted(subtitles.result.get("corrections", [])) != cur_corr:
             subtitles.inputs_newest = float("inf")
@@ -313,14 +318,19 @@ class TopicState:
         self._asset_blockers(st)
         st.blocked = bool(st.blockers)
 
-        # Next: the first step whose result is missing, failed or stale.
-        order: list[tuple[str, Step | None]] = [("validate", validate), ("render", render), ("await_recording", None),
-                                                ("cues", cues), ("subtitles", subtitles), ("compose", compose),
-                                                ("package", package)]
+        # Next: the first step whose result is missing, failed or stale. The subtitle side (cues,
+        # subtitles, and from there sending for translation) needs only validate and the SRT, not
+        # render or the video, so once the SRT is in it comes first. compose needs render and the
+        # video, so render and the wait for the edit sit before it.
+        order: list[tuple[str, Step | None, FileInfo | None]] = [
+            ("validate", validate, None),
+            *([("cues", cues, None), ("subtitles", subtitles, None)] if srt.exists else []),
+            ("render", render, None), ("await_subtitles", None, srt), ("await_video", None, video),
+            ("compose", compose, None), ("package", package, None)]
         st.next = None
-        for name, s in order:
+        for name, s, needs in order:
             if s is None:
-                if not exist["recorded"]:
+                if needs is not None and not needs.exists:
                     st.next = name
                     break
                 continue
@@ -384,7 +394,9 @@ class TopicState:
         if not returned:
             if exported:
                 st.next = "await_translation"
-            elif en.stage_index >= STAGES["en"].index("recorded") and not reasons:
+            # Only the English SRT is needed (through cues and subtitles, which the reasons
+            # cover); the video can arrive later, since the translator works from the SRT.
+            elif srt.exists and not reasons:
                 st.next = "translation_export"
             else:
                 st.next = None  # not ready to send
@@ -475,8 +487,17 @@ class TopicState:
             out[name] = {"exists": s.exists, "ok": s.ok if s.exists else None, "fresh": s.fresh if s.exists else None,
                          "time": _iso(s.mtime), "skipped": s.result.get("skipped") if s.exists else None,
                          "draft": (s.result.get("mode") == "draft") if s.exists else None,
-                         "counts": self._step_counts(s) if s.exists else None}
+                         "counts": self._step_counts(s) if s.exists else None,
+                         "slides_to_place": self._slides_to_place(s) if name == "cues" and lang == "en" else None}
         return out
+
+    @staticmethod
+    def _slides_to_place(s: Step) -> int | None:
+        """cues only: when its run failed on slide timings alone (subtitles and translation can go
+        ahead, compose cannot), how many slides need a break placed; else None."""
+        if not s.exists or s.ok or not runner.passed(s.env or {}, SHEET_CODES):
+            return None
+        return len({d.get("slide") for d in s.errors() if d.get("slide") is not None})
 
     def _manifest_intact(self, name: str) -> bool:
         """Shallow: every listed file exists at its recorded size. --verify checks hashes."""

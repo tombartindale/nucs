@@ -33,7 +33,10 @@ export interface Blocker { code: string; message: string; file?: string | null; 
 // `fresh` while `next` still points back at compose until a non-draft run exists.
 export interface StepState { exists: boolean; ok: boolean | null; fresh: boolean | null; time: string | null; skipped: boolean | null; draft: boolean | null;
   /** This step's own findings (not-ready refusals excluded); null if it has not run. */
-  counts: { error: number; warn: number } | null }
+  counts: { error: number; warn: number } | null;
+  /** cues only: set when its run failed on slide timings alone (subtitles and translation can go
+   *  ahead, a full compose cannot) - how many slides need a break placed (0: a hand-set time is invalid). */
+  slides_to_place: number | null }
 type GenTopic = BcnStatusEnvelope['results'][number];
 export type LangState = Omit<NonNullable<GenTopic['en']>, 'blockers' | 'steps'> & {
   stage: string; stage_index: number; stages: string[]; stale: boolean; stale_steps: string[]; blocked: boolean;

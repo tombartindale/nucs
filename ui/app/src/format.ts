@@ -7,7 +7,8 @@ export const STAGE_LABEL: Record<string, string> = {
 };
 
 export const NEXT_LABEL: Record<string, string> = {
-  intake: 'write the script', validate: 'validate', render: 'render', await_recording: 'awaiting the edit',
+  intake: 'write the script', validate: 'validate', render: 'render', await_subtitles: 'awaiting the subtitles',
+  await_video: 'awaiting the video',
   cues: 'cues', subtitles: 'subtitles', package: 'package', translation_export: 'send for translation',
   await_translation: 'awaiting translation',
 };
@@ -23,7 +24,7 @@ export const STEP_HELP: Record<string, string> = {
   qti: 'Export unit quizzes as QTI 2.1 packages (.zip) to import into the LMS. A quiz with a question that has '
     + 'no correct answer, or fewer than two options, is not exported.',
   cues: 'Match the script to the editor\'s subtitles to find when each slide starts (the cue sheet), and list '
-    + 'where the recording differs from the script. Needs the edited video and its subtitles. English only: '
+    + 'where the recording differs from the script. Needs only the English subtitles; if the edited video is in, the subtitles are also checked against it. English only: '
     + 'Mandarin reuses the English timings.',
   subtitles: 'Prepare the subtitles for delivery, applying any approved fixes to misheard words (timings are never '
     + 'changed). For Mandarin, it checks the translator kept every timing exactly.',
