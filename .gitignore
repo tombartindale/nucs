@@ -27,3 +27,5 @@ ui/app/.quasar/
 *.otf
 NU_Logo_Black.svg
 NU_Logo_White.svg
+# Claude Desktop extension build output (npm run build -w desktop-extension)
+ui/desktop-extension/dist/

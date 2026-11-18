@@ -8,11 +8,12 @@
   "workspaces": [
     "shared",
     "server",
-    "app"
+    "app",
+    "desktop-extension"
   ],
   "scripts": {
-    "build": "npm run build -w server && npm run build -w app",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w app",
+    "build": "npm run build -w server && npm run build -w app && npm run build -w desktop-extension",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w app && npm run typecheck -w desktop-extension",
     "test": "npm test -w server",
     "gen:envelopes": "node shared/scripts/gen-envelopes.mjs",
     "dev:server": "npm run dev -w server --",
