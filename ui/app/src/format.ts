@@ -92,3 +92,10 @@ export function fmtBytes(n: number | null | undefined): string {
 export const topicPath = (id: string) => id.split('-').join('/');
 
 export const LEVEL_ORDER: Record<string, number> = { error: 0, warn: 1, info: 2 };
+
+/** Mandarin QA verdicts: label, StateChip kind (house colours) and icon. */
+export const QA_STATUS: Record<string, { label: string; kind: string; icon: string }> = {
+  to_review: { label: 'To review', kind: 'queued', icon: 'pending' },
+  changes_needed: { label: 'Changes needed', kind: 'stale', icon: 'edit_note' },
+  approved: { label: 'Approved', kind: 'done', icon: 'check_circle' },
+};

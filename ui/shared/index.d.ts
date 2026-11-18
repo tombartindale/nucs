@@ -278,6 +278,37 @@ export type PlansSummaryResponse = Record<string, {
   onTrack: boolean | null; daysBehind: number; units: UnitPlan[]; milestones: Milestone[];
 }>;
 
+// -- Mandarin QA review (GET/PUT /api/qa…) ---------------------------------------------------------
+/** A reviewer's verdict on one QA item. Everything starts at to_review. */
+export type QaStatus = 'to_review' | 'changes_needed' | 'approved';
+export type QaCommentKind = 'comment' | 'suggestion';
+/** One thing to QA: a topic's composed Mandarin video, or a unit's Mandarin activity.
+ *  `item` is its key: 'video:KV7015-U01-T01' or 'activity:KV7015/U01'. */
+export interface QaItem {
+  item: string; type: 'video' | 'activity';
+  module: string; unit: string; topic: string | null; title: string;
+  /** The file reviewed (the .mp4 or the .zh.md), and the video's Mandarin subtitles. */
+  path: string; srt: string | null;
+  mtime: string | null; stale: boolean;
+  status: QaStatus; statusBy: string; statusAt: string | null;
+  /** The file changed after someone approved it or asked for changes. */
+  changedSinceReview: boolean;
+  openComments: number; comments: number; lastActivity: string | null;
+}
+export interface QaComment {
+  id: number; item: string; body: string; kind: QaCommentKind;
+  /** Optional anchor: seconds into the video, or a line of the activity. */
+  anchorT: number | null; anchorLine: number | null;
+  by: string; at: string; resolved: boolean; resolvedBy: string | null; resolvedAt: string | null;
+  /** Written by the signed-in user (so they may delete it). */
+  mine: boolean;
+}
+export interface QaListResponse { items: QaItem[] }
+export interface QaItemResponse { item: QaItem; comments: QaComment[] }
+export interface QaStatusRequest { status: QaStatus }
+export interface QaCommentRequest { body: string; kind?: QaCommentKind; anchorT?: number | null; anchorLine?: number | null }
+export interface QaResolveRequest { resolved: boolean }
+
 export interface ErrorResponse { error: string }
 
 // Envelopes a job can carry, by command, for callers that know which one they ran.
@@ -294,6 +325,8 @@ export type ServerEvent =
   | { type: 'job'; job: JobSummary }
   | { type: 'job-event'; job: number; target_index: number; target_count: number; event: BcnEvent }
   | { type: 'warnings'; warnings: string[] }
+  /** A QA item's status or comments changed: open QA screens refetch. */
+  | { type: 'qa'; item: string }
   // Internal: tells a worker process to check for queued jobs now rather than on its next
   // poll. Carried over the same bus as browser-facing events for simplicity, but the
   // browser's SSE route ignores it (see server.ts's /api/events handler).
