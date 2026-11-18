@@ -28,7 +28,7 @@ What separates the two
 
 ## Where it goes wrong
 
-![Alt text that stands alone without the image](./assets/fig-01.png)
+![Alt text that stands alone without the image](assets/fig-1.png)
 
 > **Say:** Narration referring to what is on screen, but never pointing at it.
 > No "here on the left", because the presenter is recorded as a headshot with

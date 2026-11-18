@@ -53,3 +53,12 @@ def test_the_course_map_template_parses_with_its_extra_columns(tmp_path):
     assert t2.outcomes == ["LO1", "LO2"]
     assert set(cm.outcomes) == {"LO1", "LO2"}
     assert cm.readings["U01"].startswith("Course textbook")
+
+
+def test_the_topic_template_names_images_the_way_intake_does():
+    # authoring/templates/topic.md, the prompt, the image skill and bcn intake's extraction
+    # all write assets/fig-<n>.<ext>: unpadded, no leading ./ or /.
+    import re
+
+    refs = re.findall(r"!\[[^\]]*\]\(([^)]+)\)", (TEMPLATES / "topic.md").read_text())
+    assert refs and all(re.fullmatch(r"assets/fig-[1-9]\d*\.[a-z]+", r) for r in refs), refs
