@@ -8,6 +8,7 @@ const NAV = [
   { to: '/diagnostics', label: 'Verification', icon: 'rule' },
   { to: '/jobs', label: 'Jobs', icon: 'play_circle' },
   { to: '/translation', label: 'Translation', icon: 'translate' },
+  { to: '/qa', label: 'QA', icon: 'fact_check' },
   { to: '/transfer', label: 'Transfer', icon: 'drive_file_move' },
 ];
 const ADMIN_NAV = { to: '/admin', label: 'Admin', icon: 'admin_panel_settings' };
@@ -39,6 +40,7 @@ const banners = computed(() => {
         <q-tabs dense no-caps inline-label shrink stretch active-color="white" indicator-color="white">
           <q-route-tab v-for="n in navItems" :key="n.to" :to="n.to" :label="n.label" :icon="n.icon">
             <q-badge v-if="n.to === '/jobs' && beacon.activeJobs" color="orange" floating>{{ beacon.activeJobs }}</q-badge>
+            <q-badge v-if="n.to === '/qa' && beacon.qaToReview" color="orange" floating>{{ beacon.qaToReview }}</q-badge>
           </q-route-tab>
         </q-tabs>
         <q-space />
