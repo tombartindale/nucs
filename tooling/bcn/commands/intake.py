@@ -19,12 +19,21 @@ second folder or .zip supplied separately for a batch that ships its images apar
 from the (often flat-named) .md files rather than nested beside them. Without this,
 an image the script references would validate as missing even though it was right
 there in the same upload.
+
+Images embedded in the markdown itself as data: URIs (how a chat export or a pasted
+document often carries them) are extracted into the topic's assets/ and the reference
+rewritten to assets/fig-N.<ext>. They are matched by content, never by position: an
+image identical to one already in the topic's assets/ keeps that file's name, so a
+re-send whose figures are numbered in a different order still compares as unchanged.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import difflib
+import hashlib
 import re
 import shutil
 import tempfile
@@ -41,6 +50,52 @@ from ..tree import TOPIC_ID_RE, Target, Topic, is_noise
 
 HELP = "place pasted topic markdown into the tree and validate it"
 FENCE = re.compile(r"^\s*(```|~~~)[\w-]*\s*$")
+# A base64 image embedded where a path would be: markdown ![..](data:...) or <img src="data:...">.
+DATA_URI = re.compile(r"data:image/(png|jpe?g|gif|webp|svg\+xml);base64,([A-Za-z0-9+/=\s]*[A-Za-z0-9+/=])(?=\s*[)\"'])", re.IGNORECASE)
+EXT = {"png": "png", "jpg": "jpg", "jpeg": "jpg", "gif": "gif", "webp": "webp", "svg+xml": "svg"}
+FIG = re.compile(r"^fig-(\d+)\.[A-Za-z0-9]+$")
+
+
+def extract_embedded(block: str, assets_dir: Path) -> tuple[str, dict[str, bytes], list[tuple[str, str | None]]]:
+    """Rewrites every data: image in `block` to an assets/ path. Returns (text, files to
+    write, [(name, the existing file it matched or None)]). Matching is by content hash:
+    an image already in `assets_dir` (or earlier in this block) reuses that name; a new one
+    takes the next free fig-N, padded like the figures already there."""
+    if "data:image/" not in block:
+        return block, {}, []
+    existing: dict[str, str] = {}
+    width, top = 1, 0
+    if assets_dir.is_dir():
+        for f in sorted(assets_dir.iterdir()):
+            if f.is_file() and not is_noise(f.name):
+                existing.setdefault(hashlib.sha256(f.read_bytes()).hexdigest(), f.name)
+                m = FIG.match(f.name)
+                if m:
+                    top = max(top, int(m.group(1)))
+                    width = max(width, len(m.group(1)))
+    new: dict[str, bytes] = {}
+    report: list[tuple[str, str | None]] = []
+
+    def swap(m: re.Match[str]) -> str:
+        nonlocal top
+        try:
+            data = base64.b64decode(re.sub(r"\s+", "", m.group(2)), validate=True)
+        except (binascii.Error, ValueError):
+            return m.group(0)
+        digest = hashlib.sha256(data).hexdigest()
+        if digest in existing:
+            name = existing[digest]
+            if name not in new and (name, name) not in report:
+                report.append((name, name))
+        else:
+            top += 1
+            name = f"fig-{top:0{width}d}.{EXT[m.group(1).lower()]}"
+            existing[digest] = name
+            new[name] = data
+            report.append((name, None))
+        return f"assets/{name}"
+
+    return DATA_URI.sub(swap, block), new, report
 
 
 def add_args(p: argparse.ArgumentParser) -> None:
@@ -170,6 +225,15 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
         t = Topic(target.root, m, u, c)
         r.rel = t.rel
         r.extra["path"] = f"{t.rel}/topic.md"
+        block, embedded, extracted = extract_embedded(block, t.assets)
+        if extracted:
+            p = parse(Path("pasted.md"), "pasted", text=block)
+            sibling_assets.setdefault(tid, {}).update(embedded)
+            for name, matched in extracted:
+                r.diagnostics.append(Diagnostic(
+                    "INTAKE_IMAGE_EXTRACTED",
+                    f"An image embedded in the markdown {'matches the existing' if matched else 'was extracted to'} assets/{name}.",
+                    topic=tid, file=f"assets/{name}"))
         if parts and (parts[0] != m or (len(parts) > 1 and parts[1] != u) or (len(parts) > 2 and parts[2] != c)):
             r.diagnostics.append(Diagnostic("INTAKE_NOT_IN_MAP", f"{tid} is outside {target.rel}, where this paste was aimed.", topic=tid))
             r.ok = False
