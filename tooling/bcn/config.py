@@ -73,7 +73,10 @@ DEFAULTS: dict[str, Any] = {
         "course_map_headings": [],
         "activity_headings": [],
         "activity_types": ["quiz", "task"],
-        "assignment_headings": ["Brief", "Outcomes", "Assessment criteria"],
+        # The sections of the Project's assignment-brief.md template (authoring/templates/),
+        # written there as bold labels; a heading of the same name counts too.
+        "assignment_headings": ["What you are asked to do", "What you submit", "How it is judged",
+                                "Outcomes addressed", "Before attempting this"],
         # Required headings for the Mandarin translation of an activity/assignment. Empty by
         # default (heading check skipped for zh): there's no established convention yet for
         # translated heading text, so a programme that wants it enforced fills these in itself,

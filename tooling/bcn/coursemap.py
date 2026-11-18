@@ -93,12 +93,18 @@ def _table_rows(lines: list[str], start: int) -> list[tuple[int, list[str]]]:
     return rows
 
 
+# A section can also open with a bold label instead of a heading, as the Project templates
+# write them: "**What you submit.** One PDF..." (the full stop or colon inside or outside the bold).
+LABEL_RE = re.compile(r"^\s*\*\*(.+?)[.:]?\*\*[.:]?(\s|$)")
+
+
 def _check_headings(lines: list[str], required: list[str], rel: str, diags: list[Diagnostic]) -> None:
     present = {h[2].strip().lower() for h in _headings(lines)}
+    present |= {m.group(1).strip().lower() for line in lines if (m := LABEL_RE.match(line))}
     for want in required:
         if not any(p == want.lower() or p.endswith(" " + want.lower()) for p in present):
-            diags.append(Diagnostic("DOC_HEADING_MISSING", f"{rel} has no '{want}' heading.", file=rel,
-                                    hint=f"Add a '## {want}' section."))
+            diags.append(Diagnostic("DOC_HEADING_MISSING", f"{rel} has no '{want}' section.", file=rel,
+                                    hint=f"Add it as a bold label at the start of a paragraph ('**{want}.** ...') or as a heading ('## {want}')."))
 
 
 def load_course_map(module_dir: Path, required_headings: list[str] | None = None, text: str | None = None) -> CourseMap:
