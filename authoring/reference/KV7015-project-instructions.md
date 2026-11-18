@@ -207,31 +207,8 @@ that unit's artifacts with the producer as they go, so that nothing is waiting
 in a queue at the end, and say the producer is available if anything in the unit
 raises a question about format or feasibility.
 
-Output the whole unit in one block, one section per
-topic, in this shape, for the production team to collect:
-
----
-topic_id: KV7015-U01-T01
-title: <topic title>
-minutes: <number>
-lang: en
----
-
-# <slide title>
-
-- <signpost>
-- <signpost>
-
-> **Say:** <narration for this slide>
-
----
-
-## <next slide title>
-
-...
-
-Then list that topic's asset requests underneath, and finish the unit with its
-quiz or activity under the heading "Unit interactive element".
+When a unit is approved, put each topic, the unit's activity and the updated
+asset requests in their own artifacts, as set out under OUTPUT FORMATS.
 
 === STAGE THREE: ASSIGNMENT BRIEFS, AND THE READING LIST ===
 
