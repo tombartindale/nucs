@@ -16,7 +16,7 @@ import extractZip from 'extract-zip';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type {
   BcnDiagnosticsEnvelope, BcnDoceditEnvelope, BcnEditEnvelope, BcnReviewEnvelope, BcnStatusEnvelope, BcnSyncEnvelope, BcnThemecheckEnvelope,
-  BootResponse, JobArgs, ModuleNotesRequest, ModulePlanRemindResponse, ModulePlanRequest, ModulePlanResponse, PlansSummaryResponse, ShowEnvelope, TranslationItem, UnitPlanRequest,
+  BootResponse, JobArgs, ModuleNotesRequest, QaCommentRequest, QaItemResponse, QaListResponse, QaResolveRequest, QaStatusRequest, ModulePlanRemindResponse, ModulePlanRequest, ModulePlanResponse, PlansSummaryResponse, ShowEnvelope, TranslationItem, UnitPlanRequest,
 } from '@beacon/shared';
 import type { App } from './app.js';
 import { SESSION_COOKIE } from './auth.js';
@@ -26,6 +26,7 @@ import { buildIcs, type IcsEvent } from './ics.js';
 import { mimeType, withCharset } from './mime.js';
 import { MediaStore } from './media-store.js';
 import { computeModulePlan, moduleTopicsFor } from './planning.js';
+import { buildQaItems, QA_COMMENT_MAX, QA_ITEM, QA_KINDS, QA_STATUSES, toQaComment } from './qa.js';
 import { registerRunnerRoutes, RUNNER_PATH } from './runner-api.js';
 import { now, pyJson, sha256, stamp } from './util.js';
 
@@ -385,6 +386,79 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const out = await planFor(req.params.name);
     if (!saved) return reply.code(409).send({ ...out, error: `${out.notesBy || 'Someone'} saved these notes while you were editing.` });
     return out;
+  });
+
+  // -- Mandarin QA ------------------------------------------------------------------------------
+  // The task list is built from bcn status (what exists) plus the UI database (verdicts and
+  // comments). Comments are signed with the session's email, not the shared operator name,
+  // since a QA trail is only useful if it says who said what.
+  const whoAmI = async (req: Req) => (req as FastifyRequest & { email?: string }).email || (await app.operator()) || 'ui';
+  const docMtime = (rel: string) => {
+    try { return statSync(app.safePath(rel)).mtime.toISOString(); } catch { return null; }
+  };
+  async function qaItems() {
+    const env = await app.status.get();
+    if (!env) throw new BcnError(app.status.error || 'Programme status is not available yet.');
+    return buildQaItems(env, await app.db.qaReviews(), docMtime);
+  }
+  async function qaItem(item: string) {
+    if (!QA_ITEM.test(item)) throw new BadRequest(`'${item}' is not a QA item.`);
+    const found = (await qaItems()).find((i) => i.item === item);
+    if (!found) throw new BadRequest(`${item} is not ready for QA: its Mandarin file does not exist yet.`);
+    return found;
+  }
+  async function qaDetail(req: Req, item: string): Promise<QaItemResponse> {
+    const me = (req as FastifyRequest & { email?: string }).email || (await app.operator()) || null;
+    return { item: await qaItem(item), comments: (await app.db.qaComments(item)).map((c) => toQaComment(c, me)) };
+  }
+  const qaChanged = (item: string) => app.bus.publish({ type: 'qa', item });
+
+  f.get('/api/qa', async (): Promise<QaListResponse> => ({ items: await qaItems() }));
+  f.get('/api/qa/item/:item', async (req: Req) => qaDetail(req, req.params.item));
+
+  f.put('/api/qa/item/:item/status', async (req: Req) => {
+    const data = await readJson(req) as unknown as QaStatusRequest;
+    if (!QA_STATUSES.includes(data.status)) throw new BadRequest(`status must be one of ${QA_STATUSES.join(', ')}.`);
+    const item = await qaItem(req.params.item);
+    await app.db.setQaStatus(item.item, data.status, await whoAmI(req), item.mtime);
+    qaChanged(item.item);
+    return qaDetail(req, item.item);
+  });
+
+  f.post('/api/qa/item/:item/comments', async (req: Req) => {
+    const data = await readJson(req) as unknown as QaCommentRequest;
+    const body = typeof data.body === 'string' ? data.body.trim() : '';
+    if (!body) throw new BadRequest('A comment needs some text.');
+    if (body.length > QA_COMMENT_MAX) throw new BadRequest(`Comments are limited to ${QA_COMMENT_MAX} characters.`);
+    const kind = data.kind ?? 'comment';
+    if (!QA_KINDS.includes(kind)) throw new BadRequest(`kind must be one of ${QA_KINDS.join(', ')}.`);
+    const anchorT = data.anchorT ?? null;
+    if (anchorT !== null && (typeof anchorT !== 'number' || !Number.isFinite(anchorT) || anchorT < 0)) throw new BadRequest('anchorT must be a number of seconds.');
+    const anchorLine = data.anchorLine ?? null;
+    if (anchorLine !== null && (!Number.isInteger(anchorLine) || anchorLine < 1)) throw new BadRequest('anchorLine must be a line number.');
+    const item = await qaItem(req.params.item);
+    await app.db.addQaComment({ item: item.item, body, kind, anchor_t: anchorT, anchor_line: anchorLine, by: await whoAmI(req) });
+    qaChanged(item.item);
+    return qaDetail(req, item.item);
+  });
+
+  f.patch('/api/qa/comments/:id(^\\d+$)', async (req: Req, reply) => {
+    const data = await readJson(req) as unknown as QaResolveRequest;
+    if (typeof data.resolved !== 'boolean') throw new BadRequest('resolved must be true or false.');
+    const row = await app.db.resolveQaComment(Number(req.params.id), data.resolved, await whoAmI(req));
+    if (!row) return reply.code(404).send({ error: 'No such comment.' });
+    qaChanged(row.item);
+    return qaDetail(req, row.item);
+  });
+
+  f.delete('/api/qa/comments/:id(^\\d+$)', async (req: Req, reply) => {
+    const row = await app.db.qaComment(Number(req.params.id));
+    if (!row) return reply.code(404).send({ error: 'No such comment.' });
+    const me = await whoAmI(req);
+    if (row.by.toLowerCase() !== me.toLowerCase() && !isAdmin(req)) throw new Forbidden('Only the person who wrote a comment can delete it.');
+    await app.db.deleteQaComment(row.id);
+    qaChanged(row.item);
+    return qaDetail(req, row.item);
   });
 
   // Each unit's own agreed date (subtitles ready for translation), set independently of every other unit's.

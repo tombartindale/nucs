@@ -5,7 +5,7 @@ import { defineStore } from 'pinia';
 import { computed, ref, shallowRef, watch } from 'vue';
 import { Notify } from 'quasar';
 import type {
-  BcnEvent, BootResponse, CodeInfo, JobArgs, JobDetail, JobsResponse, JobSummary, ServerEvent, StatusResponse,
+  BcnEvent, BootResponse, CodeInfo, JobArgs, JobDetail, JobsResponse, JobSummary, QaItem, QaListResponse, ServerEvent, StatusResponse,
 } from '@beacon/shared';
 import { api } from '@/api';
 
@@ -21,6 +21,12 @@ export const useBeacon = defineStore('beacon', () => {
   const live = ref<'connecting' | 'up' | 'down'>('connecting');
   const now = ref(Date.now());  // ticks every 2 s: stalled detection is time-based
   const jobEventListeners = new Set<JobEventListener>();
+
+  // Mandarin QA task list, and a counter that ticks whenever any item's review changes
+  // (QA screens watch it to refetch their item).
+  const qa = shallowRef<QaItem[] | null>(null);
+  const qaTick = ref(0);
+  const qaToReview = computed(() => (qa.value || []).filter((i) => i.status === 'to_review' || i.changedSinceReview).length);
 
   const activeJobs = computed(() => [...jobs.value.values()].filter((j) => LIVE_STATES.includes(j.state)).length);
 
@@ -39,6 +45,15 @@ export const useBeacon = defineStore('beacon', () => {
   async function loadJobs() {
     const r = await api<JobsResponse>('/api/jobs?limit=150');
     jobs.value = new Map(r.jobs.map((j) => [j.id, j]));
+  }
+
+  async function loadQa() {
+    qa.value = (await api<QaListResponse>('/api/qa')).items;
+  }
+  let qaTimer: ReturnType<typeof setTimeout> | undefined;
+  function refreshQa() {
+    clearTimeout(qaTimer);
+    qaTimer = setTimeout(() => { void loadQa().catch(() => {}); }, 300);
   }
 
   function toast(message: string, error = false) {
@@ -87,6 +102,7 @@ export const useBeacon = defineStore('beacon', () => {
       live.value = 'up';
       void loadStatus().catch(() => {});
       void loadJobs().catch(() => {});
+      void loadQa().catch(() => {});
     });
     es.onerror = () => { live.value = 'down'; };
     es.onmessage = (m) => {
@@ -95,6 +111,10 @@ export const useBeacon = defineStore('beacon', () => {
         // Coalesce bursts of refreshes into one reload.
         clearTimeout(statusTimer);
         statusTimer = setTimeout(() => { void loadStatus().catch(() => {}); }, 150);
+        refreshQa();  // a new composed video or activity can make a new QA item
+      } else if (ev.type === 'qa') {
+        qaTick.value++;
+        refreshQa();
       } else if (ev.type === 'job') {
         jobs.value.set(ev.job.id, { ...(jobs.value.get(ev.job.id) || {}), ...ev.job });
       } else if (ev.type === 'job-event') {
@@ -123,7 +143,7 @@ export const useBeacon = defineStore('beacon', () => {
   }
 
   return {
-    boot, bootError, status, jobs, codes, live, now, activeJobs,
-    loadBoot, loadStatus, loadJobs, runJob, trackJob, awaitJob, onJobEvent, connect, toast, stateOf,
+    boot, bootError, status, jobs, codes, live, now, activeJobs, qa, qaTick, qaToReview,
+    loadBoot, loadStatus, loadJobs, loadQa, runJob, trackJob, awaitJob, onJobEvent, connect, toast, stateOf,
   };
 });

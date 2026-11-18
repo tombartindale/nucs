@@ -97,6 +97,32 @@ CREATE TABLE IF NOT EXISTS unit_plans (
     updated TEXT NOT NULL,
     PRIMARY KEY (module, unit)
 );
+-- Internal QA of the Mandarin deliverables: one row per item that has a verdict (an item
+-- with no row is simply 'to_review'), and the reviewers' comments on it. Items are keyed
+-- 'video:<topic id>' or 'activity:<module>/<unit>'. Review conversation, not content, so
+-- it lives here rather than in the tree. reviewed_mtime is the file's mtime when the
+-- verdict was given, so a file changed since then can be flagged for another look.
+CREATE TABLE IF NOT EXISTS qa_reviews (
+    item TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'to_review',
+    status_by TEXT NOT NULL DEFAULT '',
+    status_at TEXT,
+    reviewed_mtime TEXT
+);
+CREATE TABLE IF NOT EXISTS qa_comments (
+    id SERIAL PRIMARY KEY,
+    item TEXT NOT NULL,
+    body TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'comment',
+    anchor_t REAL,
+    anchor_line INTEGER,
+    by TEXT NOT NULL,
+    at TEXT NOT NULL,
+    resolved BOOLEAN NOT NULL DEFAULT FALSE,
+    resolved_by TEXT,
+    resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS qa_comments_item ON qa_comments(item);
 `;
 
 export const DEFAULT_PREFS: Prefs = {
@@ -137,6 +163,17 @@ export interface ModulePlanRow {
 
 export interface UnitPlanRow {
   module: string; unit: string; delivery_date: string | null; updated: string;
+}
+
+/** A QA item's verdict plus its comment counts, as the task list needs them. */
+export interface QaReviewRow {
+  item: string; status: string; status_by: string; status_at: string | null; reviewed_mtime: string | null;
+  comments: number; open_comments: number; last_comment: string | null;
+}
+
+export interface QaCommentRow {
+  id: number; item: string; body: string; kind: string; anchor_t: number | null; anchor_line: number | null;
+  by: string; at: string; resolved: boolean; resolved_by: string | null; resolved_at: string | null;
 }
 
 export class DB {
@@ -237,6 +274,57 @@ export class DB {
   async allUnitPlans(): Promise<UnitPlanRow[]> {
     const res = await this.pool.query<UnitPlanRow>('SELECT * FROM unit_plans');
     return res.rows;
+  }
+
+  // -- Mandarin QA ------------------------------------------------------------------------------
+
+  /** Every item with a verdict or a comment, keyed by item. */
+  async qaReviews(): Promise<Map<string, QaReviewRow>> {
+    const res = await this.pool.query<QaReviewRow>(
+      `SELECT i.item, COALESCE(r.status, 'to_review') AS status, COALESCE(r.status_by, '') AS status_by,
+              r.status_at, r.reviewed_mtime,
+              COALESCE(c.comments, 0)::int AS comments, COALESCE(c.open_comments, 0)::int AS open_comments, c.last_comment
+       FROM (SELECT item FROM qa_reviews UNION SELECT item FROM qa_comments) i
+       LEFT JOIN qa_reviews r ON r.item = i.item
+       LEFT JOIN (SELECT item, COUNT(*) AS comments, COUNT(*) FILTER (WHERE NOT resolved) AS open_comments,
+                         MAX(at) AS last_comment FROM qa_comments GROUP BY item) c ON c.item = i.item`);
+    return new Map(res.rows.map((r) => [r.item, r]));
+  }
+
+  async qaComments(item: string): Promise<QaCommentRow[]> {
+    const res = await this.pool.query<QaCommentRow>('SELECT * FROM qa_comments WHERE item=$1 ORDER BY at, id', [item]);
+    return res.rows;
+  }
+
+  async setQaStatus(item: string, status: string, by: string, mtime: string | null): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO qa_reviews(item, status, status_by, status_at, reviewed_mtime) VALUES($1, $2, $3, $4, $5)
+       ON CONFLICT(item) DO UPDATE SET status=excluded.status, status_by=excluded.status_by,
+         status_at=excluded.status_at, reviewed_mtime=excluded.reviewed_mtime`,
+      [item, status, by, new Date().toISOString(), mtime]);
+  }
+
+  async addQaComment(c: { item: string; body: string; kind: string; anchor_t: number | null; anchor_line: number | null; by: string }): Promise<QaCommentRow> {
+    const res = await this.pool.query<QaCommentRow>(
+      `INSERT INTO qa_comments(item, body, kind, anchor_t, anchor_line, by, at) VALUES($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [c.item, c.body, c.kind, c.anchor_t, c.anchor_line, c.by, new Date().toISOString()]);
+    return res.rows[0];
+  }
+
+  async qaComment(id: number): Promise<QaCommentRow | null> {
+    const res = await this.pool.query<QaCommentRow>('SELECT * FROM qa_comments WHERE id=$1', [id]);
+    return res.rows[0] ?? null;
+  }
+
+  async resolveQaComment(id: number, resolved: boolean, by: string): Promise<QaCommentRow | null> {
+    const res = await this.pool.query<QaCommentRow>(
+      'UPDATE qa_comments SET resolved=$2, resolved_by=$3, resolved_at=$4 WHERE id=$1 RETURNING *',
+      [id, resolved, resolved ? by : null, resolved ? new Date().toISOString() : null]);
+    return res.rows[0] ?? null;
+  }
+
+  async deleteQaComment(id: number): Promise<void> {
+    await this.pool.query('DELETE FROM qa_comments WHERE id=$1', [id]);
   }
 
   async close(): Promise<void> { await this.pool.end(); }
