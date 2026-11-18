@@ -5,8 +5,7 @@
 
 N is 1-based, the cue's position in the SRT (positions are renumbered 1..N on every
 write, so position is the only stable identity to hand). Only the given cue(s)' text
-changes; start/end timestamps and every other cue are untouched, so this can never
-break the Mandarin SRT's cue-count/timing parity check in bcn subtitles. The previous
+changes; start/end timestamps and every other cue are untouched. The previous
 version of the file is kept in .history/ (bcn edit's pattern), via
 fsutil.save_with_history - one snapshot per invocation, however many cues it touches,
 so a whole bulk-edit pass undoes as a single step.

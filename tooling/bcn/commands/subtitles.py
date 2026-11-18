@@ -2,8 +2,8 @@
 
 English: edit/master.srt passes through untouched unless reviewed corrections
 exist or line normalisation is switched on, in which case only cue text changes.
-Mandarin: the returned SRT is verified cue for cue against the English: same
-count, same in and out times, different text.
+Mandarin: the returned SRT may split, merge and re-time cues freely; only lines
+left in English are flagged.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from ..tree import Target, Topic
 from ..codes import SHEET_CODES
 
 HELP = "convert or normalise the supplied SRT"
-TIME_TOL = 0.0015  # seconds; SRT has millisecond resolution
 
 
 def add_args(p: argparse.ArgumentParser) -> None:
@@ -123,28 +122,17 @@ def subtitles_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, la
     changed = False
 
     if lang == "zh":
+        # Translators split, merge and re-time cues to suit Mandarin reading speed, and that
+        # is expected: the Mandarin SRT is only ever a subtitle track (slide timing comes
+        # from the English cue sheet), and the composed video gets a human QA pass. So cue
+        # count and timings are not compared with the English. What is still worth catching
+        # is a line left in English, matched against any English cue rather than by position.
         en = srt.parse_file(t.srt("en"), "edit/master.srt")
-        if len(cues) != len(en):
-            r.diagnostics.append(Diagnostic("SRT_ZH_CUE_COUNT", f"The Mandarin SRT has {len(cues)} cues; the English has {len(en)}.",
-                                            topic=t.id, lang=lang, file=rel,
-                                            hint="The translator merged or split cues. Return it: timings must match the English cue for cue."))
-        mism = 0
-        for a, b in zip(cues, en):
-            if abs(a.start - b.start) > TIME_TOL or abs(a.end - b.end) > TIME_TOL:
-                mism += 1
-                if mism <= 20:
-                    r.diagnostics.append(Diagnostic(
-                        "SRT_ZH_TIMING",
-                        f"Cue {a.index} is {srt.fmt_cue_time(a.start)} --> {srt.fmt_cue_time(a.end)}; the English is {srt.fmt_cue_time(b.start)} --> {srt.fmt_cue_time(b.end)}.",
-                        topic=t.id, lang=lang, file=rel, line=a.line,
-                        hint="A timing difference is an error, never corrected silently. The translator re-timed it."))
-            elif a.plain == b.plain and re.search(r"[A-Za-z]{3,}", a.plain):
+        english = {c.plain for c in en if re.search(r"[A-Za-z]{3,}", c.plain)}
+        for a in cues:
+            if a.plain in english:
                 r.diagnostics.append(Diagnostic("SRT_ZH_UNTRANSLATED", f"Cue {a.index} has the English text unchanged.",
                                                 topic=t.id, lang=lang, file=rel, line=a.line))
-        if mism > 20:
-            r.diagnostics.append(Diagnostic("SRT_ZH_TIMING", f"{mism - 20} further cues differ in timing.", topic=t.id, lang=lang, file=rel))
-        if any(d.level == "error" for d in r.diagnostics):
-            return
     else:
         if apply_corrections(t, cues, r):
             changed = True
