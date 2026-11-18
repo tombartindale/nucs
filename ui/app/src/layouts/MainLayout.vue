@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+import ConnectClaudeDialog from '@/components/ConnectClaudeDialog.vue';
 import { useBeacon } from '@/stores/beacon';
 
 const beacon = useBeacon();
+const connectClaude = ref(false);
 const NAV = [
   { to: '/', label: 'Programme', icon: 'dashboard' },
   { to: '/diagnostics', label: 'Verification', icon: 'rule' },
@@ -48,6 +50,9 @@ const banners = computed(() => {
           {{ LIVE[beacon.live].label }}
           <q-tooltip>Connection to the backend</q-tooltip>
         </q-chip>
+        <q-btn flat round dense icon="smart_toy" aria-label="Connect Claude Desktop" @click="connectClaude = true">
+          <q-tooltip>Connect Claude Desktop</q-tooltip>
+        </q-btn>
         <q-btn flat round dense icon="settings" to="/settings" aria-label="Settings">
           <q-tooltip>Settings</q-tooltip>
         </q-btn>
@@ -66,6 +71,7 @@ const banners = computed(() => {
         <component :is="Component" :key="route.fullPath" />
       </router-view>
     </q-page-container>
+    <ConnectClaudeDialog v-model="connectClaude" />
   </q-layout>
 </template>
 

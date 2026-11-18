@@ -258,6 +258,8 @@ const sourceLink = computed(() => {
                     {{ c.anchorT !== null ? fmtTime(c.anchorT) : `line ${c.anchorLine}` }}
                   </q-chip>
                   <span class="text-caption text-grey-7">{{ c.by }} · {{ fmtAgo(c.at, beacon.now) }}</span>
+                  <q-chip v-if="c.via === 'claude'" dense square size="sm" color="deep-purple-1" text-color="deep-purple-9" icon="smart_toy"
+                    class="q-ml-xs">via Claude<q-tooltip>Written by Claude on {{ c.by }}'s behalf</q-tooltip></q-chip>
                 </q-item-label>
                 <q-item-label class="qa-body q-mt-xs">{{ c.body }}</q-item-label>
                 <q-item-label v-if="c.resolved" caption>Resolved by {{ c.resolvedBy }} · {{ fmtAgo(c.resolvedAt, beacon.now) }}</q-item-label>
