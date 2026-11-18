@@ -124,7 +124,7 @@ const message = computed(() => {
   if (!items.length) return '';
   const byTopic = new Map<string, string[]>();
   for (const x of items) { if (!byTopic.has(x.topic)) byTopic.set(x.topic, []); byTopic.get(x.topic)!.push(x.message); }
-  return ['The following returned files need correcting. Slide breaks must match the English exactly, and SRT timings must be identical cue for cue.', '',
+  return ['The following returned files need correcting. Slide breaks must match the English exactly.', '',
     ...[...byTopic.entries()].flatMap(([t, ms]) => [`${t}:`, ...ms.map((m) => `  - ${m}`), ''])].join('\n');
 });
 const copy = () => navigator.clipboard.writeText(message.value).then(() => beacon.toast('Copied'));

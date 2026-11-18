@@ -91,8 +91,6 @@ CODES: dict[str, tuple[str, str]] = {
     "CUE_INSERTION": ("info", "The SRT contains words that are not in the script."),
     "CUE_SHEET_INVALID": ("error", "cues.csv is malformed or disagrees with the slide count."),
     "SRT_PARSE": ("error", "The SRT could not be parsed."),
-    "SRT_ZH_CUE_COUNT": ("error", "The Mandarin SRT has a different number of cues from the English."),
-    "SRT_ZH_TIMING": ("error", "A Mandarin SRT cue has different timings from the English."),
     "SRT_ZH_UNTRANSLATED": ("warn", "A Mandarin SRT cue has the same text as the English."),
     "SRT_LINE_LENGTH": ("info", "A subtitle line was rewrapped to the configured maximum."),
     "SRT_CUE_DURATION": ("warn", "A subtitle cue is longer than the configured maximum; timings are never changed."),

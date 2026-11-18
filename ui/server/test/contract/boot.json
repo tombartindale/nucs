@@ -609,18 +609,6 @@
    },
    {
     "area": "SRT",
-    "code": "SRT_ZH_CUE_COUNT",
-    "description": "The Mandarin SRT has a different number of cues from the English.",
-    "level": "error"
-   },
-   {
-    "area": "SRT",
-    "code": "SRT_ZH_TIMING",
-    "description": "A Mandarin SRT cue has different timings from the English.",
-    "level": "error"
-   },
-   {
-    "area": "SRT",
     "code": "SRT_ZH_UNTRANSLATED",
     "description": "A Mandarin SRT cue has the same text as the English.",
     "level": "warn"
