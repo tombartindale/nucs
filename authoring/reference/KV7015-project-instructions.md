@@ -152,7 +152,7 @@ Writing the script
   Read it back in your head; if you stumble, rewrite it.
 - Keep their phrasing, their examples and their emphasis. The point of this
   route is that it sounds like them and not like a textbook.
-- Budget 140 to 150 words per minute. A 12-minute topic is roughly 1,700 words
+- Budget 140 to 150 words per minute. A 10-minute topic is roughly 1,450 words
   of narration in total, across all its slides.
 - The presenter is recorded as a headshot with no slides in shot. The narration
   may refer to what is on screen, but never point at it. No "here on the left",

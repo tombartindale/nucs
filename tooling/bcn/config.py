@@ -27,7 +27,8 @@ DEFAULTS: dict[str, Any] = {
         "slides_min": 6,
         "slides_max": 16,
         "narration_min_words": 30,
-        "narration_max_words": 200,
+        # The Project prompt: a slide break every 60 to 90 seconds at 140-150 wpm, so up to ~225 words.
+        "narration_max_words": 225,
         "title_max_chars": 60,
         # Weekday names ("Friday") as dates. Off by default: they are usually examples, not schedules.
         "date_weekdays": False,
@@ -215,8 +216,11 @@ DEFAULTS: dict[str, Any] = {
         "region": "",
     },
     "qa": {
-        "unit_minutes_min": 85,
-        "unit_minutes_max": 110,
+        # The Project prompt: about 85 minutes per unit is a budget, not a target, from 6-8 topics
+        # of 8-10 minutes. Over ~10% above budget is flagged; below 45 (fewer than six short
+        # topics) most likely means a topic is missing.
+        "unit_minutes_min": 45,
+        "unit_minutes_max": 95,
         "video_minutes_tolerance": 0.15,
     },
     "tools": {

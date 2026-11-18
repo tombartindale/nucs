@@ -49,7 +49,7 @@ def test_the_course_map_template_parses_with_its_extra_columns(tmp_path):
     cm = load_course_map(module)
     assert [d.message for d in cm.diagnostics] == []
     t1, t2 = cm.topics[:2]
-    assert (t1.unit, t1.code, t1.title, t1.minutes, t1.outcomes) == ("U01", "T01", "Turning a topic into a question", 12, ["LO1"])
+    assert (t1.unit, t1.code, t1.title, t1.minutes, t1.outcomes) == ("U01", "T01", "Turning a topic into a question", 10, ["LO1"])
     assert t2.outcomes == ["LO1", "LO2"]
     assert set(cm.outcomes) == {"LO1", "LO2"}
     assert cm.readings["U01"].startswith("Course textbook")

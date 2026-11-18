@@ -1,7 +1,7 @@
 ---
 topic_id: KV7015-U01-T01
 title: Turning a topic into a question
-minutes: 12
+minutes: 10
 lang: en
 ---
 
@@ -10,8 +10,8 @@ lang: en
 What separates the two
 
 > **Say:** Narration for this slide, written to be spoken rather than read.
-> Sixty to a hundred and forty words, depending on how long the slide should
-> stay on screen.
+> Sixty to ninety seconds spoken, so roughly 140 to 220 words, depending on how
+> long the slide should stay on screen.
 
 ---
 

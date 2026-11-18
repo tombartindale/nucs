@@ -1,6 +1,6 @@
 # KV7015 — Course map
 
-Ten units. Approximately 100 minutes of video per unit.
+Ten units. About 85 minutes of video per unit, as a budget rather than a target.
 
 ## Unit 1 — Framing the problem
 
@@ -9,15 +9,15 @@ the unit page for students.
 
 **Reading.** Course textbook, ch. 1–2. Chen (2021), sections 3 and 4.
 
-**Recording.** 96 minutes across 8 topics.
+**Recording.** 80 minutes across 8 topics.
 
 **Interactive element.** Quiz, targeting the confusion between a topic and an
 answerable question.
 
 | Topic | Title | Minutes | Outcomes | What it does | From the interview |
 | --- | --- | --- | --- | --- | --- |
-| U01-T01 | Turning a topic into a question | 12 | LO1 | Shows why a subject is not yet a question. | "students arrive with a subject, not a question, and they can't see the difference" |
-| U01-T02 | Where the boundaries go | 12 | LO1, LO2 | Sets the scope a question can realistically cover. | "they always try to answer everything at once" |
+| U01-T01 | Turning a topic into a question | 10 | LO1 | Shows why a subject is not yet a question. | "students arrive with a subject, not a question, and they can't see the difference" |
+| U01-T02 | Where the boundaries go | 10 | LO1, LO2 | Sets the scope a question can realistically cover. | "they always try to answer everything at once" |
 
 ## Unit 2 — ...
 
