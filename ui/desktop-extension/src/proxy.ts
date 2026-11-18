@@ -52,6 +52,29 @@ export const IMPORT_TOOL: Tool = {
   annotations: { destructiveHint: true },
 };
 
+export const SUBTITLES_TOOL: Tool = {
+  name: 'upload_subtitles_from_disk',
+  title: "Upload a topic's recorded SRT from this computer",
+  description: "Uploads an .srt file from this computer as a topic's recorded subtitles in NUCS (edit/master.srt for English, "
+    + 'edit/master.zh.srt for Mandarin), byte for byte: BOM and line endings are kept, nothing is retyped. Use it for the corrected '
+    + 'SRT once the person has saved it and is happy with it. If the topic already has a different SRT, nothing is replaced and the '
+    + 'difference is reported; pass replace only after the person has agreed to overwrite it. Only folders allowed in the '
+    + 'extension settings can be read (the Downloads folder by default).',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      topic: { type: 'string', description: 'Topic id, e.g. KV7015-U01-T03' },
+      path: { type: 'string', description: 'The .srt file, e.g. ~/Downloads/KV7015-U01-T03_mp4.srt' },
+      lang: { type: 'string', enum: ['en', 'zh'], default: 'en' },
+      replace: { type: 'boolean', default: false, description: 'replace a different SRT already in NUCS (only after the person agreed)' },
+    },
+    required: ['topic', 'path'],
+  },
+  annotations: { destructiveHint: true },
+};
+const TOPIC_RE = /^[A-Z]{2}\d{4}-U\d{2}-T\d{2}$/;
+const SRT_MAX = 5 * 1024 * 1024;
+
 const expand = (p: string) => (p === '~' ? homedir() : p.startsWith(`~${sep}`) || p.startsWith('~/') ? join(homedir(), p.slice(2)) : p);
 
 /** The allowed folders, resolved; unresolvable or unset ones dropped. */
@@ -184,6 +207,41 @@ export function createProxy(o: ProxyOptions): Server {
     return { content, ...(outcome.isError ? { isError: true } : {}) };
   }
 
+  async function uploadSubtitles(args: Record<string, unknown>): Promise<CallToolResult> {
+    const topic = typeof args.topic === 'string' ? args.topic.trim() : '';
+    const lang = args.lang === 'zh' ? 'zh' : 'en';
+    if (!TOPIC_RE.test(topic)) return textResult('Give the topic id, e.g. KV7015-U01-T03.', true);
+    let real: string;
+    let bytes: Uint8Array;
+    try {
+      real = checkPath(typeof args.path === 'string' ? args.path : '', folders);
+      if (extname(real).toLowerCase() !== '.srt' || !statSync(real).isFile()) throw new Error('Upload an .srt file.');
+      if (statSync(real).size > SRT_MAX) throw new Error('That file is too large to be a subtitle file.');
+      bytes = readFileSync(real);
+    } catch (e) {
+      return textResult((e as Error).message, true);
+    }
+    const q = new URLSearchParams({ kind: lang });
+    if (args.replace === true) q.set('replace', '1');
+    let res: Response;
+    try {
+      res = await fetch(`${base}/api/topic/${topic}/media?${q}`, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/x-subrip' }, body: bytes });
+    } catch (e) {
+      return textResult(explain(e).message, true);
+    }
+    const body = await res.text();
+    if (!res.ok) {
+      let msg = body;
+      try { msg = (JSON.parse(body) as { error?: string }).error ?? body; } catch { /* text */ }
+      return textResult(res.status === 401 ? explain(new Error('401')).message : `NUCS refused the upload: ${msg}`, true);
+    }
+    const job = JSON.parse(body) as { id: number };
+    const outcome = await onRemote((c) => c.callTool({ name: 'get_job_result', arguments: { job_id: job.id, wait_seconds: 120 } }));
+    const head = `Uploaded ${real} as ${topic}'s ${lang === 'zh' ? 'Mandarin' : 'English'} recorded SRT (NUCS job ${job.id}).\n\n`;
+    const content = (outcome.content as CallToolResult['content']).map((c) => (c.type === 'text' ? { ...c, text: head + c.text } : c));
+    return { content, ...(outcome.isError ? { isError: true } : {}) };
+  }
+
   const server = new Server({ name: 'nucs', version: VERSION }, {
     capabilities: { tools: {}, prompts: {} },
     instructions: 'NUCS is the production system for the programme\'s modules, units and topics. Use its tools as the ground truth, '
@@ -192,10 +250,11 @@ export function createProxy(o: ProxyOptions): Server {
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const { tools } = await onRemote((c) => c.listTools());
-    return { tools: [...tools, IMPORT_TOOL] };
+    return { tools: [...tools, IMPORT_TOOL, SUBTITLES_TOOL] };
   });
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (req.params.name === IMPORT_TOOL.name) return importFromDisk(req.params.arguments ?? {});
+    if (req.params.name === SUBTITLES_TOOL.name) return uploadSubtitles(req.params.arguments ?? {});
     try {
       return await onRemote((c) => c.callTool(req.params)) as CallToolResult;
     } catch (e) {

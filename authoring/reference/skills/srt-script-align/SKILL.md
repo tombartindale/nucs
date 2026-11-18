@@ -7,6 +7,15 @@ description: Correct an auto-generated SRT subtitle file so its text matches the
 
 Fixes speech-to-text mistakes in an SRT by replacing cue text with the script's wording while leaving every cue number and timestamp untouched.
 
+## With NUCS connected (Claude Desktop with the NUCS extension)
+
+If the NUCS tools are available, use NUCS as the source and the destination, so the user handles only the Premiere SRT:
+- **Script:** get it with `get_topic_source(topic)` instead of asking for the markdown. It is the validated script exactly as NUCS holds it, including edits made after filming. Write it to a file and run the script on it as below.
+- **Edit SRT:** the user attaches the Premiere export as usual.
+- **When the user is happy with the corrected SRT:** ask them to save it (to Downloads, or another folder the extension may read), then call `upload_subtitles_from_disk(topic, path)`. It uploads the file byte for byte (BOM and CRLF kept) as the topic's recorded SRT. If NUCS already holds a different SRT for the topic, nothing is replaced. Say so, and only call it again with `replace: true` once the user has agreed.
+
+Everything below is unchanged.
+
 ## Inputs
 1. The script. For topic markdown files, only the `> **Say:** ...` blockquotes are the spoken script (headings, bullets and image lines are slide content, not narration — ignore them). Blockquotes may wrap across several `>` lines; words hyphenated at a line end ("rule-\nbased") are rejoined. For anything else, use `--plain`.
 2. The SRT (typically `<topic>_mp4.srt`).

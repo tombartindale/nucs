@@ -101,4 +101,34 @@ describe('Claude Desktop extension', () => {
   });
 });
 
+describe('upload_subtitles_from_disk', () => {
+  it('uploads an SRT byte for byte, refusing to replace a different one until asked', async () => {
+    const c = await extension(token, [allowed]);
+    expect((await c.listTools()).tools.map((t) => t.name)).toContain('upload_subtitles_from_disk');
+    const stored = join(b.root, 'KV7015/U01/T01/edit/master.srt');
+    const before = readFileSync(stored);
+    // As the skill writes it: BOM and CRLF, which must survive untouched.
+    const corrected = Buffer.from('\uFEFF' + before.toString('utf8').replace(/^\uFEFF/, '').replace(/\r?\n/g, '\r\n').replace(/ the /, ' THE '), 'utf8');
+    const file = join(allowed, 'KV7015-U01-T01_mp4.srt');
+    writeFileSync(file, corrected);
+
+    const refused = await c.callTool({ name: 'upload_subtitles_from_disk', arguments: { topic: 'KV7015-U01-T01', path: file } });
+    expect(textOf(refused)).toContain('recorded SRT');
+    expect(readFileSync(stored).equals(before)).toBe(true);
+
+    const replaced = await c.callTool({ name: 'upload_subtitles_from_disk', arguments: { topic: 'KV7015-U01-T01', path: file, replace: true } });
+    expect(replaced.isError).toBeFalsy();
+    expect(readFileSync(stored).equals(corrected)).toBe(true);
+
+    const bad = await c.callTool({ name: 'upload_subtitles_from_disk', arguments: { topic: 'KV7015-U01-T01', path: join(outside, 'KV7015-U01-T01.md') } });
+    expect(bad.isError).toBe(true);
+  });
+
+  it('will not take video through a token', async () => {
+    const r = await fetch(`${b.url}/api/topic/KV7015-U01-T01/media?kind=master`, {
+      method: 'POST', body: 'x', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'video/mp4' } });
+    expect(r.status).toBe(403);
+  });
+});
+
 afterAll(() => { try { rmSync(join(allowed, '..'), { recursive: true, force: true }); } catch { /* fine */ } });

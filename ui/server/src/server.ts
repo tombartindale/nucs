@@ -115,8 +115,10 @@ export interface ServerOptions {
 const PUBLIC_PATHS = new Set(['/api/auth/request-link', '/api/auth/verify', '/api/auth/logout', '/api/auth/me']);
 // Routes that also take a personal API token (api-tokens.ts) in place of the session
 // cookie: the MCP endpoint, and the one upload the Claude Desktop extension makes for
-// import_from_disk. Nowhere else: a token is not a way into the rest of the API.
+// import_from_disk and upload_subtitles_from_disk. Nowhere else: a token is not a way into
+// the rest of the API.
 const BEARER_PATHS = new Set(['/mcp', '/api/intake/upload']);
+const BEARER_TOPIC_MEDIA = /^\/api\/topic\/[A-Z]{2}\d{4}-U\d{2}-T\d{2}\/media$/;
 
 /** Who a request acts as, and whether it came through Claude (the MCP endpoint). */
 type Who = FastifyRequest & { email?: string; via?: 'claude' };
@@ -156,7 +158,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
       who.via = 'claude';
       return;
     }
-    if (BEARER_PATHS.has(path) && req.headers.authorization) {
+    if ((BEARER_PATHS.has(path) || BEARER_TOPIC_MEDIA.test(path)) && req.headers.authorization) {
       const email = await app.tokens.verify(req.headers.authorization, testDisableAuth);
       if (!email) return reply.code(401).send({ error: 'This NUCS API token is not valid, or has been revoked.' });
       who.email = email;
@@ -804,6 +806,8 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   f.post(`/api/topic/:id(${TOPIC})/media`, { bodyLimit: TRANSFER_UPLOAD_MAX }, async (req: Req, reply) => {
     const kind = MEDIA_KINDS[String(req.query.kind ?? '')];
     if (!kind) throw new BadRequest('kind must be master, en or zh.');
+    // Through Claude, subtitles only: video goes through the app.
+    if ((req as Who).via && kind.ext !== 'srt') throw new Forbidden('Only subtitle files can be uploaded through Claude.');
     const n = Number(req.headers['content-length'] || 0);
     if (!(n > 0) || n > TRANSFER_UPLOAD_MAX) throw new BadRequest('Upload is empty or too large.');
     const id = req.params.id;
@@ -813,7 +817,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     await pipeline(req.body as IncomingMessage, createWriteStream(file));
     const args: JobArgs = { import: file };
     if (req.query.replace === '1') args.replace = true;
-    const job = await app.jobs.submit('transfer', [app.targetRel(id)], args, `media ${basename(file)} · ${id}`, await app.operator());
+    const job = await app.jobs.submit('transfer', [app.targetRel(id)], args, `media ${viaLabel(req, basename(file))} · ${id}`, await jobBy(req));
     return reply.code(202).send(job);
   });
 

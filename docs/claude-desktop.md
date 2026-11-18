@@ -34,6 +34,7 @@ Claude Desktop ──stdio──▶ NUCS extension (on your computer) ──HTTP
 | "Import ~/Downloads/KV7016-U04 from Jane" | the `import_tutor_content` prompt: `import_from_disk` with check_only first, a summary and the diffs, and then the real import only once you agree |
 | "Review video:KV7015-U01-T03" | the `review_qa_item` prompt: the English and Mandarin scripts, the Mandarin subtitles, and the existing comments, then a proposed list of anchored comments. It posts only the ones you choose. |
 | "Which QA items need attention in KV7015?" | `list_qa_items` |
+| "Correct the subtitles for KV7015-U01-T03" (with the edit's SRT attached) | your `srt-script-align` skill. With NUCS connected, it gets the script from NUCS (`get_topic_source`). Once you have saved the result, `upload_subtitles_from_disk` makes it the recorded SRT. |
 | "Reconcile KV7015" | the `reconcile_module` prompt: the course map against the topics that were built (titles, order, minutes, outcome coverage), and assessment alignment. It changes nothing. |
 
 The prompts are listed in Claude Desktop's **+** menu under NUCS.
@@ -53,6 +54,7 @@ The prompts are listed in Claude Desktop's **+** menu under NUCS.
 | `intake_check(text)`, `intake_submit(text, replace?)` | `intake_submit` does | Intake for pasted markdown, the same as the Intake page |
 | `import_from_disk(path, check_only, replace, scope?)` | when `check_only` is false | Intake for a folder, `.zip` or `.md` on your computer. This tool runs in the extension. |
 | `get_job_result(job_id)` | no | Waits for a NUCS job to finish and returns its outcome |
+| `upload_subtitles_from_disk(topic, path, lang, replace?)` | yes | Uploads an `.srt` from your computer as the topic's recorded SRT, byte for byte. It refuses to replace a different SRT unless you agree. This tool runs in the extension. |
 
 Images embedded in markdown as `data:` URIs are extracted by `bcn intake` into `assets/fig-N.<ext>`, whichever route the content came in by. They're matched to existing images by content, not by position.
 
