@@ -133,6 +133,7 @@ CODES: dict[str, tuple[str, str]] = {
     "INTAKE_REPLACED": ("warn", "The topic file already existed and differed; it was overwritten because --replace was set."),
     "INTAKE_ASSET_WRITTEN": ("info", "An asset file from the source was written alongside the topic."),
     "INTAKE_ASSET_AMBIGUOUS": ("warn", "An asset's filename matched more than one differing file in the source; the first was used."),
+    "INTAKE_IMAGE_CORRUPT": ("error", "An image embedded in the markdown is damaged or cut off, so the topic was not written."),
     "INTAKE_IMAGE_EXTRACTED": ("info", "An image embedded in the markdown as a data: URI was extracted into the topic's assets/ (or matched one already there by content)."),
     # --- translation -----------------------------------------------------
     "XL_NOT_READY": ("error", "A topic is not ready to export for translation."),

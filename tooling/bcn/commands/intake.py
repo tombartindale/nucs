@@ -36,8 +36,10 @@ import difflib
 import hashlib
 import re
 import shutil
+import struct
 import tempfile
 import zipfile
+import zlib
 from pathlib import Path
 
 from .. import fsutil
@@ -51,18 +53,60 @@ from ..tree import TOPIC_ID_RE, Target, Topic, is_noise
 HELP = "place pasted topic markdown into the tree and validate it"
 FENCE = re.compile(r"^\s*(```|~~~)[\w-]*\s*$")
 # A base64 image embedded where a path would be: markdown ![..](data:...) or <img src="data:...">.
-DATA_URI = re.compile(r"data:image/(png|jpe?g|gif|webp|svg\+xml);base64,([A-Za-z0-9+/=\s]*[A-Za-z0-9+/=])(?=\s*[)\"'])", re.IGNORECASE)
-EXT = {"png": "png", "jpg": "jpg", "jpeg": "jpg", "gif": "gif", "webp": "webp", "svg+xml": "svg"}
+# Any image type and extra parameters (;charset=...), and URL-safe base64 (-, _), as chat
+# exports produce them.
+DATA_URI = re.compile(r"data:image/([A-Za-z0-9.+-]+)((?:;[A-Za-z0-9=._-]+)*?);base64,"
+                      r"([A-Za-z0-9+/=_\-\s]*[A-Za-z0-9+/=_\-])(?=\s*[)\"'])", re.IGNORECASE)
+MIME_EXT = {"png": "png", "jpg": "jpg", "jpeg": "jpg", "gif": "gif", "webp": "webp", "svg+xml": "svg", "bmp": "bmp"}
+MAGIC = [(b"\x89PNG\r\n\x1a\n", "png"), (b"\xff\xd8\xff", "jpg"), (b"GIF87a", "gif"), (b"GIF89a", "gif"), (b"RIFF", "webp")]
 FIG = re.compile(r"^fig-(\d+)\.[A-Za-z0-9]+$")
 
 
-def extract_embedded(block: str, assets_dir: Path) -> tuple[str, dict[str, bytes], list[tuple[str, str | None]]]:
+def _ext(mime: str, raw: bytes) -> str:
+    """The file's real type from its first bytes; the declared type only when they say nothing."""
+    for sig, ext in MAGIC:
+        if raw.startswith(sig) and (ext != "webp" or raw[8:12] == b"WEBP"):
+            return ext
+    if b"<svg" in raw[:200]:
+        return "svg"
+    return MIME_EXT.get(mime.lower(), "bin")
+
+
+def _png_problem(raw: bytes) -> str | None:
+    """None for a structurally sound PNG (every chunk CRC matches, IDAT inflates, IEND is
+    there), else what is wrong. A pasted image is often cut off part way through."""
+    if not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "it is not a PNG"
+    pos, idat = 8, b""
+    while pos + 8 <= len(raw):
+        n, typ = struct.unpack(">I4s", raw[pos:pos + 8])
+        body, crc = raw[pos + 8:pos + 8 + n], raw[pos + 8 + n:pos + 12 + n]
+        name = typ.decode("latin1")
+        if len(body) < n or len(crc) < 4:
+            return f"it is cut off in the {name} chunk"
+        if zlib.crc32(typ + body) & 0xFFFFFFFF != struct.unpack(">I", crc)[0]:
+            return f"its {name} chunk is corrupted"
+        if typ == b"IDAT":
+            idat += body
+        if typ == b"IEND":
+            try:
+                zlib.decompress(idat)
+            except zlib.error:
+                return "its image data does not decompress"
+            return None
+        pos += 12 + n
+    return "it is cut off (no end marker)"
+
+
+def extract_embedded(block: str, assets_dir: Path) -> tuple[str, dict[str, bytes], list[tuple[str, str | None]], list[str]]:
     """Rewrites every data: image in `block` to an assets/ path. Returns (text, files to
-    write, [(name, the existing file it matched or None)]). Matching is by content hash:
-    an image already in `assets_dir` (or earlier in this block) reuses that name; a new one
-    takes the next free fig-N, padded like the figures already there."""
+    write, [(name, the existing file it matched or None)], problems). Matching is by
+    content hash: an image already in `assets_dir` (or earlier in this block) reuses that
+    name; a new one takes the next free fig-N, padded like the figures already there. An
+    image that does not decode, or a PNG that fails its integrity check, is a problem: the
+    caller must not write the topic, since the image would be lost."""
     if "data:image/" not in block:
-        return block, {}, []
+        return block, {}, [], []
     existing: dict[str, str] = {}
     width, top = 1, 0
     if assets_dir.is_dir():
@@ -75,12 +119,22 @@ def extract_embedded(block: str, assets_dir: Path) -> tuple[str, dict[str, bytes
                     width = max(width, len(m.group(1)))
     new: dict[str, bytes] = {}
     report: list[tuple[str, str | None]] = []
+    problems: list[str] = []
+    count = 0
 
     def swap(m: re.Match[str]) -> str:
-        nonlocal top
+        nonlocal top, count
+        count += 1
+        b64 = re.sub(r"\s+", "", m.group(3)).replace("-", "+").replace("_", "/")
         try:
-            data = base64.b64decode(re.sub(r"\s+", "", m.group(2)), validate=True)
+            data = base64.b64decode(b64 + "=" * (-len(b64) % 4), validate=True)
         except (binascii.Error, ValueError):
+            problems.append(f"embedded image {count} is not valid base64")
+            return m.group(0)
+        ext = _ext(m.group(1), data)
+        bad = _png_problem(data) if ext == "png" else None
+        if bad:
+            problems.append(f"embedded image {count} cannot be used: {bad}")
             return m.group(0)
         digest = hashlib.sha256(data).hexdigest()
         if digest in existing:
@@ -89,13 +143,13 @@ def extract_embedded(block: str, assets_dir: Path) -> tuple[str, dict[str, bytes
                 report.append((name, name))
         else:
             top += 1
-            name = f"fig-{top:0{width}d}.{EXT[m.group(1).lower()]}"
+            name = f"fig-{top:0{width}d}.{ext}"
             existing[digest] = name
             new[name] = data
             report.append((name, None))
         return f"assets/{name}"
 
-    return DATA_URI.sub(swap, block), new, report
+    return DATA_URI.sub(swap, block), new, report, problems
 
 
 def add_args(p: argparse.ArgumentParser) -> None:
@@ -225,7 +279,14 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
         t = Topic(target.root, m, u, c)
         r.rel = t.rel
         r.extra["path"] = f"{t.rel}/topic.md"
-        block, embedded, extracted = extract_embedded(block, t.assets)
+        block, embedded, extracted, problems = extract_embedded(block, t.assets)
+        if problems:
+            for msg in problems:
+                r.diagnostics.append(Diagnostic("INTAKE_IMAGE_CORRUPT", f"{tid}: {msg}; nothing was written.", topic=tid,
+                                                hint="Ask for the topic file itself (attached, not pasted), or the image on its own."))
+            r.extra["action"] = "refused"
+            r.ok = False
+            continue
         if extracted:
             p = parse(Path("pasted.md"), "pasted", text=block)
             sibling_assets.setdefault(tid, {}).update(embedded)
