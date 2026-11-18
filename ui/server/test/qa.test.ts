@@ -103,12 +103,16 @@ describe('buildQaItems', () => {
 describe('toQaComment', () => {
   const row: QaCommentRow = {
     id: 1, item: 'video:KV7015-U01-T01', body: 'Tone is off', kind: 'suggestion', anchor_t: 12.5, anchor_line: null,
-    by: 'Reviewer@x.org', at: '2026-11-01T00:00:00Z', resolved: false, resolved_by: null, resolved_at: null,
+    by: 'Reviewer@x.org', at: '2026-11-01T00:00:00Z', resolved: false, resolved_by: null, resolved_at: null, via: null,
   };
   it('marks the signed-in author\'s own comments, ignoring case', () => {
     expect(toQaComment(row, 'reviewer@x.org')).toMatchObject({ mine: true, kind: 'suggestion', anchorT: 12.5 });
     expect(toQaComment(row, 'other@x.org').mine).toBe(false);
     expect(toQaComment(row, null).mine).toBe(false);
+  });
+  it('carries where a comment came from', () => {
+    expect(toQaComment(row, null).via).toBeNull();
+    expect(toQaComment({ ...row, via: 'claude' }, null).via).toBe('claude');
   });
 });
 

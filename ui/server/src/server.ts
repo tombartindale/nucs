@@ -8,9 +8,10 @@
 import { createReadStream, createWriteStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
-import { basename, extname, join, relative, resolve, sep } from 'node:path';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { fileURLToPath } from 'node:url';
 import cookie from '@fastify/cookie';
 import extractZip from 'extract-zip';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
@@ -23,6 +24,7 @@ import { SESSION_COOKIE } from './auth.js';
 import { Backups } from './backups.js';
 import { BadRequest, BcnError, Forbidden } from './errors.js';
 import { buildIcs, type IcsEvent } from './ics.js';
+import { INTERNAL_AS_HEADER, INTERNAL_HEADER, registerMcpRoutes } from './mcp.js';
 import { mimeType, withCharset } from './mime.js';
 import { MediaStore } from './media-store.js';
 import { computeModulePlan, moduleTopicsFor } from './planning.js';
@@ -45,6 +47,9 @@ const MODULE = '^[A-Z]{2}\\d{4}$';
 const ICS_PATH = /^\/api\/module\/[A-Z]{2}\d{4}\/plan\/[^/]+\/calendar\.ics$/;
 const PING_MS = 15_000;
 const ADMIN_EMAILS = new Set((process.env.ADMIN_EMAILS || '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean));
+// The Claude Desktop extension (ui/desktop-extension/), built by its own `npm run build`.
+const EXTENSION_PATH = process.env.NUCS_EXTENSION_PATH
+  || join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'desktop-extension', 'dist', 'nucs.mcpb');
 const SSE_BACKLOG = 4 * 1024 * 1024;  // a tab that falls this far behind is dropped; it resyncs on reconnect
 
 /** localhost, plus any hostnames in ALLOWED_HOSTS (comma-separated, e.g. beacon.example.org). */
@@ -108,6 +113,13 @@ export interface ServerOptions {
 // (the app needs to load far enough to show a login form). Every other /api/* route
 // requires a valid session cookie.
 const PUBLIC_PATHS = new Set(['/api/auth/request-link', '/api/auth/verify', '/api/auth/logout', '/api/auth/me']);
+// Routes that also take a personal API token (api-tokens.ts) in place of the session
+// cookie: the MCP endpoint, and the one upload the Claude Desktop extension makes for
+// import_from_disk. Nowhere else: a token is not a way into the rest of the API.
+const BEARER_PATHS = new Set(['/mcp', '/api/intake/upload']);
+
+/** Who a request acts as, and whether it came through Claude (the MCP endpoint). */
+type Who = FastifyRequest & { email?: string; via?: 'claude' };
 
 export async function buildServer({ app, staticDir, testDisableAuth }: ServerOptions): Promise<FastifyInstance> {
   // Live event streams never finish by themselves, so closing must not wait for them.
@@ -125,11 +137,33 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   f.removeAllContentTypeParsers();
   f.addContentTypeParser('*', (_req, payload, done) => done(null, payload));
 
+  // MCP tools call this API in-process (fastify.inject, see mcp.ts) as the token's owner.
+  // They prove it with this secret, made fresh on every start and never sent anywhere; a
+  // request from outside that carries the header with any other value is refused.
+  const internalSecret = randomBytes(32).toString('hex');
+  const isInternal = (v: unknown) => typeof v === 'string' && v.length === internalSecret.length
+    && timingSafeEqual(Buffer.from(v), Buffer.from(internalSecret));
+
   f.addHook('onRequest', async (req, reply) => {
     if (!allowed(req)) return reply.code(403).send({ error: 'Requests are accepted from localhost only.' });
     reply.header('Cache-Control', 'no-store');
     reply.header('X-Content-Type-Options', 'nosniff');
     const path = (req.raw.url || '').split('?')[0];
+    const who = req as Who;
+    if (req.headers[INTERNAL_HEADER] !== undefined) {
+      if (!isInternal(req.headers[INTERNAL_HEADER])) return reply.code(403).send({ error: 'Forbidden.' });
+      who.email = String(req.headers[INTERNAL_AS_HEADER] || '');
+      who.via = 'claude';
+      return;
+    }
+    if (BEARER_PATHS.has(path) && req.headers.authorization) {
+      const email = await app.tokens.verify(req.headers.authorization, testDisableAuth);
+      if (!email) return reply.code(401).send({ error: 'This NUCS API token is not valid, or has been revoked.' });
+      who.email = email;
+      who.via = 'claude';
+      return;
+    }
+    if (path === '/mcp') return reply.code(401).send({ error: 'A NUCS API token is required (Authorization: Bearer nucs_...).' });
     // The ICS feed is fetched by calendar clients (Outlook, Apple Calendar), which cannot
     // send a session cookie. It carries its own per-module secret token instead, checked
     // inside the route handler itself — this carve-out is a single literal route shape and
@@ -437,7 +471,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const anchorLine = data.anchorLine ?? null;
     if (anchorLine !== null && (!Number.isInteger(anchorLine) || anchorLine < 1)) throw new BadRequest('anchorLine must be a line number.');
     const item = await qaItem(req.params.item);
-    await app.db.addQaComment({ item: item.item, body, kind, anchor_t: anchorT, anchor_line: anchorLine, by: await whoAmI(req) });
+    await app.db.addQaComment({ item: item.item, body, kind, anchor_t: anchorT, anchor_line: anchorLine, by: await whoAmI(req), via: (req as Who).via ?? null });
     qaChanged(item.item);
     return qaDetail(req, item.item);
   });
@@ -565,6 +599,47 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     return job ?? reply.code(404).send({ error: 'No such job, or it has already finished.' });
   });
 
+  // -- Claude: personal API tokens and the MCP endpoint (api-tokens.ts, mcp.ts) ---------------
+  /** A job's "by": the signed-in person when there is one (always, through Claude), else the operator pref. */
+  async function jobBy(req: FastifyRequest): Promise<string> {
+    return (req as Who).email || (await app.operator());
+  }
+  /** A job label's source part, marked when the request came through Claude. */
+  function viaLabel(req: FastifyRequest, source: string): string {
+    return (req as Who).via === 'claude' ? `${source} via Claude` : source;
+  }
+  /** Token management is for a person in the app, never for Claude acting through a token. */
+  function tokenOwner(req: FastifyRequest): string {
+    const who = req as Who;
+    if (who.via) throw new Forbidden('API tokens can only be managed from the NUCS app.');
+    if (who.email) return who.email;
+    if (testDisableAuth) return 'test@localhost';
+    throw new Forbidden();
+  }
+
+  f.get('/api/tokens', async (req) => ({ tokens: await app.tokens.list(tokenOwner(req)) }));
+  f.post('/api/tokens', async (req) => {
+    const owner = tokenOwner(req);
+    const data = await readJson(req);
+    return app.tokens.create(owner, typeof data.name === 'string' ? data.name : '');
+  });
+  f.delete('/api/tokens/:id', async (req: Req, reply) => {
+    const owner = tokenOwner(req);
+    if (!(await app.tokens.revoke(req.params.id, owner, isAdmin(req)))) return reply.code(404).send({ error: 'No such token.' });
+    return { ok: true };
+  });
+  // What the Connect Claude Desktop dialog shows: where /mcp is, and whether the extension was built.
+  f.get('/api/mcp/info', async () => ({
+    url: `${app.auth.baseUrl}/mcp`, extension: existsSync(EXTENSION_PATH),
+  }));
+  f.get('/api/mcp/extension', async (_req, reply) => {
+    if (!existsSync(EXTENSION_PATH)) return reply.code(404).send({ error: 'The Claude Desktop extension has not been built on this server.' });
+    reply.header('Content-Type', 'application/zip');
+    reply.header('Content-Disposition', 'attachment; filename="nucs.mcpb"');
+    return reply.send(createReadStream(EXTENSION_PATH));
+  });
+  registerMcpRoutes(f, internalSecret);
+
   // A path this process itself staged under dataDir/intake/ a moment ago (a paste, an
   // uploaded batch zip, or an uploaded assets zip) — never one the browser can point
   // anywhere else, since `assets`/`from` are passed straight to bcn as a filesystem path.
@@ -586,7 +661,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const args: JobArgs = { from: file, dry_run: Boolean(data.dry_run) };
     if (data.replace) args.replace = true;
     if (data.assets) args.assets = stagedIntakePath(String(data.assets));
-    const job = await app.jobs.submit('intake', [target], args, `intake${args.dry_run ? ' (check only)' : ''} · paste`, await app.operator());
+    const job = await app.jobs.submit('intake', [target], args, `intake${args.dry_run ? ' (check only)' : ''} · ${viaLabel(req, 'paste')}`, await jobBy(req));
     return reply.code(202).send(job);
   });
 
@@ -607,7 +682,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const args: JobArgs = { from: file, dry_run: req.query.dry_run === '1' };
     if (req.query.replace === '1') args.replace = true;
     if (req.query.assets) args.assets = stagedIntakePath(String(req.query.assets));
-    const job = await app.jobs.submit('intake', [target], args, `intake${args.dry_run ? ' (check only)' : ''} · ${name}`, await app.operator());
+    const job = await app.jobs.submit('intake', [target], args, `intake${args.dry_run ? ' (check only)' : ''} · ${viaLabel(req, name)}`, await jobBy(req));
     return reply.code(202).send(job);
   });
 

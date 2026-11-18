@@ -4,6 +4,7 @@ import { existsSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileS
 import { homedir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import type { CodeInfo, DoctorEnvelope, JobArgs, JobSummary, Queried } from '@beacon/shared';
+import { ApiTokens } from './api-tokens.js';
 import { Auth, authOptionsFromEnv } from './auth.js';
 import { Bcn } from './bcn.js';
 import { Bus, type EventBus } from './bus.js';
@@ -79,6 +80,7 @@ export class App {
   readonly jobs: JobQueue;
   readonly watcher: Watcher;
   readonly auth: Auth;
+  readonly tokens: ApiTokens;
   doctor: Queried<DoctorEnvelope> | null = null;
   codes: CodeInfo[] = [];
   /** Commands bcn can carry to a runner (bcn bundle specs); the only ones routing may send there. */
@@ -96,6 +98,7 @@ export class App {
     this.jobs = new JobQueue(db, this.bus);
     this.watcher = new Watcher(this.root, (reason) => { void this.status.refresh(reason); });
     this.auth = new Auth(db, authOptionsFromEnv());
+    this.tokens = new ApiTokens(db, (email) => this.auth.allows(email));
     // The worker running a job publishes its completion on the bus (Redis, if the worker is
     // a separate process) rather than calling back into this process directly.
     this.bus.subscribe((ev) => {

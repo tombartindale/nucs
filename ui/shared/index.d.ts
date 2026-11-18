@@ -302,12 +302,21 @@ export interface QaComment {
   by: string; at: string; resolved: boolean; resolvedBy: string | null; resolvedAt: string | null;
   /** Written by the signed-in user (so they may delete it). */
   mine: boolean;
+  /** 'claude': written through Claude (the MCP endpoint) on that person's behalf. */
+  via: 'claude' | null;
 }
 export interface QaListResponse { items: QaItem[] }
 export interface QaItemResponse { item: QaItem; comments: QaComment[] }
 export interface QaStatusRequest { status: QaStatus }
 export interface QaCommentRequest { body: string; kind?: QaCommentKind; anchorT?: number | null; anchorLine?: number | null }
 export interface QaResolveRequest { resolved: boolean }
+
+/** A personal API token for Claude Desktop (GET/POST /api/tokens). The token itself only ever comes back from POST. */
+export interface ApiTokenInfo { id: string; name: string; created: string; lastUsed: string | null }
+export interface ApiTokensResponse { tokens: ApiTokenInfo[] }
+export interface ApiTokenCreated { id: string; name: string; token: string }
+/** GET /api/mcp/info: the MCP endpoint's address, and whether the Desktop extension is available to download. */
+export interface McpInfoResponse { url: string; extension: boolean }
 
 export interface ErrorResponse { error: string }
 

@@ -68,5 +68,6 @@ export function toQaComment(r: QaCommentRow, me: string | null): QaComment {
     anchorT: r.anchor_t, anchorLine: r.anchor_line, by: r.by, at: r.at,
     resolved: r.resolved, resolvedBy: r.resolved_by, resolvedAt: r.resolved_at,
     mine: !!me && r.by.toLowerCase() === me.toLowerCase(),
+    via: r.via === 'claude' ? 'claude' : null,
   };
 }
