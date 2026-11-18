@@ -38,3 +38,18 @@ def test_a_brief_missing_a_section_is_caught_whether_written_as_labels_or_headin
     inline = tmp_path / "inline.md"
     inline.write_text("# Assignment 1\n\nYou will see **What you submit** later.\n")
     assert len([d for d in validate_doc(inline, "a.md", required, {}) if d.code == "DOC_HEADING_MISSING"]) == len(required)
+
+
+def test_the_course_map_template_parses_with_its_extra_columns(tmp_path):
+    from bcn.coursemap import load_course_map
+
+    module = tmp_path / "KV7015"
+    module.mkdir()
+    (module / "course-map.md").write_text((TEMPLATES / "course-map.md").read_text())
+    cm = load_course_map(module)
+    assert [d.message for d in cm.diagnostics] == []
+    t1, t2 = cm.topics[:2]
+    assert (t1.unit, t1.code, t1.title, t1.minutes, t1.outcomes) == ("U01", "T01", "Turning a topic into a question", 12, ["LO1"])
+    assert t2.outcomes == ["LO1", "LO2"]
+    assert set(cm.outcomes) == {"LO1", "LO2"}
+    assert cm.readings["U01"].startswith("Course textbook")

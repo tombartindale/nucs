@@ -14,13 +14,10 @@ the unit page for students.
 **Interactive element.** Quiz, targeting the confusion between a topic and an
 answerable question.
 
-| Topic | Title | Minutes | Outcomes |
-| --- | --- | --- | --- |
-| U01-T01 | Turning a topic into a question | 12 | LO1 |
-| U01-T02 | Where the boundaries go | 12 | LO1, LO2 |
-
-*From the interview: "students arrive with a subject, not a question, and they
-can't see the difference."*
+| Topic | Title | Minutes | Outcomes | What it does | From the interview |
+| --- | --- | --- | --- | --- | --- |
+| U01-T01 | Turning a topic into a question | 12 | LO1 | Shows why a subject is not yet a question. | "students arrive with a subject, not a question, and they can't see the difference" |
+| U01-T02 | Where the boundaries go | 12 | LO1, LO2 | Sets the scope a question can realistically cover. | "they always try to answer everything at once" |
 
 ## Unit 2 — ...
 

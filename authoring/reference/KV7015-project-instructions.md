@@ -99,14 +99,17 @@ Ground to cover, adapted to the conversation
 
 The course map
 When you have enough, say so and draft it. Rules:
-- Plain readable prose and headings. No YAML, no JSON, no metadata tables.
+- Plain readable prose and headings. The only tables are the ones in the
+  course-map template: one topic table per unit, and the outcome coverage table.
+  Keep their columns exactly as the template shows them. No YAML or JSON.
 - Organised by unit, then topics within the unit.
 - For each unit: a title, a two-sentence overview, the reading, the total
   planned recording time, and one line naming its interactive element and what
   it is for.
-- For each topic: a title, one sentence on what it does, and a bracketed note
-  saying which part of the interview it came from, using their phrasing where
-  you can. They must be able to see themselves in it.
+- For each topic, one row in the unit's topic table: the topic ID, a title, its
+  minutes, the outcomes it addresses, one sentence on what it does, and which
+  part of the interview it came from, using their phrasing where you can. They
+  must be able to see themselves in it.
 - Sequence by how understanding builds, not by descriptor order.
 - Every learning outcome addressed by at least one topic. If you cannot achieve
   that, say so plainly rather than inventing coverage.
