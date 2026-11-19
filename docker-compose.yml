@@ -16,6 +16,9 @@ services:
 
   api:
     image: ${BEACON_IMAGE:-ghcr.io/tombartindale/nucs}:${BEACON_IMAGE_TAG:-latest}
+    # Node is not an init: without this, Chrome processes orphaned by bcn (bumpers, render,
+    # docpdf...) stay as zombies until the container's pids limit is hit and spawn fails EAGAIN.
+    init: true
     command: ["--root", "/data/programme", "--data-dir", "/data/ui-state", "--port", "8420", "--host", "0.0.0.0"]
     environment:
       DATABASE_URL: postgres://beacon:${POSTGRES_PASSWORD:-beacon}@postgres:5432/beacon
@@ -49,6 +52,9 @@ services:
 
   worker:
     image: ${BEACON_IMAGE:-ghcr.io/tombartindale/nucs}:${BEACON_IMAGE_TAG:-latest}
+    # Node is not an init: without this, Chrome processes orphaned by bcn (bumpers, render,
+    # docpdf...) stay as zombies until the container's pids limit is hit and spawn fails EAGAIN.
+    init: true
     entrypoint: ["node", "/app/ui/server/dist/worker.js"]
     environment:
       BEACON_ROOT: /data/programme
