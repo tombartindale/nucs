@@ -12,6 +12,9 @@
 services:
   runner:
     image: ${BEACON_IMAGE:-ghcr.io/tombartindale/nucs}:${BEACON_IMAGE_TAG:-latest}
+    # Node is not an init: without this, Chrome processes orphaned by bcn (bumpers, render,
+    # docpdf...) stay as zombies until the container's pids limit is hit and spawn fails EAGAIN.
+    init: true
     entrypoint: ["node", "/app/ui/server/dist/runner.js"]
     environment:
       NUCS_URL: ${NUCS_URL:?set NUCS_URL to the server's https address}
