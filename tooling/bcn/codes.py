@@ -133,6 +133,10 @@ CODES: dict[str, tuple[str, str]] = {
     "INTAKE_ASSET_AMBIGUOUS": ("warn", "An asset's filename matched more than one differing file in the source; the first was used."),
     "INTAKE_IMAGE_CORRUPT": ("error", "An image embedded in the markdown is damaged or cut off, so the topic was not written."),
     "INTAKE_IMAGE_EXTRACTED": ("info", "An image embedded in the markdown as a data: URI was extracted into the topic's assets/ (or matched one already there by content)."),
+    # --- project (Claude Project packs, new modules) ----------------------
+    "MODULE_CODE_INVALID": ("error", "A new module's code is not two capital letters and four digits."),
+    "MODULE_EXISTS": ("error", "A module with that code already exists, so it was not created."),
+    "PROJECT_SOURCE_MISSING": ("error", "The Claude Project instructions and templates (authoring/) are not installed."),
     # --- translation -----------------------------------------------------
     "XL_NOT_READY": ("error", "A topic is not ready to export for translation."),
     "XL_EXPORTED": ("info", "A topic was exported for translation."),

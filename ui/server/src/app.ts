@@ -63,6 +63,7 @@ export function jobLabel(command: string, targets: string[], args: JobArgs): str
   if (command === 'mark') what = `${args.clear ? 'untick' : 'mark'} ${args.mark}`;
   if (command === 'sync') what = `${args.pull ? 'pull from OneDrive' : 'push to OneDrive'}${args.prefer ? ' (keep chosen version)' : ''}`;
   if (command === 'translation') what = args.export ? 'translation export' : 'translation import';
+  if (command === 'project') return args.new ? `add module ${args.new}` : `Claude Project pack · ${targets.length === 1 ? targets[0] : `${targets.length} targets`}`;
   const scope = targets.length === 1 ? targets[0] : `${targets.length} targets`;
   return `${what} · ${scope === '.' ? 'programme' : scope}`;
 }

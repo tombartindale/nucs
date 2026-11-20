@@ -69,7 +69,17 @@ export interface ModuleSummary {
   course_map: boolean; documents: ModuleDocument[]; errors: number; title: string; unit_titles: Record<string, string>;
   /** The module's reading list (bcn readinglist), null if there's no course-map.md to build it from. */
   reading_list: DocPdfInfo | null;
+  /** The module's Claude Project pack (bcn project). */
+  claude_project: ClaudeProjectInfo | null;
 }
+/** A module's Claude Project pack: the instructions and templates for the module leader's Project.
+ *  `stale` once authoring/ has changed since it was made, so the Project needs updating. */
+export interface ClaudeProjectInfo {
+  exists: boolean; path: string; zip: string; version: string | null; current: string | null; stale: boolean | null;
+  generated: string | null; units: number | null; title: string | null;
+}
+/** POST /api/modules (admin only). */
+export interface NewModuleRequest { code: string; title?: string; units?: number }
 /** GET /api/theme: whether a custom theme (themes/custom/) has been uploaded and/or activated. */
 export interface ThemeStatus { uploaded: boolean; active: boolean; files: string[] }
 export interface StatusSummary {

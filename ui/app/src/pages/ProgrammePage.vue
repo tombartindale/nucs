@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Programme: the landing screen. Four numbers, then one row per module. Rows are links and nothing else.
 import { computed, onMounted, ref, watch } from 'vue';
-import type { Lang, Milestone, PlansSummaryResponse, TopicStatus } from '@beacon/shared';
+import { useRouter } from 'vue-router';
+import type { JobSummary, Lang, Milestone, NewModuleRequest, PlansSummaryResponse, TopicStatus } from '@beacon/shared';
 import { api } from '@/api';
 import PageHeader from '@/components/PageHeader.vue';
 import StateChip from '@/components/StateChip.vue';
@@ -10,6 +11,37 @@ import { markDone, published, publishedStale, readyToTranslate, recordingIn, scr
 import { useBeacon } from '@/stores/beacon';
 
 const beacon = useBeacon();
+const router = useRouter();
+
+// Add module (admin only): creates the module's folder and its Claude Project pack, then opens
+// the module with the Project checklist showing. The course map comes later, from the Project.
+const addOpen = ref(false);
+const adding = ref(false);
+const newModule = ref({ code: '', title: '', units: 10 });
+const codeOk = computed(() => /^[A-Z]{2}\d{4}$/.test(newModule.value.code.trim().toUpperCase()));
+function openAdd() { newModule.value = { code: '', title: '', units: 10 }; addOpen.value = true; }
+async function addModule() {
+  const code = newModule.value.code.trim().toUpperCase();
+  adding.value = true;
+  try {
+    const body: NewModuleRequest = { code, title: newModule.value.title.trim() || undefined, units: newModule.value.units };
+    const job = await api<JobSummary>('/api/modules', { method: 'POST', body });
+    beacon.trackJob(job);
+    const result = await beacon.awaitJob(job.id);
+    if (result.state !== 'done') {
+      const why = result.envelopes.flatMap((e) => e.diagnostics).find((d) => d.level === 'error')?.message;
+      beacon.toast(why ?? `${code} could not be added; see Jobs.`, true);
+      return;
+    }
+    await beacon.loadStatus();
+    addOpen.value = false;
+    await router.push({ path: `/module/${code}`, query: { project: '1' } });
+  } catch (e) {
+    beacon.toast((e as Error).message, true);
+  } finally {
+    adding.value = false;
+  }
+}
 
 // Delivery planning: the next at-risk milestone per module, for a producer scanning
 // across every module at once. Full per-topic detail lives on each module's own page.
@@ -122,7 +154,32 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `repeat(${STEPS.value.l
   <q-page padding class="page-max">
     <div v-if="!env" class="text-grey-7 q-pa-lg">Reading the programme…</div>
     <template v-else>
-      <PageHeader title="Programme" :sub="`${s.topics} topics across ${modules.length} modules`" />
+      <PageHeader title="Programme" :sub="`${s.topics} topics across ${modules.length} modules`">
+        <q-btn v-if="beacon.boot?.admin" outline dense no-caps icon="add" label="Add module" @click="openAdd" />
+      </PageHeader>
+
+      <q-dialog v-model="addOpen">
+        <q-card style="width: 480px; max-width: 95vw">
+          <q-card-section class="text-h6">Add a module</q-card-section>
+          <q-card-section class="q-pt-none column q-gutter-y-md">
+            <div class="text-body2">
+              Creates the module in NUCS and the Claude Project its leader is interviewed in: the instructions to paste and the
+              templates to upload. The course map comes later, from the Project.
+            </div>
+            <q-input v-model="newModule.code" outlined dense autofocus label="Module code" hint="e.g. KV7023" maxlength="6"
+              :error="!!newModule.code && !codeOk" error-message="Two letters and four digits"
+              @update:model-value="(v) => (newModule.code = String(v ?? '').toUpperCase())" />
+            <q-input v-model="newModule.title" outlined dense label="Title (optional)" maxlength="120" />
+            <q-input v-model.number="newModule.units" outlined dense type="number" min="1" max="30" label="Units"
+              hint="One unit is one week of study" />
+          </q-card-section>
+          <q-card-actions align="right">
+            <q-btn flat no-caps label="Cancel" v-close-popup />
+            <q-btn unelevated no-caps color="primary" label="Add module" :disable="!codeOk || !(newModule.units >= 1 && newModule.units <= 30)"
+              :loading="adding" @click="addModule" />
+          </q-card-actions>
+        </q-card>
+      </q-dialog>
 
       <div class="row q-col-gutter-md q-mb-md">
         <div v-for="k in kpis" :key="k.l" class="col-12 col-sm-6 col-md-3">
@@ -183,6 +240,7 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `repeat(${STEPS.value.l
               <StateChip v-if="m.cloud" kind="cloud" :label="`☁ ${m.cloud} cloud-only`" />
               <StateChip v-if="m.unreviewed" kind="warn" :label="`${m.unreviewed} to proofread`" />
               <StateChip v-if="m.errors" kind="error" :label="`module documents: ${plural(m.errors, 'error')}`" />
+              <StateChip v-if="m.claude_project?.stale" kind="warn" label="Claude Project out of date" />
             </q-item-section>
             <q-item-section v-if="onTrackChips[name]" side class="prog-track">
               <q-icon name="schedule" size="32px" :color="onTrackChips[name]!.kind === 'ok' ? 'positive' : 'negative'">

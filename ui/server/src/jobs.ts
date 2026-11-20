@@ -18,7 +18,7 @@ export const STALL_MS = 10_000;
 
 // What the browser may ask for. Anything else is refused.
 export const COMMANDS = new Set(['validate', 'render', 'script', 'bumpers', 'cues', 'caption', 'subtitles', 'compose', 'package', 'qa',
-  'review', 'intake', 'translation', 'transfer', 'sync', 'ack', 'mark', 'edit', 'docedit', 'qti', 'coursemap', 'docpdf', 'readinglist', 'media']);
+  'review', 'intake', 'translation', 'transfer', 'sync', 'ack', 'mark', 'edit', 'docedit', 'qti', 'coursemap', 'docpdf', 'readinglist', 'project', 'media']);
 export const FLAG_ARGS = ['force', 'no_bumpers', 'draft', 'dump_narration', 'accept', 'clear', 'applied', 'dry_run', 'export', 'pull', 'push', 'media', 'slides', 'nested', 'full', 'init', 'replace'];
 export const VALUE_ARGS: Record<string, RegExp> = {
   lang: /^(en|zh)$/,
@@ -51,9 +51,14 @@ export const VALUE_ARGS: Record<string, RegExp> = {
   // bcn media: only the browser-upload hand-off is offered to the UI (migrate and gc are CLI/admin operations).
   action: /^adopt$/,
   upload_key: /^[A-Za-z0-9_\/.-]{1,300}$/,  // an S3 staging key this server issued; bcn re-checks the prefix
+  // bcn project: `new` (a module to create) is server-supplied only, from the admin-only
+  // POST /api/modules; title and units shape the Claude Project pack's instructions.
+  new: /^[A-Z]{2}\d{4}$/,
+  title: /^[^\x00-\x1f]{1,120}$/,
+  units: /^([1-9]|[12]\d|30)$/,
 };
 // The order value arguments are passed to bcn in. Shared with the worker's argv builder.
-export const VALUE_ORDER = ['lang', 'theme', 'set', 'unset', 'item', 'correct', 'cue', 'caption_text', 'cues_json', 'from', 'assets', 'by', 'prefer', 'fingerprint', 'note', 'mark', 'expect_sha', 'doc', 'upload_key'];
+export const VALUE_ORDER = ['lang', 'theme', 'set', 'unset', 'item', 'correct', 'cue', 'caption_text', 'cues_json', 'from', 'assets', 'by', 'prefer', 'fingerprint', 'note', 'mark', 'expect_sha', 'doc', 'upload_key', 'new', 'title', 'units'];
 export const PIPELINE = new Set(['validate', 'render', 'script', 'bumpers', 'cues', 'subtitles', 'compose', 'package', 'qa']);
 
 /** Two targets overlap when one contains the other ('.' is the whole programme). */

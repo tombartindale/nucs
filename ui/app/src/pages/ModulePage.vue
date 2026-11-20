@@ -5,6 +5,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router';
 import type { JobSummary, LangState, ModulePlanResponse, StepState, TopicMark, TopicStatus } from '@beacon/shared';
+import ClaudeProjectDialog from '@/components/ClaudeProjectDialog.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import StagePips from '@/components/StagePips.vue';
 import StateChip from '@/components/StateChip.vue';
@@ -25,6 +26,9 @@ const state = reactive({
   force: false,
   filter: { wait: '', stale: false, blocked: false },
 });
+
+// The Claude Project dialog; opened straight away when arriving from Add module (?project=1).
+const projectOpen = ref(route.query.project === '1');
 
 const env = computed(() => beacon.status);
 const rows = computed(() => (env.value?.results || []).filter((r) => r.module === props.module));
@@ -470,6 +474,10 @@ async function sendReminder() {
         <q-btn v-if="assessments.length" outline dense no-caps icon="picture_as_pdf" label="Export assessment PDFs" @click="exportAssessmentPdfs">
           <q-tooltip max-width="320px">{{ STEP_HELP.docpdf }}</q-tooltip>
         </q-btn>
+        <q-btn outline dense no-caps icon="smart_toy" label="Claude Project" @click="projectOpen = true">
+          <q-badge v-if="m.claude_project?.stale" color="warning" floating>!</q-badge>
+          <q-tooltip>The instructions and templates for the module leader's Claude Project{{ m.claude_project?.stale ? ' (out of date)' : '' }}</q-tooltip>
+        </q-btn>
         <q-btn outline dense no-caps label="Run QA on module" @click="beacon.runJob('qa', [module], {})" />
         <template v-if="moduleMap">
           <q-btn-dropdown v-if="moduleMap.exists" split outline dense no-caps label="Module map" :to="`/edit-doc/${moduleMap.path}`">
@@ -560,6 +568,7 @@ async function sendReminder() {
           </q-btn-dropdown>
         </template>
       </PageHeader>
+      <ClaudeProjectDialog v-model="projectOpen" :module="module" />
 
       <q-expansion-item v-if="plan" icon="event" label="Delivery planning" class="q-mb-md planning-card"
         :header-class="plan.plan.onTrack === false ? 'text-negative' : undefined">

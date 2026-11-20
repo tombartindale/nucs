@@ -587,7 +587,7 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const data = await readJson(req);
     const command = String(data.command ?? '');
     const args: JobArgs = { ...((data.args && typeof data.args === 'object' ? data.args : {}) as JobArgs) };
-    for (const k of ['from', 'import', 'by']) delete args[k];  // server-supplied only
+    for (const k of ['from', 'import', 'by', 'new']) delete args[k];  // server-supplied only
     const targets = (Array.isArray(data.targets) ? data.targets : []).map((t) => app.targetRel(String(t)));
     const operator = await app.operator();
     if (command === 'review' || command === 'ack' || command === 'mark' || (command === 'cues' && (args.set || args.unset))) {
@@ -859,6 +859,22 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   const isAdmin = (req: Req) => testDisableAuth
     || ADMIN_EMAILS.has(String((req as FastifyRequest & { email?: string }).email ?? '').toLowerCase());
   const requireAdmin = (req: Req) => { if (!isAdmin(req)) throw new Forbidden('This is for administrators only.'); };
+
+  // -- adding a module (admin only) ---------------------------------------------------------------
+  // Creates the module's folder and renders its Claude Project pack (bcn project --new): the
+  // instructions and templates the producer puts in the module leader's Project. No course map
+  // is created; that is the Project's first output.
+  f.post('/api/modules', async (req: Req, reply) => {
+    requireAdmin(req);
+    const data = await readJson(req);
+    const code = String(data.code ?? '').trim().toUpperCase();
+    if (!/^[A-Z]{2}\d{4}$/.test(code)) throw new BadRequest('A module code is two letters and four digits, e.g. KV7023.');
+    const args: JobArgs = { new: code };
+    const title = String(data.title ?? '').trim();
+    if (title) args.title = title;
+    if (data.units !== undefined && data.units !== null && data.units !== '') args.units = Number(data.units);
+    return reply.code(202).send(await app.submitJob('project', ['.'], args, await app.operator()));
+  });
 
   // -- remote runners ---------------------------------------------------------------------------
   registerRunnerRoutes(f, app, media, readJson, (req) => requireAdmin(req as Req));

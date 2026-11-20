@@ -106,6 +106,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=ffmpeg-build /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 COPY --from=tooling /app/tooling /app/tooling
+# The Claude Project instructions and templates bcn project renders into each module's pack.
+COPY authoring /app/authoring
 COPY --from=ui-build /app/ui/server/dist ui/server/dist
 COPY --from=ui-build /app/ui/server/package.json ui/server/package.json
 COPY --from=ui-build /app/ui/server/bin ui/server/bin

@@ -1,6 +1,6 @@
 # Plan: module Claude Projects under version control, and NUCS in Claude Desktop
 
-Branch `mcp-desktop`. It is not merged or deployed. Status was last updated on 2026-11-19.
+Branch `mcp-desktop`. It is not merged or deployed. Status was last updated on 2026-11-20.
 
 ## Status
 
@@ -15,10 +15,10 @@ Branch `mcp-desktop`. It is not merged or deployed. Status was last updated on 2
 | 3 | `intake_check`/`intake_submit`, `import_from_disk`, the `import_tutor_content` prompt | Done | `00fc9c4`, `e3cf271` |
 | 3+ | `upload_subtitles_from_disk` (the result of the `srt-script-align` skill becomes the recorded SRT) | Done | `9cd6407` |
 | 4 | `docs/claude-desktop.md`: setup, tools, the developer-extension design | Done | `34ed63d` |
-| 5a | Current Project instructions, templates and skills brought into `authoring/` | Done (KV7015 is the reference copy) | `41b6bf4`, `184f21e` |
+| 5a | Current Project instructions, templates and skills brought into `authoring/` | Done; `authoring/instructions.md` is now generic (`{{module}}`, `{{module_name}}`, `{{units}}`) | `41b6bf4`, `184f21e` |
 | 5a | `bcn` aligned with the prompt: brief headings, course-map table, timings, image paths, no unit block | Done | `dec0806`…`aa7e406` |
-| 5b | `bcn pack` (Project pack plus `pack_version`), the stamp check in intake, `pack` in status | **Not started** | |
-| 6 | `bcn module --new`, `SETUP.md`, the Add-module UI, the Claude Project card, the stale badge | **Not started** | |
+| 5b/6 | `bcn project` (pack plus version, `--new` creates a module), `SETUP.md`, `claude_project` in status, empty modules listed, the Add-module dialog, the Claude Project dialog, the stale badges | Done | this commit |
+| 5b | The `nucs-pack` stamp in the assistant's output, and the stamp check in intake | **Not started** | |
 | – | Module developers using the extension | Designed, not built (see `docs/claude-desktop.md`) | |
 
 ### Not yet verified
@@ -29,7 +29,7 @@ Branch `mcp-desktop`. It is not merged or deployed. Status was last updated on 2
 ### Open questions
 - **Asset requests.** Should NUCS track them itself, as a per-topic tick list or as something that blocks render? The template is kept, but "we should not need it".
 - **Topic template.** Its example narration says "here on the left", which fails the deictic check, so it needs rewording.
-- **Other modules.** Another module's instructions are needed to confirm that only the module code differs between Projects. Until then a new module's Project is made by copying the KV7015 reference and replacing the module code.
+- **Other modules.** Another module's instructions are needed to confirm that only the module code (and unit count) differs between Projects. `bcn project` assumes so.
 
 ### Running it locally
 See the comment in `docker-compose.mcp-test.yml`, which is local only and not committed. It runs the branch as compose project `nucs-mcp` on :8421, beside the main dev stack.
@@ -57,41 +57,49 @@ Decisions made along the way:
 ## A. Project spec in git
 
 ### Layout
-- **`authoring/reference/KV7015-project-instructions.md`** is the prompt in use, kept as the reference copy.
-  - The generic `authoring/instructions.md` with placeholders (`{{module}}`, `{{module_title}}`, `{{pack_version}}`, `{{rules}}`, `{{module_notes}}`) comes with `bcn pack`.
-  - `{{rules}}` would be rendered from the effective config: forbidden words, the deictic list, word-count tolerance, required headings, activity types.
-- **`authoring/templates/`** holds the canonical templates. `tooling/tests/test_templates.py` keeps them passing `bcn`'s checks.
+- **`authoring/instructions.md`** is the interview prompt, made generic from the KV7015 Project's. Placeholders:
+  - `{{module}}`: the module code;
+  - `{{module_name}}`: the code, plus the title in brackets when one is given;
+  - `{{units}}`: the number of units.
+- **`authoring/templates/`** holds the canonical templates. Their worked examples are written for KV7015, and that code is replaced with the module's own code. `tooling/tests/test_templates.py` keeps them passing `bcn`'s checks.
 - **`authoring/reference/skills/`** holds `srt-script-align` and `md-embedded-image-extract`.
-- **Per-module extras** live in the programme root, not git: `KVxxxx/authoring.md`, for the paired module, assessment components and deadlines, and notes.
+- **The Docker image** carries `authoring/` at `/app/authoring`. `BCN_AUTHORING` overrides the location.
+- **Not done:** a `{{rules}}` placeholder rendered from config (forbidden words, the deictic list, word counts, headings), and a per-module `authoring.md` for notes.
 
-### `bcn pack <module|root>` (to do)
-- Writes `transfer/exports/<stamp>-<module>-project-pack.zip`, containing `instructions.md`, `knowledge/*.md` and `SETUP.md`.
-- `pack_version` is a short hash of the rendered instructions plus the templates.
-- Records what was issued in `KVxxxx/build/pack.json`.
-- The instructions tell the assistant to start every output with `<!-- nucs-pack: {{pack_version}} -->`.
-- Reuses `load`/`DEFAULTS` from `config.py`, and the batch naming and atomic writes from `transfer.py`.
+### `bcn project <module|root>` (done)
+- **Output.** It writes `<module>/build/claude-project/`, containing:
+  - `instructions.md`;
+  - `knowledge/*.md`;
+  - `SETUP.md`, the producer's checklist;
+  - `pack.json`, which records the version, units, title, files and producer documents.
 
-### "Add new module" (to do)
-- **`bcn module --new KV7023 --title "…"`**:
-  - validates the code and refuses one that exists;
-  - creates the folder and `authoring.md`;
-  - renders the pack.
-  - It creates no `course-map.md`, because that is the output of stage 1. `bcn status` must handle an empty module.
-- **`SETUP.md`**:
-  1. Create the Project.
-  2. Paste the instructions.
-  3. Upload the templates, plus three documents from the producer: the module descriptor, the validated learning outcomes, and the indicative reading list.
-  4. Share the Project with the developer.
-  5. Click "Project set up" in NUCS.
-- **UI**: an admin-only "Add module" button on the Programme page, backed by `POST /api/modules`. It shows the checklist with copy buttons and the knowledge zip.
+  It also writes `<module>/build/claude-project.zip`, which holds the templates.
+- **Version.** `version` is a short hash of the rendered instructions and templates.
+- **Unit count and title** come from, in order:
+  1. the arguments;
+  2. the last pack;
+  3. the course map;
+  4. a default of 10 units.
+- **`--new KV7023 [--title …] [--units N]`**, run against the programme root:
+  - creates the module folder;
+  - refuses a code that exists, comparing case-insensitively (`MODULE_EXISTS`), or a malformed code (`MODULE_CODE_INVALID`);
+  - creates no `course-map.md`.
+- **`bcn status`**:
+  - now lists every module folder, including an empty one;
+  - adds `claude_project: {exists, version, current, stale, …}` to each module.
+- **Server:**
+  - `POST /api/modules` (admin only) runs `project --new`;
+  - `new` is stripped from plain `/api/jobs` requests;
+  - the job is labelled `add module KV7023`.
+- **UI:**
+  - **Add module** on the Programme page (admin only) asks for the code, title and units, then opens the new module with the Claude Project dialog showing;
+  - the module page's **Claude Project** button opens a checklist for the Project. It gives the name to copy, the instructions to copy or download, the templates zip, the producer's three documents, and a share step. It also has an update button;
+  - "Claude Project out of date" badges appear on the module page and the Programme page.
 
-### Stamp check, status and UI (to do)
-- Intake reads and strips the `nucs-pack` comment.
+### Stamp check (to do)
+- The instructions would tell the assistant to start every output with `<!-- nucs-pack: <version> -->`.
+- Intake would read and strip that comment.
   - New codes: `INTAKE_PACK_STALE` (warn) and `INTAKE_PACK_MISSING` (info).
-- `bcn status` gains `pack: {issued, current, stale}` for each module. It's a new key; existing keys don't change.
-- **UI**:
-  - a "Claude Project" card on the module page: version, stale badge, download, and an `authoring.md` editor;
-  - a "Project out of date" badge on the programme grid.
 
 ### Embedded images in intake (done)
 - `bcn intake` rewrites `data:` image URIs to `assets/fig-N.<ext>`.
@@ -133,16 +141,9 @@ Decisions made along the way:
 
 Pilot it with one developer on one module first.
 
-## Verification still to write (for 5b and 6)
-- **`test_pack.py`**:
-  - the rules are rendered from config;
-  - the version changes with templates or rules.
-- **`test_module_new.py`**:
-  - the folder and `authoring.md` are created;
-  - a bad or existing code is refused;
-  - `SETUP.md` lists the three producer documents;
-  - status handles an empty module.
-- **`test_intake.py`**:
+## Verification
+- **Written:** `tooling/tests/test_project.py` and `ui/server/test/modules.test.ts`.
+- **Still to write, with the stamp check (`test_intake.py`):**
   - stale and missing stamps give the right codes;
   - the stamp is stripped;
   - an unstamped paste behaves as today.
