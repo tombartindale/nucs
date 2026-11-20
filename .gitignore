@@ -27,3 +27,5 @@ ui/app/.quasar/
 *.otf
 NU_Logo_Black.svg
 NU_Logo_White.svg
+tooling/themes/default-theme.zip
+tooling/themes/northumbria-theme.zip
