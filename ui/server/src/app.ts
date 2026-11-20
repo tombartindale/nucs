@@ -179,6 +179,18 @@ export class App {
     return rel;
   }
 
+  /** The narrowest module/unit/topic an import of `source` would write under, worked out by
+   *  bcn from the file names alone. An import job holds its whole target in the queue, so
+   *  aiming it at '.' would make it wait for every running job in the programme; this keeps
+   *  it to the part it actually touches. Falls back to '.' if bcn cannot tell. */
+  async importScope(source: string): Promise<string> {
+    try {
+      const env = await this.bcn.query<{ scope?: unknown }>('transfer', [this.root, '--import', source, '--plan']);
+      if (env.exit_code === 0 && typeof env.scope === 'string' && TARGET_RE.test(env.scope)) return env.scope;
+    } catch { /* fall through to the whole programme */ }
+    return '.';
+  }
+
   /** Submits a job from the browser, placed where the routing preference says (Prefs.routing).
    *  A job routed to runners is split into one job per topic, so several runners (or one
    *  runner's slots) work through a unit or module in parallel instead of one topic at a time. */

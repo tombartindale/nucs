@@ -449,3 +449,60 @@ def test_single_file_with_unknown_name_is_not_placed(tree, tmp_path, capsys):
     assert code == 1
     assert next(r for r in env["results"] if r["topic"] == "final-cut.mp4")["action"] == "unrecognized"
     assert not (_topic_dir(tree) / "edit").exists()
+
+
+# --plan: the narrowest existing target an import lands under, from the file names alone.
+# The UI aims the import job at this, so it only waits for jobs running on that part of the tree.
+
+def _plan(capsys, tree, zpath):
+    code, env = bcn(capsys, "transfer", str(tree), "--import", str(zpath), "--plan")
+    assert code == 0, env["diagnostics"]
+    return env["scope"]
+
+
+def _zip(tmp_path, *names):
+    zpath = tmp_path / "batch.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        for n in names:
+            z.writestr(n, "x")
+    return zpath
+
+
+def test_plan_single_topic_flat_and_nested(tree, tmp_path, capsys):
+    assert _plan(capsys, tree, _zip(tmp_path, "KV7015-U01-T01.md")) == "KV7015/U01/T01"
+    assert _plan(capsys, tree, _zip(tmp_path, "KV7015/U01/T01/topic.md")) == "KV7015/U01/T01"
+
+
+def test_plan_new_topic_narrows_to_its_existing_unit(tree, tmp_path, capsys):
+    # T02 does not exist yet, so the job cannot be aimed at it; its unit is the narrowest real target.
+    assert _plan(capsys, tree, _zip(tmp_path, "KV7015-U01-T02.md")) == "KV7015/U01"
+
+
+def test_plan_files_across_a_module_and_across_modules(tree, tmp_path, capsys):
+    assert _plan(capsys, tree, _zip(tmp_path, "KV7015-U01-T01.md", "KV7015-course-map.md")) == "KV7015"
+    assert _plan(capsys, tree, _zip(tmp_path, "KV7015-U01-T01.md", "KV7016-U01-T01.md")) == "."
+
+
+def test_plan_ignores_files_that_would_never_be_placed(tree, tmp_path, capsys):
+    # An unrecognised name or a manifest is not written anywhere, so must not widen the scope.
+    zpath = _zip(tmp_path, "KV7015-U01-T01.md", "README.txt", "manifest.json", "programme.toml")
+    assert _plan(capsys, tree, zpath) == "KV7015/U01/T01"
+
+
+def test_plan_places_nothing(tree, tmp_path, capsys):
+    _plan(capsys, tree, _zip(tmp_path, "KV7015-U01-T02.md"))
+    assert not (tree / "KV7015" / "U01" / "T02").exists()
+
+
+def test_import_validates_only_topics_within_its_target(tree, tmp_path, capsys):
+    # A sibling topic outside the import's target may be mid-write by another job; it must not be read.
+    (tree / "KV7015" / "U02" / "T01").mkdir(parents=True)
+    (tree / "KV7015" / "U02" / "T01" / "topic.md").write_text(topic_md("KV7015-U02-T01"))
+    zpath = tmp_path / "batch.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("KV7015-U01-T02.md", topic_md("KV7015-U01-T02", title="Another"))
+    code, env = bcn(capsys, "transfer", str(tree / "KV7015" / "U01"), "--import", str(zpath))
+    assert code == 0, env["diagnostics"]
+    validated = {v["topic"] for v in env["validated"]}
+    assert "KV7015-U01-T02" in validated, "a topic the import just created is validated"
+    assert "KV7015-U02-T01" not in validated
