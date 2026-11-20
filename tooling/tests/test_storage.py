@@ -11,7 +11,7 @@ import pytest
 boto3 = pytest.importorskip("boto3")
 moto = pytest.importorskip("moto")
 
-from bcn import fsutil, storage  # noqa: E402
+from bcn import fsutil, progress, storage  # noqa: E402
 from bcn.tree import Topic  # noqa: E402
 
 from .conftest import make_video  # noqa: E402
@@ -42,6 +42,23 @@ def keys(client) -> set[str]:
 def test_storage_off_without_bucket(tree, monkeypatch):
     monkeypatch.delenv("S3_MEDIA_BUCKET", raising=False)
     assert storage.remote(tree) is None
+
+
+def test_transfers_log_progress(tmp_path, capsys, s3, monkeypatch):
+    monkeypatch.setattr(storage, "METER_EVERY_S", 0.0)
+    monkeypatch.setattr(progress, "_quiet", False)  # an earlier `bcn --quiet` run leaves it set
+    st = storage.Store(tmp_path, BUCKET)
+    src = tmp_path / "src.mp4"
+    src.write_bytes(os.urandom(12 * 1024 * 1024))
+    dest = tmp_path / "M1" / "edit" / "master.mp4"
+    st.put(src, dest)
+    st.download(dest, tmp_path / "back.mp4")
+    events = [json.loads(line) for line in capsys.readouterr().err.splitlines() if line.startswith("{")]
+    for verb in ("uploading", "downloading"):
+        mine = [e for e in events if e.get("transfer") == verb]
+        assert mine[0]["message"] == f"{verb} M1/edit/master.mp4 (12.0 MB)"
+        assert any("%" in e["message"] for e in mine[1:-1])
+        assert mine[-1]["message"].startswith(f"{verb} M1/edit/master.mp4: done, 12.0 MB")
 
 
 def test_migrate_dry_run_then_apply(tree, capsys, s3):

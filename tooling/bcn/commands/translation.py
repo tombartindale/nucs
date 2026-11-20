@@ -262,7 +262,7 @@ def _import(env: Envelope, target: Target, source: str, args: argparse.Namespace
 
     if not placed and not placed_docs:
         return
-    # Check the whole batch at once: parity first, then SRT timings.
+    # Check the whole batch at once: slide parity, then the Mandarin subtitles.
     sub = Target(target.root, target.path, target.level, target.rel, target.modules, placed, [])
     for step, fn in (
         ("validate", lambda t, r, tp, cfg: validate_cmd.check_topic(t, r, tp, cfg, "zh")),
@@ -301,7 +301,7 @@ def _import(env: Envelope, target: Target, source: str, args: argparse.Namespace
         {"topic": d.topic, "code": d.code, "message": d.message}
         for r in results.values() for d in r.diagnostics
         if d.level == "error" and d.code in ("MD_PARITY_COUNT", "MD_PARITY_BREAK", "MD_SAY_IN_ZH", "MD_ZH_UNTRANSLATED",
-                                             "SRT_ZH_CUE_COUNT", "SRT_ZH_TIMING", "FS_MISSING")
+                                             "FS_MISSING")
     ] + [
         {"topic": r.topic, "code": d.code, "message": d.message}
         for r in doc_results.values() for d in r.diagnostics if d.level == "error"

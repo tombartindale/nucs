@@ -237,7 +237,7 @@ Both languages run through the same commands, but they are not symmetrical, and 
 
 **Overflow checking matters more, not less.** Chinese needs a larger point size for equivalent legibility and breaks lines without spaces, so text that fits in English will overflow. The overflow and safe-area checks in `render` are advisory for English and blocking for Mandarin.
 
-**The translated SRT must match the English one cue for cue.** When the Mandarin SRT comes back, check that it has the same number of cues with the same in and out times as the English. Different text, identical timings. Any divergence means the translator re-timed it, and the Mandarin video will drift against slides that were never re-cued.
+**The translated SRT may be split and re-timed.** Translators break up and re-time cues to suit Mandarin reading speed, and that is expected, so the Mandarin SRT's cue count and timings are not compared with the English. Slides cannot drift as a result: slide timing always comes from the English cue sheet, and the Mandarin SRT is only ever the subtitle track. The composed Mandarin video goes through a human QA review instead. The one automatic check kept is for a cue left in English, matched against any English cue rather than by position.
 
 **Every command takes `--lang`, and `status` reports per language.** A topic is not done because its English side is. `status` returns the state of both, so a UI can show that fifty topics are complete in English and none in Mandarin.
 

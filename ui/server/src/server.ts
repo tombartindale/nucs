@@ -785,7 +785,9 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const src = app.safePath(String(data.source ?? ''));
     const incoming = app.safePath('transfer/incoming');
     if (!src.startsWith(incoming + sep)) throw new Forbidden();
-    const target = app.targetRel(String(data.path || '.'));
+    // No explicit path: aim the job at just the part of the tree the files land in, so it
+    // only waits for jobs running there (--full is always the whole programme).
+    const target = data.path ? app.targetRel(String(data.path)) : data.full ? '.' : await app.importScope(src);
     const args: JobArgs = { import: src };
     if (data.dry_run) args.dry_run = true;
     if (data.full) args.full = true;

@@ -100,7 +100,8 @@ def topic_checks(t: Topic, r: TopicResult, cfg: Config, durations: Durations, as
             d("QA_UNREVIEWED_MISTRANSCRIPTION", f"{len(open_items)} suspected mis-transcriptions are unreviewed, e.g. \"{open_items[0]['srt']}\" for \"{open_items[0]['script']}\".",
               file="build/cues-report.json", hint="Review them in the Diagnostics view or with bcn review.")
 
-    # Mandarin variant: parity, identical timings, no overflow, no narration.
+    # Mandarin variant: slide parity, no overflow, no narration. Subtitle timings are the
+    # translator's to change (cues are split and re-timed for Mandarin), so not compared.
     if t.src("zh").is_file():
         vz = fsutil.read_json(t.step_file("validate", "zh"))
         if not vz or not fsutil.is_fresh([t.step_file("validate", "zh")], [t.src("zh"), src]):
@@ -111,15 +112,6 @@ def topic_checks(t: Topic, r: TopicResult, cfg: Config, durations: Durations, as
             r.diagnostics.extend(Diagnostic(x["code"], x["message"], topic=t.id, lang="zh", file=x.get("file"), line=x.get("line"),
                                             slide=x.get("slide"))
                                  for x in vz.get("diagnostics", []) if x["code"] in ("MD_PARITY_COUNT", "MD_PARITY_BREAK", "MD_SAY_IN_ZH") and x["level"] == "error")
-        if t.srt("zh").is_file() and t.srt("en").is_file():
-            try:
-                a, b = srt.parse_file(t.srt("zh"), "edit/master.zh.srt"), srt.parse_file(t.srt("en"), "edit/master.srt")
-                if len(a) != len(b):
-                    d("SRT_ZH_CUE_COUNT", f"The Mandarin SRT has {len(a)} cues; the English has {len(b)}.", lang="zh", file="edit/master.zh.srt")
-                elif any(abs(x.start - y.start) > 0.0015 or abs(x.end - y.end) > 0.0015 for x, y in zip(a, b)):
-                    d("SRT_ZH_TIMING", "The Mandarin SRT timings differ from the English.", lang="zh", file="edit/master.zh.srt")
-            except Fail as f:
-                r.diagnostics.append(f.diagnostic)
         rz = fsutil.read_json(t.step_file("render", "zh")) or {}
         flagged = sorted({x.get("slide") for x in rz.get("diagnostics", []) if x.get("code") in ("RENDER_OVERFLOW", "RENDER_SAFE_AREA")})
         if flagged:

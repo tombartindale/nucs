@@ -21,16 +21,62 @@ import contextlib
 import os
 import shutil
 import tempfile
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
 from . import fsutil
 from .envelope import Fail, sha256_file
+from .progress import log
 
 POINTER_SUFFIX = ".s3.json"
 MEDIA_SUFFIXES = (".mp4",)
 PRESIGN_SECONDS = 3600
+# Transfer progress goes to the job log at most this often, so a multi-GB master on a slow
+# link shows it is moving without flooding the log.
+METER_EVERY_S = 10.0
+
+
+def _human(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
+class _Meter:
+    """A boto3 transfer Callback that logs how far an upload/download has got. boto3 calls
+    it from its worker threads with the bytes moved since the last call."""
+
+    def __init__(self, verb: str, name: str, total: int | None) -> None:
+        self.verb, self.name, self.total = verb, name, total or 0
+        self.done = 0
+        self.t0 = self.last = time.monotonic()
+        self.lock = threading.Lock()
+        log(f"{verb} {name}" + (f" ({_human(self.total)})" if self.total else ""), transfer=verb, file=name)
+
+    def _rate(self, now: float) -> str:
+        return f"{_human(self.done / max(now - self.t0, 1e-3))}/s"
+
+    def __call__(self, n: int) -> None:
+        with self.lock:
+            self.done += n
+            now = time.monotonic()
+            if now - self.last < METER_EVERY_S:
+                return
+            self.last = now
+            pct = f"{100 * self.done / self.total:.0f}% " if self.total else ""
+            msg = (f"{self.verb} {self.name}: {pct}{_human(self.done)}"
+                   + (f" of {_human(self.total)}" if self.total else "") + f", {self._rate(now)}")
+        log(msg, transfer=self.verb, file=self.name, bytes=self.done, total=self.total or None)
+
+    def finish(self) -> None:
+        now = time.monotonic()
+        log(f"{self.verb} {self.name}: done, {_human(self.done)} in {now - self.t0:.0f}s ({self._rate(now)})",
+            transfer=self.verb, file=self.name, bytes=self.done, total=self.total or None)
 
 
 def pointer_path(p: Path) -> Path:
@@ -148,7 +194,10 @@ class Store:
         does not make every step that was fresh against it look stale."""
         sha = sha256 or sha256_file(local)
         expected = local.stat().st_size
-        self.client.upload_file(str(local), self.bucket, self.key(dest), ExtraArgs={"ContentType": "video/mp4"})
+        meter = _Meter("uploading", self.rel(dest), expected)
+        self.client.upload_file(str(local), self.bucket, self.key(dest), ExtraArgs={"ContentType": "video/mp4"},
+                                Callback=meter)
+        meter.finish()
         head = self.head(dest)
         if head is None or int(head["ContentLength"]) != expected:
             raise Fail("TOOL_FAILED", f"Upload of {self.rel(dest)} did not verify (size mismatch).", file=self.rel(dest))
@@ -220,7 +269,9 @@ class Store:
             raise Fail("FS_MISSING", f"{self.rel(path)} is neither on disk nor in the bucket.", file=self.rel(path))
         to.parent.mkdir(parents=True, exist_ok=True)
         extra = {"VersionId": ptr["version_id"]} if ptr.get("version_id") else None
-        self.client.download_file(self.bucket, ptr["key"], str(to), ExtraArgs=extra)
+        meter = _Meter("downloading", self.rel(path), int(ptr["size"]) if ptr.get("size") is not None else None)
+        self.client.download_file(self.bucket, ptr["key"], str(to), ExtraArgs=extra, Callback=meter)
+        meter.finish()
         if to.stat().st_size != int(ptr["size"]):
             raise Fail("TOOL_FAILED", f"Download of {self.rel(path)} came back the wrong size.", file=self.rel(path))
 

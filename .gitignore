@@ -29,3 +29,5 @@ NU_Logo_Black.svg
 NU_Logo_White.svg
 # Claude Desktop extension build output (npm run build -w desktop-extension)
 ui/desktop-extension/dist/
+tooling/themes/default-theme.zip
+tooling/themes/northumbria-theme.zip

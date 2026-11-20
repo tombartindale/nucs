@@ -46,7 +46,7 @@ from ..markdown import parse
 from ..progress import CANCEL, Progress
 from ..runner import run_topics
 from ..sync import local_to_remote, remote_to_local
-from ..tree import MODULE_RE, Target, is_noise
+from ..tree import MODULE_RE, TOPIC_RE, UNIT_RE, Target, is_noise
 from ..tree import resolve as resolve_target
 from . import validate as validate_cmd
 
@@ -77,6 +77,9 @@ def add_args(p: argparse.ArgumentParser) -> None:
                    help="root scope only: a disaster-recovery backup, not just content -- implies --media, and also "
                         "carries programme.toml and themes/custom/")
     p.add_argument("--dry-run", action="store_true", help="import: report what would happen, write nothing")
+    p.add_argument("--plan", action="store_true",
+                   help="import: read only the file names and report, as 'scope', the narrowest existing "
+                        "module/unit/topic every file would land under; place nothing")
     p.add_argument("--replace", action="store_true",
                    help="import: overwrite a file that already exists and differs, instead of refusing")
     p.add_argument("--init", action="store_true",
@@ -479,12 +482,14 @@ def _import(env: Envelope, target: Target, source: str, dry_run: bool, full: boo
             shutil.rmtree(tmp, ignore_errors=True)
 
     if touched_modules and not dry_run:
-        all_topics = []
-        for module in sorted(touched_modules):
-            try:
-                all_topics.extend(resolve_target(str(target.root / module)).topics)
-            except Fail:
-                continue
+        # Re-resolved (the import may have created topic folders) but kept within the
+        # target: the job queue only holds the target, so a topic outside it may be
+        # mid-write by another job, and validating it here would read a half-built topic.
+        try:
+            in_scope = resolve_target(str(target.path)).topics
+        except Fail:
+            in_scope = []
+        all_topics = [t for t in in_scope if t.module in touched_modules]
         if all_topics:
             sub = Target(target.root, target.path, target.level, target.rel, sorted(touched_modules), all_topics, [])
             step_env = Envelope("validate", target.rel, target.root)
@@ -492,7 +497,64 @@ def _import(env: Envelope, target: Target, source: str, dry_run: bool, full: boo
             env.extra["validated"] = [{"topic": sr.topic, "ok": sr.ok} for sr in step_env.results]
 
 
+def _source_names(src: Path) -> list[str]:
+    """The entry names an import would consider, as _import walks them, without
+    extracting anything: a zip's member list, a folder's files, or a single media file."""
+    if src.is_file() and src.suffix.lower() in MEDIA_SUFFIXES:
+        return [src.name]
+    if src.is_file() and src.suffix.lower() == ".zip":
+        with zipfile.ZipFile(src) as z:
+            return [m for m in z.namelist() if not m.endswith("/") and not is_noise(Path(m).name) and "__MACOSX" not in m]
+    if src.is_dir():
+        return [str(f.relative_to(src)) for f in sorted(src.rglob("*"))
+                if f.is_file() and not is_noise(f.name) and "__MACOSX" not in f.relative_to(src).parts]
+    raise Fail("USAGE", f"{src} must be a folder, a .zip, or a single .mp4/.srt file.")
+
+
+def plan_scope(root: Path, source: str) -> str:
+    """The narrowest existing module/unit/topic directory every placeable file in `source`
+    lands under, relative to the root ("." if they span modules, or none would be placed).
+    Files that would never be placed (unrecognised names, --full extras) do not count, so
+    a stray README in the zip does not widen the scope to the whole programme."""
+    src = Path(source).expanduser()
+    if not src.exists():
+        raise Fail("FS_MISSING", f"{source} does not exist.")
+    common: list[str] | None = None
+    for rel in _source_names(src):
+        if rel == "manifest.json" or rel.startswith(FULL_STATE_PREFIX) or rel == FULL_PROGRAMME_TOML or rel.startswith(FULL_THEME_PREFIX):
+            continue
+        module, inner = _module_of(rel)
+        local_rel = remote_to_local(module, inner) if module else None
+        if not module or not local_rel:
+            continue
+        # The file's own directory, as far down as it is a real unit/topic level.
+        dirs = [module]
+        for part, level_re in zip(local_rel.split("/")[:-1], (UNIT_RE, TOPIC_RE)):
+            if not level_re.fullmatch(part):
+                break
+            dirs.append(part)
+        if common is None:
+            common = dirs
+        else:
+            n = 0
+            while n < min(len(common), len(dirs)) and common[n] == dirs[n]:
+                n += 1
+            common = common[:n]
+        if not common:
+            return "."
+    parts = common or []
+    # A target has to exist to be resolved, and an import may be creating a new topic or unit.
+    while parts and not (root / Path(*parts)).is_dir():
+        parts = parts[:-1]
+    return "/".join(parts) or "."
+
+
 def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
+    if args.plan:
+        if args.export or args.full:
+            raise Fail("USAGE", "--plan only makes sense with --import (and not --full, which is always the whole programme).")
+        env.extra["scope"] = plan_scope(target.root, args.source)
+        return
     if args.export:
         _export(env, target, args.media, args.nested, args.full, args.slides)
     else:
