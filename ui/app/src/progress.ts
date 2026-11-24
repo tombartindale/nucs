@@ -43,3 +43,14 @@ export function published(r: TopicStatus, lang: Lang) {
   return !!st?.exists && st.ok !== false && !st.draft;
 }
 export const publishedStale = (r: TopicStatus, lang: Lang) => published(r, lang) && r[lang].steps.compose?.fresh === false;
+
+/** The topic's own intro/outro (bcn bumpers) for one language. bcn lists a row for every
+ *  bumper the programme needs (one set per frame size in [compose].default_layouts), so a
+ *  row that doesn't exist yet counts as out of date: compose has no topic bumper for that
+ *  size and falls back to [bumpers], or none. Shared by the module grid and the topic page
+ *  so they always agree. */
+export function bumperStatus(r: Pick<TopicStatus, 'artifacts'>, lang: Lang): 'ok' | 'stale' | 'none' {
+  const arts = r.artifacts.filter((a) => a.kind.startsWith('bumper') && a.lang === lang);
+  if (!arts.some((a) => a.exists)) return 'none';
+  return arts.some((a) => !a.exists || a.stale) ? 'stale' : 'ok';
+}

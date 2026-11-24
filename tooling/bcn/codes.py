@@ -107,7 +107,7 @@ CODES: dict[str, tuple[str, str]] = {
     "QUIZ_NOT_A_QUIZ": ("info", "The activity is not a quiz, so there is nothing to export."),
     "QUIZ_ZH_PARITY": ("error", "A translated quiz has a different question count, options, or correct answer(s) than the English."),
     # --- compose ---------------------------------------------------------
-    "COMPOSE_BUMPER": ("warn", "A bumper is configured but could not be used."),
+    "COMPOSE_BUMPER": ("warn", "A bumper is missing or out of date; the draft goes ahead without it."),
     "COMPOSE_NAME_TAG": ("warn", "The speaker's name tag could not be rendered; the video was composed without it."),
     "COMPOSE_NO_SPEAKER": ("info", "The course map names no speaker for the topic, so the video has no name tag."),
     # --- package ---------------------------------------------------------

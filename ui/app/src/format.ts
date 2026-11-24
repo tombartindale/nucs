@@ -28,8 +28,9 @@ export const STEP_HELP: Record<string, string> = {
     + 'Mandarin reuses the English timings.',
   subtitles: 'Prepare the subtitles for delivery, applying any approved fixes to misheard words (timings are never '
     + 'changed). For Mandarin, it checks the translator kept every timing exactly.',
-  compose: 'Build a draft video (slides with the presenter and subtitles burned in, in whichever layout(s) are '
-    + 'selected below) to check that the slides change at the right moments. For checking only; it is not delivered.',
+  compose: 'Build the final video: slides with the presenter, the intro and outro, at delivery quality, in each '
+    + 'layout the programme delivers, with a subtitle file beside it. Needs the slides (render) and the intro and '
+    + 'outro (bumpers) to be up to date. Tick draft for a quick preview instead.',
   package: 'Assemble the delivery folder: the video, slide images, subtitles, cue sheet and script, with '
     + 'checksums. Needs cues and subtitles to be done.',
   qa: 'Run every check on the topic, plus cross-checks: video length, files older than the script, and '

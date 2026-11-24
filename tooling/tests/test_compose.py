@@ -21,12 +21,31 @@ from .test_bumpers import _isolated_theme, _needs_tools
 from .test_cli import bcn
 
 
-def _build_up_to_cues(tree, capsys, t: Topic):
+def _write_programme(tree, default_layouts: list[str] | None = None, bumpers: bool = True) -> None:
+    """programme.toml, by default with a programme-wide intro/outro in [bumpers]: a full
+    compose refuses to run without bumpers, and a topic that hasn't run bcn bumpers uses these."""
+    lines = ['[programme]', 'name = "test"']
+    if bumpers:
+        for kind in ("intro", "outro"):
+            if not (tree / "bumpers" / f"{kind}.mp4").is_file():
+                make_video(tree / "bumpers" / f"{kind}.mp4", 1)
+        lines += ['', '[bumpers]', 'intro = "bumpers/intro.mp4"', 'outro = "bumpers/outro.mp4"']
+    if default_layouts:
+        lines += ['', '[compose]', 'default_layouts = [' + ', '.join(f'"{n}"' for n in default_layouts) + ']']
+    (tree / "programme.toml").write_text("\n".join(lines) + "\n")
+    from bcn import config
+    config._cache.clear()
+
+
+def _build_up_to_cues(tree, capsys, t: Topic, programme_bumpers: bool = True):
     """validate, render, then a real edited video and a matching SRT (same construction as
     test_cli.test_cues_end_to_end, one sentence per cue), so a genuine bcn cues run produces a
     high-confidence sheet. Everything compose needs, without re-testing the matching algorithm.
+    programme_bumpers: give the programme a [bumpers] intro/outro (see _write_programme).
     """
     _needs_tools(tree)
+    if programme_bumpers:
+        _write_programme(tree)
     bcn(capsys, "validate", str(t.dir))
     code, env = bcn(capsys, "render", str(t.dir))
     assert code == 0, env["diagnostics"]
@@ -79,11 +98,8 @@ def test_compose_full_mode_delivery_quality(tree, capsys):
     assert (v.width, v.height) == (widescreen["width"], widescreen["height"])
     assert abs(v.fps - cfg["delivery"]["fps"]) < 0.5
 
-    # No bumpers were made, so there is no offset and the sidecar's cues are unshifted.
-    assert r["body_offset"] == 0.0
-    cues = srt.parse_file(t.composed_srt("en"))
-    original = srt.parse_file(t.srt("en"))
-    assert [c.start for c in cues] == [c.start for c in original]
+    # The programme's [bumpers] intro is joined on, so the sidecar is shifted by its length.
+    assert r["bumpers"] == ["intro", "outro"] and r["body_offset"] > 0
 
 
 def test_compose_sidecar_shifted_by_intro_duration(tree, capsys):
@@ -165,7 +181,7 @@ def test_package_requires_full_compose(tree, capsys):
     assert (t.out / f"{t.id}.mp4").is_file()
     assert (t.out / f"{t.id}.en.srt").is_file()
     manifest = json.loads(t.manifest("en").read_text())
-    assert manifest["body_offset"] == 0.0
+    assert manifest["body_offset"] > 0
     assert "transcode" not in manifest and "transcoded" not in env["results"][0]
 
     delivered = srt.parse_file(t.out / f"{t.id}.en.srt")
@@ -227,11 +243,7 @@ def test_compose_multiple_layouts_in_one_run(tree, capsys):
     vertical_inset are added to [compose].default_layouts here first."""
     t = Topic(tree, "KV7015", "U01", "T01")
     _build_up_to_cues(tree, capsys, t)
-    (tree / "programme.toml").write_text(
-        '[programme]\nname = "test"\n\n[compose]\n'
-        'default_layouts = ["widescreen", "vertical_stacked", "vertical_inset"]\n')
-    from bcn import config
-    config._cache.clear()
+    _write_programme(tree, ["widescreen", "vertical_stacked", "vertical_inset"])
     code, env = bcn(capsys, "compose", str(t.dir), "--layout", "widescreen", "--layout", "vertical_stacked")
     assert code == 0, env["diagnostics"]
     r = env["results"][0]
@@ -306,10 +318,7 @@ def test_vertical_layout_uses_its_own_bumper_resolution(tree, capsys):
     is added to [compose].default_layouts here first."""
     t = Topic(tree, "KV7015", "U01", "T01")
     _build_up_to_cues(tree, capsys, t)
-    (tree / "programme.toml").write_text(
-        '[programme]\nname = "test"\n\n[compose]\ndefault_layouts = ["widescreen", "vertical_stacked"]\n')
-    from bcn import config
-    config._cache.clear()
+    _write_programme(tree, ["widescreen", "vertical_stacked"])
     _with_bumpers(tree, capsys, t)
     code, env = bcn(capsys, "compose", str(t.dir), "--layout", "vertical_stacked")
     assert code == 0, env["diagnostics"]
@@ -323,6 +332,89 @@ def test_vertical_layout_uses_its_own_bumper_resolution(tree, capsys):
     vs = cfg["compose"]["layouts"]["vertical_stacked"]
     vintro = probe(info, t.bumper("intro", "en", "1080x1920"))
     assert (vintro.width, vintro.height) == (vs["width"], vs["height"])
+
+
+def _errors(env) -> list[dict]:
+    return [d for d in env["diagnostics"] if d["level"] == "error"]
+
+
+def test_full_compose_refuses_without_bumpers(tree, capsys):
+    """A delivered video without an intro and outro is no use: with no topic bumpers and no
+    [bumpers] in programme.toml, a full compose refuses, and --no-bumpers is drafts only."""
+    t = Topic(tree, "KV7015", "U01", "T01")
+    _build_up_to_cues(tree, capsys, t, programme_bumpers=False)
+    code, env = bcn(capsys, "compose", str(t.dir))
+    assert code != 0
+    assert {d["code"] for d in _errors(env)} == {"STEP_PREREQUISITE"}
+    assert all("[bumpers]" in d["message"] for d in _errors(env))
+    assert not t.composed("en").is_file()
+
+    code, env = bcn(capsys, "compose", str(t.dir), "--no-bumpers")
+    assert code != 0 and _errors(env)[0]["code"] == "USAGE"
+
+
+def test_full_compose_refuses_stale_bumpers(tree, capsys):
+    """Editing the script after bcn bumpers ran leaves the intro's title out of date: a full
+    compose must not quietly drop it (or fall back to [bumpers]) and deliver anyway."""
+    t = Topic(tree, "KV7015", "U01", "T01")
+    _build_up_to_cues(tree, capsys, t)
+    _with_bumpers(tree, capsys, t)
+    for kind in ("intro", "outro"):
+        age(t.bumper(kind, "en"), 600)
+    code, env = bcn(capsys, "compose", str(t.dir))
+    assert code != 0
+    errors = _errors(env)
+    assert {d["file"] for d in errors} == {str(t.bumper(k, "en").relative_to(t.dir)) for k in ("intro", "outro")}, errors
+    assert all(d["code"] == "STEP_PREREQUISITE" and "older than" in d["message"] for d in errors)
+    assert not t.composed("en").is_file()
+
+
+def test_full_compose_refuses_missing_bumper_size(tree, capsys):
+    """Bumpers made before a vertical layout was added have no 1080x1920 variant: a full
+    compose at that size refuses rather than falling back to [bumpers] or none."""
+    t = Topic(tree, "KV7015", "U01", "T01")
+    _build_up_to_cues(tree, capsys, t)
+    _with_bumpers(tree, capsys, t)
+    assert not t.bumper("intro", "en", "1080x1920").is_file()
+    code, env = bcn(capsys, "compose", str(t.dir), "--layout", "vertical_stacked")
+    assert code != 0
+    errors = _errors(env)
+    assert {d["file"] for d in errors} == {str(t.bumper(k, "en", "1080x1920").relative_to(t.dir)) for k in ("intro", "outro")}, errors
+
+
+def test_draft_compose_warns_on_missing_bumper_size(tree, capsys):
+    """A draft goes ahead without the missing size's bumpers, with a warning for each."""
+    t = Topic(tree, "KV7015", "U01", "T01")
+    _build_up_to_cues(tree, capsys, t)
+    _with_bumpers(tree, capsys, t)
+    code, env = bcn(capsys, "compose", str(t.dir), "--layout", "vertical_stacked", "--draft")
+    assert code == 0, env["diagnostics"]
+    warned = [d for d in env["diagnostics"] if d["code"] == "COMPOSE_BUMPER"]
+    assert len(warned) == 2 and all(d["level"] == "warn" for d in warned), warned
+
+
+def test_draft_compose_without_any_bumpers_is_quiet(tree, capsys):
+    """A topic with no bumpers of its own and none in programme.toml drafts without a word."""
+    t = Topic(tree, "KV7015", "U01", "T01")
+    _build_up_to_cues(tree, capsys, t, programme_bumpers=False)
+    code, env = bcn(capsys, "compose", str(t.dir), "--draft")
+    assert code == 0, env["diagnostics"]
+    assert "COMPOSE_BUMPER" not in [d["code"] for d in env["diagnostics"]], env["diagnostics"]
+
+
+def test_rebuilt_bumpers_make_compose_stale(tree, capsys):
+    """compose's result counts its bumper clips as inputs, so rebuilding them sends status back
+    to compose."""
+    t = Topic(tree, "KV7015", "U01", "T01")
+    _build_up_to_cues(tree, capsys, t)
+    _with_bumpers(tree, capsys, t)
+    code, env = bcn(capsys, "compose", str(t.dir))
+    assert code == 0, env["diagnostics"]
+    for p in (t.composed("en"), t.composed_srt("en"), t.step_file("compose", "en")):
+        age(p, 60)
+    t.bumper("intro", "en").touch()
+    _, env = bcn(capsys, "status", str(t.dir))
+    assert env["results"][0]["en"]["steps"]["compose"]["fresh"] is False
 
 
 def test_compose_unknown_layout_fails(tree, capsys):
@@ -350,10 +442,7 @@ def test_package_delivers_extra_layouts_and_excludes_stale_ones(tree, capsys):
     ([compose].default_layouts), not every style sitting in the [compose.layouts] catalog."""
     t = Topic(tree, "KV7015", "U01", "T01")
     _build_up_to_cues(tree, capsys, t)
-    (tree / "programme.toml").write_text(
-        '[programme]\nname = "test"\n\n[compose]\ndefault_layouts = ["widescreen", "vertical_stacked"]\n')
-    from bcn import config
-    config._cache.clear()
+    _write_programme(tree, ["widescreen", "vertical_stacked"])
     code, env = bcn(capsys, "compose", str(t.dir), "--layout", "widescreen", "--layout", "vertical_stacked")
     assert code == 0, env["diagnostics"]
     # vertical_inset was never composed, so it's simply absent, not stale.

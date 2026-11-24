@@ -12,7 +12,7 @@ import StateChip from '@/components/StateChip.vue';
 import { api, ApiError, fileUrl } from '@/api';
 import { confirm } from '@/composables/confirm';
 import { fmtAgo, fmtMinutes, LANG_NAME, plural, STAGE_LABEL, STEP_HELP, topicPath } from '@/format';
-import { markDone, markImplied, translated } from '@/progress';
+import { bumperStatus, markDone, markImplied, translated } from '@/progress';
 import { useBeacon } from '@/stores/beacon';
 
 const BULK = ['validate', 'render', 'script', 'bumpers', 'cues', 'compose', 'package'];
@@ -131,13 +131,9 @@ const stepTip = (name: string, s: StepState | undefined, step?: string, l?: Lang
 // Bumpers isn't a pipeline step on the backend (no StepState, same as TopicActions.vue's own
 // 'bumpers' kind) — it's a tool derived from the bumper_card/bumper artifacts themselves, so it
 // never appears in stepKeys(). Spliced into the detail column list right before 'compose'
-// (which draws on it), the one place it actually sits in the pipeline.
-function bumperStatus(r: TopicStatus, lang: 'en' | 'zh'): 'ok' | 'stale' | 'none' {
-  const made = r.artifacts.filter((a) => a.kind.startsWith('bumper') && a.lang === lang && a.exists);
-  if (!made.length) return 'none';
-  return made.some((a) => a.stale) ? 'stale' : 'ok';
-}
-const BUMPER_WORD = { ok: 'made', stale: 'out of date (newer script than the bumpers)', none: 'not made yet (optional; compose can also run with --no-bumpers)' };
+// (which draws on it), the one place it actually sits in the pipeline. bumperStatus
+// (progress.ts) is the topic page's rule too, so a size not made yet shows here as well.
+const BUMPER_WORD = { ok: 'made', stale: 'out of date (newer script than the bumpers, or a layout size not made yet)', none: 'not made yet (optional; compose can also run with --no-bumpers)' };
 const bumperTip = (name: string, r: TopicStatus, lang: 'en' | 'zh') => `${name}: ${BUMPER_WORD[bumperStatus(r, lang)]}`;
 function detailCols(lang: 'en' | 'zh') {
   const keys = stepKeys(lang);
@@ -221,6 +217,7 @@ async function bulk(command: string) {
       { text: `This runs ${cli} on ${plural(ids.size, 'topic')} (${command === 'cues' ? 'English; Mandarin inherits cues' : LANG_NAME[state.lang]}), as ${plural(targets.length, 'invocation')}:`, strong: cli },
       { text: targets.join('  '), mono: true },
       force ? 'Force rebuilds topics whose outputs are already current.' : 'Topics whose outputs are already current are skipped.',
+      ...(command === 'compose' ? ['This makes the final, full-quality video with its intro and outro (not a draft). A topic whose slides or bumpers are out of date is refused: run render and bumpers first.'] : []),
     ],
   });
   if (ok) await beacon.runJob(command, targets, force ? { lang, force: true } : { lang });

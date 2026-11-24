@@ -275,7 +275,7 @@ class TopicState:
         render = self.step("render", "en", [src, theme_fi])
         cues = self.step("cues", "en", [src, srt, video, prog])
         subtitles = self.step("subtitles", "en", [srt, prog, src])
-        compose = self.step("compose", "en", [video, cues_csv, subs, *pngs])
+        compose = self.step("compose", "en", [video, cues_csv, subs, *pngs, *self._bumper_infos("en")])
         package = self.step("package", "en", [src, video, srt, cues_csv, *pngs, subs, prog])
 
         # Hand-set boundaries and corrections are compared by value, not by review.json's mtime.
@@ -365,7 +365,7 @@ class TopicState:
         subtitles = self.step("subtitles", "zh", [zsrt, srt, prog])
         render = self.step("render", "zh", [zsrc, theme_fi])
         # Mandarin's compose builds its own delivered video from the shared presenter footage.
-        compose = self.step("compose", "zh", [video, zsubs, *pngs])
+        compose = self.step("compose", "zh", [video, zsubs, *pngs, *self._bumper_infos("zh")])
         package = self.step("package", "zh", [zsrc, zsrt, *pngs, zsubs, en_manifest])
 
         exist = {
@@ -524,6 +524,25 @@ class TopicState:
             return "cloud" if states == {"cloud"} else "partial"
         return "local" if states else "unknown"
 
+    def _bumper_paths(self, lang: str) -> list[tuple[str, Path]]:
+        """Every bumper still and clip the programme needs for this language: one set per
+        distinct frame size among [compose].default_layouts (the programme's own active
+        layouts, not the full [compose.layouts] catalog), as bcn bumpers builds them."""
+        t = self.t
+        ws = self.ctx.cfg["compose"]["layouts"][DEFAULT_LAYOUT]
+        active_layouts = [self.ctx.cfg["compose"]["layouts"][name] for name in self.ctx.cfg["compose"]["default_layouts"]]
+        extra_res = sorted({f"{lo['width']}x{lo['height']}" for lo in active_layouts
+                            if (lo["width"], lo["height"]) != (ws["width"], ws["height"])})
+        out: list[tuple[str, Path]] = []
+        for res in (None, *extra_res):
+            out += [("bumper_card", t.bumper_card("intro", lang, res)), ("bumper_card", t.bumper_card("outro", lang, res)),
+                    ("bumper", t.bumper("intro", lang, res)), ("bumper", t.bumper("outro", lang, res))]
+        return out
+
+    def _bumper_infos(self, lang: str) -> list[FileInfo]:
+        """The bumper clips compose draws on, so rebuilding them makes a composed video stale."""
+        return [self.f(str(p.relative_to(self.t.dir)), p) for kind, p in self._bumper_paths(lang) if kind == "bumper"]
+
     def _artifacts(self) -> list[dict[str, Any]]:
         t = self.t
         rows = []
@@ -534,20 +553,10 @@ class TopicState:
                          "bytes": fi.size, "mtime": _iso(fi.mtime), "hydration": fi.hydration if fi.exists else None,
                          "stale": stale if fi.exists else None})
 
-        # Every distinct frame size among [compose].default_layouts (the programme's own
-        # active layouts, not the full [compose.layouts] catalog) beside widescreen's own: bcn
-        # bumpers builds a full-bleed variant per size (see bumpers.py), named with this tag.
-        ws = self.ctx.cfg["compose"]["layouts"][DEFAULT_LAYOUT]
-        active_layouts = [self.ctx.cfg["compose"]["layouts"][name] for name in self.ctx.cfg["compose"]["default_layouts"]]
-        extra_res = sorted({f"{lo['width']}x{lo['height']}" for lo in active_layouts
-                            if (lo["width"], lo["height"]) != (ws["width"], ws["height"])})
-
         def bumpers(lang: str) -> None:
             src = fsutil.mtime(t.src(lang)) or 0
-            for res in (None, *extra_res):
-                for kind, p in (("bumper_card", t.bumper_card("intro", lang, res)), ("bumper_card", t.bumper_card("outro", lang, res)),
-                                ("bumper", t.bumper("intro", lang, res)), ("bumper", t.bumper("outro", lang, res))):
-                    add(str(p.relative_to(t.dir)), p, lang, (fsutil.mtime(p) or 0) < src if storage.present(p) else None, kind=kind)
+            for kind, p in self._bumper_paths(lang):
+                add(str(p.relative_to(t.dir)), p, lang, (fsutil.mtime(p) or 0) < src if storage.present(p) else None, kind=kind)
 
         def stale_of(step: str, lang: str) -> bool | None:
             s = self.steps.get((step, lang))
