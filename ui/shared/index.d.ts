@@ -69,7 +69,17 @@ export interface ModuleSummary {
   course_map: boolean; documents: ModuleDocument[]; errors: number; title: string; unit_titles: Record<string, string>;
   /** The module's reading list (bcn readinglist), null if there's no course-map.md to build it from. */
   reading_list: DocPdfInfo | null;
+  /** The module's Claude Project pack (bcn project). */
+  claude_project: ClaudeProjectInfo | null;
 }
+/** A module's Claude Project pack: the instructions and templates for the module leader's Project.
+ *  `stale` once authoring/ has changed since it was made, so the Project needs updating. */
+export interface ClaudeProjectInfo {
+  exists: boolean; path: string; zip: string; version: string | null; current: string | null; stale: boolean | null;
+  generated: string | null; units: number | null; title: string | null;
+}
+/** POST /api/modules (admin only). */
+export interface NewModuleRequest { code: string; title?: string; units?: number }
 /** GET /api/theme: whether a custom theme (themes/custom/) has been uploaded and/or activated. */
 export interface ThemeStatus { uploaded: boolean; active: boolean; files: string[] }
 export interface StatusSummary {
@@ -302,12 +312,21 @@ export interface QaComment {
   by: string; at: string; resolved: boolean; resolvedBy: string | null; resolvedAt: string | null;
   /** Written by the signed-in user (so they may delete it). */
   mine: boolean;
+  /** 'claude': written through Claude (the MCP endpoint) on that person's behalf. */
+  via: 'claude' | null;
 }
 export interface QaListResponse { items: QaItem[] }
 export interface QaItemResponse { item: QaItem; comments: QaComment[] }
 export interface QaStatusRequest { status: QaStatus }
 export interface QaCommentRequest { body: string; kind?: QaCommentKind; anchorT?: number | null; anchorLine?: number | null }
 export interface QaResolveRequest { resolved: boolean }
+
+/** A personal API token for Claude Desktop (GET/POST /api/tokens). The token itself only ever comes back from POST. */
+export interface ApiTokenInfo { id: string; name: string; created: string; lastUsed: string | null }
+export interface ApiTokensResponse { tokens: ApiTokenInfo[] }
+export interface ApiTokenCreated { id: string; name: string; token: string }
+/** GET /api/mcp/info: the MCP endpoint's address, and whether the Desktop extension is available to download. */
+export interface McpInfoResponse { url: string; extension: boolean }
 
 export interface ErrorResponse { error: string }
 

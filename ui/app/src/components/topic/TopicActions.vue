@@ -8,6 +8,7 @@
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { StepState } from '@beacon/shared';
 import { fmtAgo, LANG_NAME, STEP_HELP } from '@/format';
+import { bumperStatus } from '@/progress';
 import { useBeacon } from '@/stores/beacon';
 import { TOPIC } from './context';
 
@@ -73,8 +74,10 @@ const emit = defineEmits<{ verify: [] }>();
 const t = inject(TOPIC)!;
 const beacon = useBeacon();
 const force = ref(false);
-const noBumpers = ref(true);
-const draftMode = ref(true);
+// Compose makes the full, delivered version unless draft is ticked; no bumpers is drafts only
+// (bcn compose refuses --no-bumpers without --draft).
+const noBumpers = ref(false);
+const draftMode = ref(false);
 const selectedLayouts = ref<string[]>([]);
 let seededLayouts = false;
 
@@ -132,14 +135,8 @@ function view(item: Item, lang: 'en' | 'zh') {
     // Reads topic.zh.md for the Mandarin title (bumpers.py: require_input(t, src, lang)), so
     // it is gated the same as the real Mandarin steps until translation has been returned.
     const waitingForTranslation = lang === 'zh' && !!s && s.stage_index < s.stages.indexOf('returned');
-    // arts is the programme's own active set (bcn state.py scopes bumper rows to
-    // [compose].default_layouts, not the full [compose.layouts] catalog), so a row that
-    // doesn't exist yet is something this programme actually needs built, not a style nobody
-    // asked for — it must count toward 'stale', not be silently dropped by the made filter.
-    const arts = (t.status.value?.artifacts || []).filter((a) => a.kind.startsWith('bumper') && a.lang === lang);
-    const made = arts.filter((a) => a.exists);
-    const missing = arts.some((a) => !a.exists);
-    const status = !made.length ? 'todo' : (made.some((a) => a.stale) || missing) ? 'stale' : 'done';
+    // The module grid's rule too (progress.ts): a size not made yet counts as out of date.
+    const status = ({ ok: 'done', stale: 'stale', none: 'todo' } as const)[bumperStatus({ artifacts: t.status.value?.artifacts || [] }, lang)];
     const ICON = { done: 'check_circle', stale: 'update', todo: 'radio_button_unchecked' } as const;
     const COLOR = { done: 'positive', stale: 'warning', todo: 'grey-6' } as const;
     const CAP = { done: '', stale: 'out of date', todo: 'optional' };
@@ -261,8 +258,10 @@ watch(rows, () => nextTick(measure));
 async function run(step: string, lang: 'en' | 'zh') {
   const args: Record<string, string | boolean | string[]> = { lang: step === 'cues' ? 'en' : lang };
   if (force.value) args.force = true;
-  if (step === 'compose' && noBumpers.value) args.no_bumpers = true;
-  if (step === 'compose' && draftMode.value) args.draft = true;
+  if (step === 'compose' && draftMode.value) {
+    args.draft = true;
+    if (noBumpers.value) args.no_bumpers = true;
+  }
   if (step === 'compose') args.layout = selectedLayouts.value;
   if (step === 'qa') delete args.lang;
   await beacon.runJob(step, [t.rel], args);
@@ -340,10 +339,10 @@ async function bumpers(lang: 'en' | 'zh') {
         <q-tooltip max-width="320px">Rebuild even if the result is already up to date. Normally a step is skipped when nothing it depends on has changed.</q-tooltip>
       </q-checkbox>
       <q-checkbox v-model="draftMode" dense label="draft">
-        <q-tooltip max-width="320px">{{ STEP_HELP.compose }} Much faster than a full compose; never delivered.</q-tooltip>
+        <q-tooltip max-width="320px">Make a quick draft instead (small, watermarked, subtitles burned in) to check that the slides change at the right moments. Much faster than a full compose; never delivered.</q-tooltip>
       </q-checkbox>
-      <q-checkbox v-model="noBumpers" dense label="no bumpers">
-        <q-tooltip max-width="320px">Leave the intro and outro off the video compose makes. Quicker, and the player's times then match the cue sheet exactly. Delivered files are unaffected.</q-tooltip>
+      <q-checkbox v-model="noBumpers" dense label="no bumpers" :disable="!draftMode">
+        <q-tooltip max-width="320px">Drafts only: leave the intro and outro off the draft. Quicker, and the player's times then match the cue sheet exactly. A full compose always has its intro and outro.</q-tooltip>
       </q-checkbox>
       <q-separator vertical class="q-mx-xs" />
       <span class="text-caption text-grey-7">layouts</span>

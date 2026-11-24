@@ -12,17 +12,15 @@ from bcn.cli import main
 
 ASSIGNMENT = """# Assignment 1: A research proposal
 
-## Brief
+**What you are asked to do.** Write a short proposal.
 
-Write a short proposal.
+**What you submit.** One PDF.
 
-## Outcomes
+**How it is judged.** Clarity of the question.
 
-LO1
+**Outcomes addressed.** LO1
 
-## Assessment criteria
-
-- Clarity of the question
+**Before attempting this.** Units 1 to 3.
 """
 
 COURSE_MAP = """# KV7015 Test module
@@ -82,8 +80,8 @@ def test_export_includes_a_ready_assignment_document(doc_only_module, capsys):
 
 
 def test_export_blocks_whole_batch_when_a_document_is_not_ready(doc_only_module, capsys):
-    # Missing the required "Outcomes"/"Assessment criteria" headings.
-    (doc_only_module / "KV7015" / "assignment-1.md").write_text("# Assignment 1\n\n## Brief\n\nDo it.\n")
+    # Missing every required section but the first.
+    (doc_only_module / "KV7015" / "assignment-1.md").write_text("# Assignment 1\n\n**What you are asked to do.** Do it.\n")
     code, env = bcn(capsys, "translation", str(doc_only_module / "KV7015"), "--export")
     assert code == 1  # XL_NOT_READY is an error-level diagnostic
     assert any(d["code"] == "XL_NOT_READY" for d in env["diagnostics"])

@@ -1,0 +1,51 @@
+{
+  "manifest_version": "0.3",
+  "name": "nucs",
+  "display_name": "NUCS",
+  "version": "1.0.0",
+  "description": "Connects Claude to NUCS: programme status, scripts, subtitles, module documents, Mandarin QA and content intake.",
+  "long_description": "Gives Claude read access to your NUCS programme (modules, topic scripts, subtitles, course maps, diagnostics), lets it add QA comments and verdicts on your behalf (marked \"via Claude\"), and lets it check and import module content from folders on this computer. Everything Claude writes is attributed to you. Create the API token in NUCS: account menu → Connect Claude Desktop.",
+  "author": { "name": "NUCS" },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.mjs", "${user_config.import_folders}"],
+      "env": {
+        "NUCS_URL": "${user_config.nucs_url}",
+        "NUCS_TOKEN": "${user_config.token}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "prompts_generated": true,
+  "user_config": {
+    "nucs_url": {
+      "type": "string",
+      "title": "NUCS address",
+      "description": "The address you open NUCS at, e.g. https://nucs.example.org",
+      "required": true
+    },
+    "token": {
+      "type": "string",
+      "title": "API token",
+      "description": "From NUCS: account menu → Connect Claude Desktop → Create token. Starts with nucs_.",
+      "sensitive": true,
+      "required": true
+    },
+    "import_folders": {
+      "type": "directory",
+      "title": "Folders NUCS may import from",
+      "description": "import_from_disk only reads inside these folders. Leave empty for your Downloads folder.",
+      "multiple": true,
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32"],
+    "runtimes": { "node": ">=18.0.0" }
+  },
+  "keywords": ["nucs", "teaching", "qa", "course production"],
+  "license": "UNLICENSED"
+}

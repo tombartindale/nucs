@@ -4,6 +4,7 @@ import { existsSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileS
 import { homedir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import type { CodeInfo, DoctorEnvelope, JobArgs, JobSummary, Queried } from '@beacon/shared';
+import { ApiTokens } from './api-tokens.js';
 import { Auth, authOptionsFromEnv } from './auth.js';
 import { Bcn } from './bcn.js';
 import { Bus, type EventBus } from './bus.js';
@@ -62,6 +63,7 @@ export function jobLabel(command: string, targets: string[], args: JobArgs): str
   if (command === 'mark') what = `${args.clear ? 'untick' : 'mark'} ${args.mark}`;
   if (command === 'sync') what = `${args.pull ? 'pull from OneDrive' : 'push to OneDrive'}${args.prefer ? ' (keep chosen version)' : ''}`;
   if (command === 'translation') what = args.export ? 'translation export' : 'translation import';
+  if (command === 'project') return args.new ? `add module ${args.new}` : `Claude Project pack · ${targets.length === 1 ? targets[0] : `${targets.length} targets`}`;
   const scope = targets.length === 1 ? targets[0] : `${targets.length} targets`;
   return `${what} · ${scope === '.' ? 'programme' : scope}`;
 }
@@ -79,6 +81,7 @@ export class App {
   readonly jobs: JobQueue;
   readonly watcher: Watcher;
   readonly auth: Auth;
+  readonly tokens: ApiTokens;
   doctor: Queried<DoctorEnvelope> | null = null;
   codes: CodeInfo[] = [];
   /** Commands bcn can carry to a runner (bcn bundle specs); the only ones routing may send there. */
@@ -96,6 +99,7 @@ export class App {
     this.jobs = new JobQueue(db, this.bus);
     this.watcher = new Watcher(this.root, (reason) => { void this.status.refresh(reason); });
     this.auth = new Auth(db, authOptionsFromEnv());
+    this.tokens = new ApiTokens(db, (email) => this.auth.allows(email));
     // The worker running a job publishes its completion on the bus (Redis, if the worker is
     // a separate process) rather than calling back into this process directly.
     this.bus.subscribe((ev) => {

@@ -13,7 +13,10 @@ Bumpers never change the cue sheet: the body is composed on its own timeline, wh
 cues.csv is correct as written, and the intro and outro are joined around it afterwards.
 The intro's duration is reported as body_offset, in the envelope and in the delivered
 manifest, so the sidecar SRT's shift is always traceable to a real number. The topic's
-own bumpers from bcn bumpers are used when current, else the files named in [bumpers].
+own bumpers from bcn bumpers are used, at every layout size; a topic that has none uses the
+files named in [bumpers]. A full compose refuses to run with a bumper missing or older than
+the script (and refuses --no-bumpers): a delivered video without its intro and outro is no
+use. A draft goes ahead without them, with a warning for each.
 """
 
 from __future__ import annotations
@@ -506,29 +509,49 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
     # size — compose's own re-encode below already letterboxes it safely if the aspect differs.
     widescreen = cfg["compose"]["layouts"][DEFAULT_LAYOUT]
     bumpers_by_size: dict[tuple[int, int], dict[str, Path]] = {}
+    if args.no_bumpers and not draft:
+        raise Fail("USAGE", "--no-bumpers is for drafts only: a delivered video always has its intro and outro.",
+                   topic=t.id, hint="Add --draft, or drop --no-bumpers.")
     if not args.no_bumpers:
         sizes_needed = {(layout["width"], layout["height"]) for layout in layouts.values()}
-        for (W, H) in sizes_needed:
-            res = None if (W, H) == (widescreen["width"], widescreen["height"]) else f"{W}x{H}"
+        res_of = {(W, H): None if (W, H) == (widescreen["width"], widescreen["height"]) else f"{W}x{H}" for (W, H) in sizes_needed}
+        # A topic that has run bcn bumpers uses its own, at every size; one that never has
+        # uses the programme-wide [bumpers] files instead.
+        has_own = any(t.bumper(kind, lang, res).is_file() for res in res_of.values() for kind in ("intro", "outro"))
+        rerun = f"bcn bumpers{' --lang ' + lang if lang != 'en' else ''}"
+        problems: list[tuple[str, str | None, str | None]] = []  # (message, file, hint)
+        for (W, H) in sorted(sizes_needed):
+            res = res_of[(W, H)]
             kinds: dict[str, Path] = {}
             for kind in ("intro", "outro"):
                 made = t.bumper(kind, lang, res)
-                if made.is_file():
-                    if fsutil.is_fresh([made], [t.src(lang)]):
-                        kinds[kind] = made
-                        continue
-                    r.diagnostics.append(Diagnostic("COMPOSE_BUMPER", f"The topic's {kind} ({W}x{H}) is older than {t.src(lang).name}; it is skipped.",
-                                                    topic=t.id, lang=lang, file=str(made.relative_to(t.dir)),
-                                                    hint=f"Run bcn bumpers{' --lang ' + lang if lang != 'en' else ''} again."))
-                rel = cfg["bumpers"][kind]
-                if rel:
-                    bumper_path = (t.root / rel).resolve()
-                    if not str(bumper_path).startswith(str(t.root.resolve())) or not bumper_path.is_file():
-                        r.diagnostics.append(Diagnostic("COMPOSE_BUMPER", f"The {kind} bumper '{rel}' does not exist inside the programme root; it is skipped.",
-                                                        topic=t.id, lang=lang, file="programme.toml"))
+                if has_own:
+                    if not made.is_file():
+                        problems.append((f"The topic has no {kind} at {W}x{H}.", str(made.relative_to(t.dir)), f"Run {rerun} again."))
+                    elif not fsutil.is_fresh([made], [t.src(lang)]):
+                        problems.append((f"The topic's {kind} ({W}x{H}) is older than {t.src(lang).name}.", str(made.relative_to(t.dir)),
+                                         f"Run {rerun} again."))
                     else:
-                        kinds[kind] = bumper_path
+                        kinds[kind] = made
+                    continue
+                rel = cfg["bumpers"][kind]
+                bumper_path = (t.root / rel).resolve() if rel else None
+                if bumper_path and str(bumper_path).startswith(str(t.root.resolve())) and bumper_path.is_file():
+                    kinds[kind] = bumper_path
+                elif rel:
+                    problems.append((f"The {kind} bumper '{rel}' does not exist inside the programme root.", "programme.toml", None))
+                elif not draft:  # a draft with no bumpers at all is fine
+                    problems.append((f"The topic has no {kind}, and programme.toml names no [bumpers] {kind}.", None, f"Run {rerun} first."))
             bumpers_by_size[(W, H)] = kinds
+        # A draft goes ahead without whatever is missing or out of date (a warning each); a
+        # delivered compose does not, because a full-quality video with the wrong intro or
+        # none is no use to anyone.
+        code = "COMPOSE_BUMPER" if draft else "STEP_PREREQUISITE"
+        found = [Diagnostic(code, m, topic=t.id, lang=lang, file=f, hint=h) for m, f, h in problems]
+        if found and not draft:
+            r.diagnostics.extend(found[1:])
+            raise Fail(code, found[0].message, topic=t.id, lang=lang, file=found[0].file, hint=found[0].hint)
+        r.diagnostics.extend(found)
 
     outputs = [(t.draft(lang, name) if draft else t.composed(lang, name)) for name in layouts]
     sidecar = None if (draft or burn_in) else t.composed_srt(lang)

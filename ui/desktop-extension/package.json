@@ -1,0 +1,20 @@
+{
+  "name": "@beacon/desktop-extension",
+  "private": true,
+  "version": "1.0.0",
+  "description": "NUCS for Claude Desktop: a one-click extension (.mcpb) that connects Claude Desktop to a NUCS server's MCP endpoint with a personal API token, and imports module content from this computer.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@anthropic-ai/mcpb": "2.1.2",
+    "esbuild": "0.28.2"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "fflate": "0.8.3",
+    "zod": "4.6.7"
+  }
+}

@@ -11,3 +11,5 @@ partner-examples.zip
 assets
 .git
 *.log
+ui/desktop-extension/dist
+ui/desktop-extension/build

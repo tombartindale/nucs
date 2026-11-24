@@ -99,6 +99,9 @@ RESULT_EXTRAS: dict[str, dict[str, Any]] = {
             "package": _str_or_null},
     "coursemap": {"pdf": _str_or_null},
     "readinglist": {"path": {"type": "string"}, "units": {"type": "integer"}, "entries": {"type": "integer"}},
+    "project": {"version": {"type": "string"}, "units": {"type": "integer"}, "title": _str_or_null,
+                "files": {"type": "array", "items": {"type": "string"}}, "producer_docs": {"type": "array", "items": {"type": "string"}},
+                "generated": {"type": "string"}, "path": {"type": "string"}, "zip": {"type": "string"}},
     "bumpers": {"title": {"type": "string"}, "logo": {"type": "boolean"}, "background_video": {"type": "boolean"},
                 "intro_seconds": {"type": "number"}, "outro_seconds": {"type": "number"}, "fps": {"type": "number"},
                 "variants": {"type": "array", "items": {"type": "object", "properties": {
@@ -120,6 +123,7 @@ TOP_EXTRAS: dict[str, dict[str, Any]] = {
     "transfer": {"batch": {"type": "string"}, "zip": {"type": "string"}, "file_count": {"type": "integer"},
                  "validated": {"type": "array"}},
     "qa": {"unit_minutes": {"type": "object"}},
+    "project": {"created": {"type": "string"}},
     "ack": {"acknowledged": {"type": "object"}},
     "edit": {"validation_ok": {"type": "boolean"}, "counts": {"type": "object"}, "diagnostics_are_validation": {"type": "boolean"}},
     "docedit": {"validation_ok": {"type": "boolean"}, "counts": {"type": "object"}, "diagnostics_are_validation": {"type": "boolean"}},

@@ -78,6 +78,7 @@ COPY ui/package.json ui/package-lock.json ./
 COPY ui/shared/package.json shared/
 COPY ui/server/package.json server/
 COPY ui/app/package.json app/
+COPY ui/desktop-extension/package.json desktop-extension/
 # --ignore-scripts: app's "postinstall" (quasar prepare) needs the app's source tree and
 # quasar.config.ts, neither copied in yet at this point (only package.json, so this layer
 # stays cached across source-only changes). Run the two deferred postinstalls explicitly,
@@ -87,6 +88,7 @@ RUN npm ci --no-audit --no-fund --ignore-scripts
 COPY ui/shared shared
 COPY ui/server server
 COPY ui/app app
+COPY ui/desktop-extension desktop-extension
 RUN npm rebuild esbuild
 RUN npm run postinstall --workspace=app
 RUN npm run build
@@ -104,6 +106,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=ffmpeg-build /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 COPY --from=tooling /app/tooling /app/tooling
+# The Claude Project instructions and templates bcn project renders into each module's pack.
+COPY authoring /app/authoring
 COPY --from=ui-build /app/ui/server/dist ui/server/dist
 COPY --from=ui-build /app/ui/server/package.json ui/server/package.json
 COPY --from=ui-build /app/ui/server/bin ui/server/bin
@@ -112,6 +116,8 @@ COPY --from=ui-build /app/ui/server/bin ui/server/bin
 # (which does not exist as a separate tree).
 COPY --from=ui-build /app/ui/node_modules ui/node_modules
 COPY --from=ui-build /app/ui/app/dist/spa ui/app/dist/spa
+# The Claude Desktop extension, served to signed-in users at /api/mcp/extension.
+COPY --from=ui-build /app/ui/desktop-extension/dist/nucs.mcpb ui/desktop-extension/dist/nucs.mcpb
 
 # A bare programme root with no modules, baked in so a fresh deployment's empty
 # /data/programme volume (Docker seeds a new named volume from the image's content at

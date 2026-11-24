@@ -108,6 +108,9 @@ export class Auth {
     return { email: row.email };
   }
 
+  /** Whether this address may sign in (the domain allowlist). API tokens re-check it on use. */
+  allows(email: string): boolean { return isAllowed(email, this.opts.allowedDomains); }
+
   async logout(sessionToken: string | undefined): Promise<void> {
     if (sessionToken) await this.db.pool.query('DELETE FROM sessions WHERE token=$1', [sessionToken]);
   }

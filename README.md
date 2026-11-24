@@ -4,6 +4,7 @@ Two applications, built from the specs in [spec/](spec/):
 
 - **`bcn`** ([tooling/](tooling/)): an offline Python CLI that turns approved topic markdown, an edited video and its SRT into the delivery package for the partner. Specified in [spec/tooling-spec.md](spec/tooling-spec.md).
 - **NUCS UI** ([ui/](ui/)): a local web app over `bcn`. It shows what is done, blocked and next across the whole programme, and runs `bcn` as jobs. Specified in [spec/ui-spec.md](spec/ui-spec.md).
+- **NUCS in Claude Desktop** ([docs/claude-desktop.md](docs/claude-desktop.md)): an MCP endpoint and a one-click Claude Desktop extension, so Claude can read NUCS, help with Mandarin QA, and check and import module content.
 
 The UI contains no pipeline logic. It calls `bcn` and renders the envelopes it returns.
 

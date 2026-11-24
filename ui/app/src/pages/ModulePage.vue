@@ -5,13 +5,14 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router';
 import type { JobSummary, LangState, ModulePlanResponse, StepState, TopicMark, TopicStatus } from '@beacon/shared';
+import ClaudeProjectDialog from '@/components/ClaudeProjectDialog.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import StagePips from '@/components/StagePips.vue';
 import StateChip from '@/components/StateChip.vue';
 import { api, ApiError, fileUrl } from '@/api';
 import { confirm } from '@/composables/confirm';
 import { fmtAgo, fmtMinutes, LANG_NAME, plural, STAGE_LABEL, STEP_HELP, topicPath } from '@/format';
-import { markDone, markImplied, translated } from '@/progress';
+import { bumperStatus, markDone, markImplied, translated } from '@/progress';
 import { useBeacon } from '@/stores/beacon';
 
 const BULK = ['validate', 'render', 'script', 'bumpers', 'cues', 'compose', 'package'];
@@ -25,6 +26,9 @@ const state = reactive({
   force: false,
   filter: { wait: '', stale: false, blocked: false },
 });
+
+// The Claude Project dialog; opened straight away when arriving from Add module (?project=1).
+const projectOpen = ref(route.query.project === '1');
 
 const env = computed(() => beacon.status);
 const rows = computed(() => (env.value?.results || []).filter((r) => r.module === props.module));
@@ -127,13 +131,9 @@ const stepTip = (name: string, s: StepState | undefined, step?: string, l?: Lang
 // Bumpers isn't a pipeline step on the backend (no StepState, same as TopicActions.vue's own
 // 'bumpers' kind) — it's a tool derived from the bumper_card/bumper artifacts themselves, so it
 // never appears in stepKeys(). Spliced into the detail column list right before 'compose'
-// (which draws on it), the one place it actually sits in the pipeline.
-function bumperStatus(r: TopicStatus, lang: 'en' | 'zh'): 'ok' | 'stale' | 'none' {
-  const made = r.artifacts.filter((a) => a.kind.startsWith('bumper') && a.lang === lang && a.exists);
-  if (!made.length) return 'none';
-  return made.some((a) => a.stale) ? 'stale' : 'ok';
-}
-const BUMPER_WORD = { ok: 'made', stale: 'out of date (newer script than the bumpers)', none: 'not made yet (optional; compose can also run with --no-bumpers)' };
+// (which draws on it), the one place it actually sits in the pipeline. bumperStatus
+// (progress.ts) is the topic page's rule too, so a size not made yet shows here as well.
+const BUMPER_WORD = { ok: 'made', stale: 'out of date (newer script than the bumpers, or a layout size not made yet)', none: 'not made yet (optional; compose can also run with --no-bumpers)' };
 const bumperTip = (name: string, r: TopicStatus, lang: 'en' | 'zh') => `${name}: ${BUMPER_WORD[bumperStatus(r, lang)]}`;
 function detailCols(lang: 'en' | 'zh') {
   const keys = stepKeys(lang);
@@ -217,6 +217,7 @@ async function bulk(command: string) {
       { text: `This runs ${cli} on ${plural(ids.size, 'topic')} (${command === 'cues' ? 'English; Mandarin inherits cues' : LANG_NAME[state.lang]}), as ${plural(targets.length, 'invocation')}:`, strong: cli },
       { text: targets.join('  '), mono: true },
       force ? 'Force rebuilds topics whose outputs are already current.' : 'Topics whose outputs are already current are skipped.',
+      ...(command === 'compose' ? ['This makes the final, full-quality video with its intro and outro (not a draft). A topic whose slides or bumpers are out of date is refused: run render and bumpers first.'] : []),
     ],
   });
   if (ok) await beacon.runJob(command, targets, force ? { lang, force: true } : { lang });
@@ -470,6 +471,10 @@ async function sendReminder() {
         <q-btn v-if="assessments.length" outline dense no-caps icon="picture_as_pdf" label="Export assessment PDFs" @click="exportAssessmentPdfs">
           <q-tooltip max-width="320px">{{ STEP_HELP.docpdf }}</q-tooltip>
         </q-btn>
+        <q-btn outline dense no-caps icon="smart_toy" label="Claude Project" @click="projectOpen = true">
+          <q-badge v-if="m.claude_project?.stale" color="warning" floating>!</q-badge>
+          <q-tooltip>The instructions and templates for the module leader's Claude Project{{ m.claude_project?.stale ? ' (out of date)' : '' }}</q-tooltip>
+        </q-btn>
         <q-btn outline dense no-caps label="Run QA on module" @click="beacon.runJob('qa', [module], {})" />
         <template v-if="moduleMap">
           <q-btn-dropdown v-if="moduleMap.exists" split outline dense no-caps label="Module map" :to="`/edit-doc/${moduleMap.path}`">
@@ -560,6 +565,7 @@ async function sendReminder() {
           </q-btn-dropdown>
         </template>
       </PageHeader>
+      <ClaudeProjectDialog v-model="projectOpen" :module="module" />
 
       <q-expansion-item v-if="plan" icon="event" label="Delivery planning" class="q-mb-md planning-card"
         :header-class="plan.plan.onTrack === false ? 'text-negative' : undefined">

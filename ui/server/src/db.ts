@@ -123,6 +123,21 @@ CREATE TABLE IF NOT EXISTS qa_comments (
     resolved_at TEXT
 );
 CREATE INDEX IF NOT EXISTS qa_comments_item ON qa_comments(item);
+-- Where a comment came from when it was not typed in the app: 'claude' for one written
+-- through the MCP endpoint (mcp.ts) on someone's behalf. NULL for the app's own.
+ALTER TABLE qa_comments ADD COLUMN IF NOT EXISTS via TEXT;
+-- Personal API tokens for the MCP endpoint (Claude Desktop). Each belongs to one signed-in
+-- person and acts as them; only the sha256 is stored, the token is shown once at creation.
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created TEXT NOT NULL,
+    last_used TEXT,
+    revoked BOOLEAN NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS api_tokens_email ON api_tokens(email);
 `;
 
 export const DEFAULT_PREFS: Prefs = {
@@ -174,6 +189,7 @@ export interface QaReviewRow {
 export interface QaCommentRow {
   id: number; item: string; body: string; kind: string; anchor_t: number | null; anchor_line: number | null;
   by: string; at: string; resolved: boolean; resolved_by: string | null; resolved_at: string | null;
+  via: string | null;
 }
 
 export class DB {
@@ -304,10 +320,10 @@ export class DB {
       [item, status, by, new Date().toISOString(), mtime]);
   }
 
-  async addQaComment(c: { item: string; body: string; kind: string; anchor_t: number | null; anchor_line: number | null; by: string }): Promise<QaCommentRow> {
+  async addQaComment(c: { item: string; body: string; kind: string; anchor_t: number | null; anchor_line: number | null; by: string; via?: string | null }): Promise<QaCommentRow> {
     const res = await this.pool.query<QaCommentRow>(
-      `INSERT INTO qa_comments(item, body, kind, anchor_t, anchor_line, by, at) VALUES($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [c.item, c.body, c.kind, c.anchor_t, c.anchor_line, c.by, new Date().toISOString()]);
+      `INSERT INTO qa_comments(item, body, kind, anchor_t, anchor_line, by, at, via) VALUES($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [c.item, c.body, c.kind, c.anchor_t, c.anchor_line, c.by, new Date().toISOString(), c.via ?? null]);
     return res.rows[0];
   }
 

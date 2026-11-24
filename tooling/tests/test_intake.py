@@ -154,3 +154,99 @@ def test_replace_with_dry_run_writes_nothing(tree, tmp_path, capsys):
     code, env = bcn(capsys, "intake", str(tree / "KV7015"), "--from", str(paste), "--replace", "--dry-run")
     assert env["results"][0]["action"] == "would_replace"
     assert (tree / "KV7015/U01/T01/topic.md").read_text() == before
+
+
+# -- images embedded as data: URIs -------------------------------------------------------------
+
+def png(seed: bytes) -> bytes:
+    """A real 1x1 PNG whose pixel depends on `seed`, so different seeds give different files."""
+    import struct
+    import zlib
+
+    def chunk(typ: bytes, body: bytes) -> bytes:
+        return struct.pack(">I", len(body)) + typ + body + struct.pack(">I", zlib.crc32(typ + body) & 0xFFFFFFFF)
+    import hashlib
+    pixel = bytes([0]) + hashlib.sha256(seed).digest()[:3]
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(pixel)) + chunk(b"IEND", b""))
+
+
+def _uri(data: bytes, kind: str = "png") -> str:
+    import base64
+    return f"data:image/{kind};base64,{base64.b64encode(data).decode()}"
+
+
+def with_embedded(topic_id: str, *images: bytes) -> str:
+    """topic_md(), with each image embedded (as a data: URI) on its first slide, in order."""
+    refs = "".join(f"![fig]({_uri(d)})\n\n" for d in images)
+    return topic_md(topic_id).replace("# Slide 1 heading\n\n", f"# Slide 1 heading\n\n{refs}", 1)
+
+
+def test_embedded_images_are_extracted_into_assets(tree, tmp_path, capsys):
+    src = tmp_path / "paste.md"
+    src.write_text(with_embedded("KV7015-U01-T02", png(b"image A"), png(b"image B"), png(b"image A")))
+    code, env = bcn(capsys, "intake", str(tree / "KV7015"), "--from", str(src))
+    assert code == 0, env["diagnostics"]
+    assets = tree / "KV7015/U01/T02/assets"
+    assert (assets / "fig-1.png").read_bytes() == png(b"image A")
+    assert (assets / "fig-2.png").read_bytes() == png(b"image B")
+    assert sorted(p.name for p in assets.iterdir()) == ["fig-1.png", "fig-2.png"]  # the repeat is not a third file
+    text = (tree / "KV7015/U01/T02/topic.md").read_text()
+    assert "data:image" not in text
+    assert text.count("](assets/fig-1.png)") == 2 and "](assets/fig-2.png)" in text
+    assert [d["code"] for d in env["diagnostics"]].count("INTAKE_IMAGE_EXTRACTED") == 2
+    assert not any(d["code"] == "MD_ASSET_MISSING" for d in env["diagnostics"])
+
+
+def test_embedded_images_match_existing_assets_by_content_not_position(tree, tmp_path, capsys):
+    # As in KV7015-U02-T05: the stored topic shows fig-02 before fig-01. A re-send that embeds
+    # the same two images must map each back to its own file by content, and so be unchanged.
+    assets = tree / "KV7015/U01/T02/assets"
+    assets.mkdir(parents=True)
+    (assets / "fig-01.png").write_bytes(png(b"first figure"))
+    (assets / "fig-02.png").write_bytes(png(b"second figure"))
+    stored = topic_md("KV7015-U01-T02").replace(
+        "# Slide 1 heading\n\n", "# Slide 1 heading\n\n![fig](assets/fig-02.png)\n\n![fig](assets/fig-01.png)\n\n", 1)
+    (tree / "KV7015/U01/T02/topic.md").write_text(stored)
+    src = tmp_path / "paste.md"
+    src.write_text(with_embedded("KV7015-U01-T02", png(b"second figure"), png(b"first figure")))
+    code, env = bcn(capsys, "intake", str(tree / "KV7015"), "--from", str(src))
+    assert env["results"][0]["action"] == "unchanged", env["results"][0]
+    assert sorted(p.name for p in assets.iterdir()) == ["fig-01.png", "fig-02.png"]
+
+    # A new image alongside them continues the numbering, padded the same way.
+    src.write_text(with_embedded("KV7015-U01-T02", png(b"second figure"), png(b"first figure"), png(b"third figure")))
+    code, env = bcn(capsys, "intake", str(tree / "KV7015"), "--from", str(src), "--replace")
+    assert env["results"][0]["action"] == "replaced"
+    assert (assets / "fig-03.png").read_bytes() == png(b"third figure")
+
+
+def test_embedded_images_dry_run_writes_nothing(tree, tmp_path, capsys):
+    src = tmp_path / "paste.md"
+    src.write_text(with_embedded("KV7015-U01-T02", png(b"image A")))
+    code, env = bcn(capsys, "intake", str(tree / "KV7015"), "--from", str(src), "--dry-run")
+    assert env["results"][0]["action"] == "would_write"
+    assert any(d["code"] == "INTAKE_IMAGE_EXTRACTED" for d in env["diagnostics"])
+    assert not (tree / "KV7015/U01/T02").exists() or not (tree / "KV7015/U01/T02/assets").exists()
+
+
+def test_a_damaged_embedded_image_refuses_the_topic(tree, tmp_path, capsys):
+    good = png(b"intact")
+    src = tmp_path / "paste.md"
+    src.write_text(with_embedded("KV7015-U01-T02", good[:-10]))  # cut off, as long pastes are
+    code, env = bcn(capsys, "intake", str(tree / "KV7015"), "--from", str(src))
+    assert env["results"][0]["action"] == "refused"
+    assert any(d["code"] == "INTAKE_IMAGE_CORRUPT" for d in env["diagnostics"])
+    assert not (tree / "KV7015/U01/T02/topic.md").exists()
+
+
+def test_embedded_image_type_comes_from_its_bytes_and_url_safe_base64_is_accepted(tree, tmp_path, capsys):
+    import base64
+    jpeg = b"\xff\xd8\xff\xe0" + b"jpeg body bytes" * 4
+    uri = "data:image/png;charset=utf-8;base64," + base64.urlsafe_b64encode(jpeg).decode().rstrip("=")
+    src = tmp_path / "paste.md"
+    src.write_text(topic_md("KV7015-U01-T02").replace("# Slide 1 heading\n\n", f"# Slide 1 heading\n\n![photo]({uri})\n\n", 1))
+    code, env = bcn(capsys, "intake", str(tree / "KV7015"), "--from", str(src))
+    assert code == 0, env["diagnostics"]
+    assert (tree / "KV7015/U01/T02/assets/fig-1.jpg").read_bytes() == jpeg
+    assert "![photo](assets/fig-1.jpg)" in (tree / "KV7015/U01/T02/topic.md").read_text()

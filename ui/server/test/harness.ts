@@ -15,6 +15,10 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Bcn } from '../src/bcn.js';
+import { Bus } from '../src/bus.js';
+import { DB } from '../src/db.js';
+import { Scheduler } from '../src/scheduler.js';
 
 export const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 export interface Backend {
@@ -36,7 +40,14 @@ function freePort(): Promise<number> {
   });
 }
 
-export async function startBackend(): Promise<Backend> {
+export interface BackendOptions {
+  /** Also run a job worker (in this process, as worker.ts would in a deployment), so jobs
+   *  submitted through the API actually run. Off by default: the contract suite pins the
+   *  API's behaviour without one. */
+  worker?: boolean;
+}
+
+export async function startBackend(opts: BackendOptions = {}): Promise<Backend> {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'beacon-contract-')));
   const root = join(base, 'root');
   const dataDir = join(base, 'data');
@@ -70,6 +81,16 @@ export async function startBackend(): Promise<Backend> {
     } catch { /* not listening yet */ }
     if (Date.now() > deadline) { await stop(); throw new Error(`backend did not start:\n${log}`); }
     await new Promise((r) => setTimeout(r, 300));
+  }
+  if (opts.worker) {
+    const db = new DB(process.env.DATABASE_URL!);
+    await db.init();
+    // The database is shared between test files: drop anything another run left queued.
+    await db.pool.query("DELETE FROM jobs WHERE state IN ('queued', 'running')");
+    const scheduler = new Scheduler(db, new Bus(), new Bcn([join(REPO, 'tooling', '.venv', 'bin', 'bcn')], root), root, () => db.prefs());
+    scheduler.start();
+    const stopBackend = stop;
+    return { url, port, root, dataDir, logs: () => log, stop: async () => { await scheduler.stop(); await db.close(); await stopBackend(); } };
   }
   return { url, port, root, dataDir, logs: () => log, stop };
 }

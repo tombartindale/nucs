@@ -36,5 +36,5 @@ intro = ""
 outro = ""
 
 [qa]
-unit_minutes_min = 85
-unit_minutes_max = 110
+unit_minutes_min = 45
+unit_minutes_max = 95

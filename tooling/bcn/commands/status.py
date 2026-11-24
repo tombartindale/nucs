@@ -26,6 +26,7 @@ from ..state import STAGES, TopicState, all_topics, module_context
 from ..tree import Target, Topic
 from .docpdf import activity_pdf_path, assignment_pdf_path, reading_list_pdf_path
 from .qti import package_path
+from .project import status_of as project_status
 from .validate import module_documents
 
 HELP = "current state of every topic beneath the path"
@@ -130,15 +131,19 @@ def verify_topic(t: Topic, data: dict[str, Any], r: TopicResult, theme: Theme | 
                     bad("FS_CHECKSUM_MISMATCH", rel, f"{rel} does not match its checksum in {mname}.")
 
 
+def empty_module() -> dict[str, Any]:
+    return {
+        "topics": 0, "units": [], "en": {s: 0 for s in STAGES["en"]}, "zh": {s: 0 for s in STAGES["zh"]},
+        "complete": {"en": 0, "zh": 0}, "blocked": 0, "stale": 0, "cloud": 0,
+        "diagnostics": {"error": 0, "warn": 0, "info": 0}, "unreviewed": 0,
+    }
+
+
 def summarise(results: list[dict[str, Any]]) -> dict[str, Any]:
     mods: dict[str, Any] = {}
     tot = Counter()
     for d in results:
-        m = mods.setdefault(d["module"], {
-            "topics": 0, "units": [], "en": {s: 0 for s in STAGES["en"]}, "zh": {s: 0 for s in STAGES["zh"]},
-            "complete": {"en": 0, "zh": 0}, "blocked": 0, "stale": 0, "cloud": 0,
-            "diagnostics": {"error": 0, "warn": 0, "info": 0}, "unreviewed": 0,
-        })
+        m = mods.setdefault(d["module"], empty_module())
         m["topics"] += 1
         if d["unit"] not in m["units"]:
             m["units"].append(d["unit"])
@@ -230,11 +235,12 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
             "title": module_title(ctx.course_map.path),
             "unit_titles": dict(ctx.course_map.units),
             "reading_list": _reading_list(target.root, m),
+            "claude_project": project_status(target.root, m),
         }
     env.extra["summary"] = summarise(rows)
+    # Every module folder is listed, including a new one with no topics or course map yet.
     for m, info in module_docs.items():
-        if m in env.extra["summary"]["modules"]:
-            env.extra["summary"]["modules"][m].update(info)
+        env.extra["summary"]["modules"].setdefault(m, empty_module()).update(info)
     env.extra["verified"] = bool(args.verify)
 
 
