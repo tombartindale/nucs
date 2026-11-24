@@ -66,6 +66,17 @@ def test_new_needs_the_programme_root(tree, capsys):
     code, env = bcn(capsys, "project", str(tree / "KV7015"), "--new", "KV7023")
     assert code != 0 and codes(env) == ["USAGE"]
     assert not (tree / "KV7015" / "KV7023").exists()
+    code, env = bcn(capsys, "project", str(tree / "KV7024"), "--new", "KV7023")
+    assert code != 0 and codes(env) == ["USAGE"]
+    assert not (tree / "KV7023").exists() and not (tree / "KV7024").exists()
+
+
+def test_new_at_the_new_modules_own_path(tree, capsys):
+    """The UI's job targets the module being created, so that is where bcn is pointed."""
+    code, env = bcn(capsys, "project", str(tree / "KV7023"), "--new", "KV7023")
+    assert code == 0, env["diagnostics"]
+    assert env["created"] == "KV7023"
+    assert (tree / "KV7023" / "build" / "claude-project").is_dir()
 
 
 def test_regenerating_keeps_units_and_title(tree, capsys):

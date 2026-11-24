@@ -39,6 +39,8 @@ describe('add module', () => {
     const r = await json<JobSummary>('/api/modules', 'POST', { code: 'kv7023', title: 'Data Things', units: 8 });
     expect(r.status).toBe(202);
     expect(r.body.label).toBe('add module KV7023');
+    // Just the new module, so it never waits behind jobs on other modules.
+    expect(r.body.targets).toEqual(['KV7023']);
     const done = await finished(r.body);
     expect(done.state).toBe('done');
     expect(existsSync(join(b.root, 'KV7023', 'build', 'claude-project', 'instructions.md'))).toBe(true);

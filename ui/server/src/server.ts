@@ -873,7 +873,9 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     const title = String(data.title ?? '').trim();
     if (title) args.title = title;
     if (data.units !== undefined && data.units !== null && data.units !== '') args.units = Number(data.units);
-    return reply.code(202).send(await app.submitJob('project', ['.'], args, await app.operator()));
+    // Targeted at the new module itself, not '.': a whole-programme job overlaps every other
+    // job, so it would wait (and keep being overtaken) while anything else was running.
+    return reply.code(202).send(await app.submitJob('project', [code], args, await app.operator()));
   });
 
   // -- remote runners ---------------------------------------------------------------------------

@@ -69,12 +69,16 @@ def prepare(args: argparse.Namespace) -> None:
         raise Fail("USAGE", "--units must be between 1 and 30.")
     if not args.new:
         return
-    root = find_root(Path(args.path))
-    if root.resolve() != Path(args.path).resolve():
-        raise Fail("USAGE", "--new takes the programme root as its path.")
     code = args.new.strip()
     if not MODULE_RE.fullmatch(code):
         raise Fail("MODULE_CODE_INVALID", f"'{code}' is not a module code: two capital letters and four digits, e.g. KV7023.")
+    # The path is the programme root, or the new module's own (not yet existing) folder. The
+    # UI uses the latter so its job targets just that module: a job on the whole programme
+    # waits for every other job to finish first.
+    path = Path(args.path).resolve()
+    root = find_root(path).resolve()
+    if path != root and path != root / code:
+        raise Fail("USAGE", f"--new takes the programme root, or the new module's own path ({code}), as its path.")
     existing = {p.name.upper(): p.name for p in root.iterdir() if p.is_dir()}
     if code.upper() in existing:
         raise Fail("MODULE_EXISTS", f"{existing[code.upper()]} already exists.", file=existing[code.upper()])

@@ -17,6 +17,9 @@ const router = useRouter();
 // the module with the Project checklist showing. The course map comes later, from the Project.
 const addOpen = ref(false);
 const adding = ref(false);
+const addingJob = ref<number | null>(null);
+// Still queued: the server starts it once a job slot is free.
+const addQueued = computed(() => addingJob.value !== null && beacon.jobs.get(addingJob.value)?.state === 'queued');
 const newModule = ref({ code: '', title: '', units: 10 });
 const codeOk = computed(() => /^[A-Z]{2}\d{4}$/.test(newModule.value.code.trim().toUpperCase()));
 function openAdd() { newModule.value = { code: '', title: '', units: 10 }; addOpen.value = true; }
@@ -27,6 +30,7 @@ async function addModule() {
     const body: NewModuleRequest = { code, title: newModule.value.title.trim() || undefined, units: newModule.value.units };
     const job = await api<JobSummary>('/api/modules', { method: 'POST', body });
     beacon.trackJob(job);
+    addingJob.value = job.id;
     const result = await beacon.awaitJob(job.id);
     if (result.state !== 'done') {
       const why = result.envelopes.flatMap((e) => e.diagnostics).find((d) => d.level === 'error')?.message;
@@ -40,6 +44,7 @@ async function addModule() {
     beacon.toast((e as Error).message, true);
   } finally {
     adding.value = false;
+    addingJob.value = null;
   }
 }
 
@@ -174,6 +179,7 @@ const gridStyle = computed(() => ({ gridTemplateColumns: `repeat(${STEPS.value.l
               hint="One unit is one week of study" />
           </q-card-section>
           <q-card-actions align="right">
+            <span v-if="addQueued" class="text-caption text-grey-7 q-mr-auto q-pl-sm">Waiting for a free job slot (see Jobs)…</span>
             <q-btn flat no-caps label="Cancel" v-close-popup />
             <q-btn unelevated no-caps color="primary" label="Add module" :disable="!codeOk || !(newModule.units >= 1 && newModule.units <= 30)"
               :loading="adding" @click="addModule" />
