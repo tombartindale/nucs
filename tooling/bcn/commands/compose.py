@@ -517,7 +517,9 @@ def _compose(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, args: arg
         res_of = {(W, H): None if (W, H) == (widescreen["width"], widescreen["height"]) else f"{W}x{H}" for (W, H) in sizes_needed}
         # A topic that has run bcn bumpers uses its own, at every size; one that never has
         # uses the programme-wide [bumpers] files instead.
-        has_own = any(t.bumper(kind, lang, res).is_file() for res in res_of.values() for kind in ("intro", "outro"))
+        # Widescreen's set counts even when only another size is being composed: that is the
+        # one bcn bumpers always makes, so a topic with it and not this size is missing one.
+        has_own = any(t.bumper(kind, lang, res).is_file() for res in {None, *res_of.values()} for kind in ("intro", "outro"))
         rerun = f"bcn bumpers{' --lang ' + lang if lang != 'en' else ''}"
         problems: list[tuple[str, str | None, str | None]] = []  # (message, file, hint)
         for (W, H) in sorted(sizes_needed):
