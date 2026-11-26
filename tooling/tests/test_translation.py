@@ -183,3 +183,43 @@ def test_import_ignores_a_returned_handout(tree, tmp_path, capsys):
     (back / "KV7015-U01-T01.handout.en.pdf").write_bytes(b"%PDF-1.4 stand-in")
     code, env = bcn(capsys, "translation", str(t), "--import", str(back))
     assert "XL_UNKNOWN_FILE" not in {d["code"] for d in env["diagnostics"]}, env["diagnostics"]
+
+
+def test_import_of_slides_alone_is_fine_when_the_subtitles_are_already_in(tree, tmp_path, capsys):
+    """Re-sent slides (or a single upload from the Transfer page) don't need the SRT with them."""
+    from .test_rules import zh_md
+    t = _subtitled(tree, capsys)
+    back = tmp_path / "back"
+    back.mkdir()
+    (back / "KV7015-U01-T01.zh.md").write_text(zh_md())
+    code, env = bcn(capsys, "translation", str(t), "--import", str(back))
+    assert "FS_MISSING" in {d["code"] for d in env["diagnostics"]}  # no SRT yet: still reported
+    (t / "edit/master.zh.srt").write_text((t / "edit/master.srt").read_text())
+    (back / "KV7015-U01-T01.zh.md").write_text(zh_md() + "\n")
+    code, env = bcn(capsys, "translation", str(t), "--import", str(back))
+    assert "FS_MISSING" not in {d["code"] for d in env["diagnostics"]}, env["results"]
+    assert (t / "topic.zh.md").read_text() == zh_md() + "\n"
+
+
+def test_import_sets_lang_zh_in_the_front_matter(tree, tmp_path, capsys):
+    """Translators leave `lang: en` as they found it; the import puts it right, not the translator."""
+    from .test_rules import zh_md
+    from bcn.commands.translation import _set_lang_zh
+    t = _subtitled(tree, capsys)
+    back = tmp_path / "back"
+    back.mkdir()
+    returned = zh_md().replace("lang: zh", "lang: en", 1)
+    assert returned != zh_md()
+    (back / "KV7015-U01-T01.zh.md").write_text(returned)
+    code, env = bcn(capsys, "translation", str(t), "--import", str(back))
+    assert (t / "topic.zh.md").read_text() == zh_md()
+    assert "MD_FRONT_MATTER_VALUE" not in {d["code"] for d in env["diagnostics"]}
+    assert any("lang was set to zh" in d["message"] for d in env["diagnostics"] if d["code"] == "XL_IMPORTED")
+    # Quoted, missing, BOM and CRLF variants; already-zh and no front matter are left alone.
+    assert _set_lang_zh(b'---\ntitle: x\nlang: "en"\n---\nbody') == (b"---\ntitle: x\nlang: zh\n---\nbody", True)
+    assert _set_lang_zh(b"---\ntitle: x\n---\nbody") == (b"---\ntitle: x\nlang: zh\n---\nbody", True)
+    assert _set_lang_zh("﻿---\r\nlang: en\r\n---\r\nb".encode()) == ("﻿---\r\nlang: zh\r\n---\r\nb".encode(), True)
+    assert _set_lang_zh(b"---\nlang: zh\n---\nb") == (b"---\nlang: zh\n---\nb", False)
+    assert _set_lang_zh(b"# no front matter\n") == (b"# no front matter\n", False)
+    # Only the front matter: a `lang:` line in the body stays as written.
+    assert _set_lang_zh(b"---\nlang: en\n---\nlang: en\n")[0] == b"---\nlang: zh\n---\nlang: en\n"
