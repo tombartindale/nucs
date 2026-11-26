@@ -278,6 +278,10 @@ class TopicState:
         compose = self.step("compose", "en", [video, cues_csv, subs, *pngs, *self._bumper_infos("en")])
         package = self.step("package", "en", [src, video, srt, cues_csv, *pngs, subs, prog])
 
+        # A render from before render made the translator's handout has not made it yet.
+        if render.exists and render.ok and not self.f("build/handout.en.pdf", t.handout_pdf()).exists:
+            render.inputs_newest = float("inf")
+
         # Hand-set boundaries and corrections are compared by value, not by review.json's mtime.
         rv = reviewfile.load(t) if review.exists else {"cue_overrides": {}, "transcripts": {}}
         cur_ov = {str(k): v for k, v in sorted(_overrides(rv).items())}
@@ -582,6 +586,7 @@ class TopicState:
         for step in ("validate", "render", "cues", "subtitles", "compose", "package"):
             add(f"build/{step}.json", t.step_file(step, "en"), "en", stale_of(step, "en"), kind="result")
         add("build/deck.en.pdf", t.deck_pdf("en"), "en", stale_of("render", "en"), kind="deck")
+        add("build/handout.en.pdf", t.handout_pdf(), "en", stale_of("render", "en"), kind="handout")
         script_stale = None
         if (t.build / "script.en.pdf").is_file():
             script_stale = (fsutil.mtime(t.build / "script.en.pdf") or 0) < (fsutil.mtime(t.src("en")) or 0)

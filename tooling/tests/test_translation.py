@@ -126,3 +126,60 @@ def test_import_flags_quiz_that_changes_the_correct_answer(doc_only_module, tmp_
     assert code == 1  # QUIZ_ZH_PARITY is an error-level diagnostic
     codes = [x["code"] for x in env["return_to_translator"]]
     assert "QUIZ_ZH_PARITY" in codes
+
+
+def _subtitled(tree, capsys) -> Path:
+    """A topic whose English SRT has been through bcn subtitles (no video, no render): ready to
+    send for translation (same construction as test_cli.test_translation_ready_without_video)."""
+    from bcn.markdown import parse
+    from .conftest import age
+    t = tree / "KV7015/U01/T01"
+    blocks, time_ = [], 0.5
+    for s in parse(t / "topic.md").slides:
+        for sentence in [x.strip() + "." for x in s.say_text.split(".") if x.strip()]:
+            a, b = time_, time_ + len(sentence.split()) / 2.5
+            blocks.append(f"{len(blocks) + 1}\n00:{int(a // 60):02d}:{a % 60:06.3f} --> 00:{int(b // 60):02d}:{b % 60:06.3f}\n{sentence}\n")
+            time_ = b + 0.1
+    (t / "edit").mkdir()
+    (t / "edit/master.srt").write_text("\n".join(
+        "\n".join(ln.replace(".", ",") if "-->" in ln else ln for ln in blk.splitlines()) + "\n" for blk in blocks))
+    for f in ("topic.md", "edit/master.srt"):
+        age(t / f, 30)
+    for cmd in ("validate", "cues", "subtitles"):
+        code, env = bcn(capsys, cmd, str(t))
+        assert code == 0, (cmd, env["diagnostics"])
+    return t
+
+
+def _batch_names(tree, env) -> set[str]:
+    """The file names in the export's zip."""
+    with zipfile.ZipFile(tree / env["zip"]) as z:
+        return {Path(n).name for n in z.namelist()}
+
+
+def test_export_includes_the_handout_when_the_slides_are_rendered(tree, capsys):
+    """The handout (each slide with what is said over it) goes in the batch for context. It is
+    not a condition of sending: without a current one the topic still goes, with a warning."""
+    t = _subtitled(tree, capsys)
+    tid = "KV7015-U01-T01"
+    code, env = bcn(capsys, "translation", str(t), "--export")
+    assert code == 0, env["diagnostics"]
+    assert f"{tid}.md" in _batch_names(tree, env) and f"{tid}.handout.en.pdf" not in _batch_names(tree, env)
+    warned = [d for d in env["diagnostics"] if d["code"] == "XL_NO_HANDOUT"]
+    assert len(warned) == 1 and warned[0]["level"] == "warn"
+
+    (t / "build/handout.en.pdf").write_bytes(b"%PDF-1.4 stand-in")  # newer than topic.md
+    code, env = bcn(capsys, "translation", str(t), "--export")
+    assert code == 0, env["diagnostics"]
+    assert f"{tid}.handout.en.pdf" in _batch_names(tree, env)
+    assert not [d for d in env["diagnostics"] if d["code"] == "XL_NO_HANDOUT"]
+
+
+def test_import_ignores_a_returned_handout(tree, tmp_path, capsys):
+    """A translator who sends the whole batch back, handout included, gets no warning for it."""
+    t = _subtitled(tree, capsys)
+    back = tmp_path / "back"
+    back.mkdir()
+    (back / "KV7015-U01-T01.handout.en.pdf").write_bytes(b"%PDF-1.4 stand-in")
+    code, env = bcn(capsys, "translation", str(t), "--import", str(back))
+    assert "XL_UNKNOWN_FILE" not in {d["code"] for d in env["diagnostics"]}, env["diagnostics"]

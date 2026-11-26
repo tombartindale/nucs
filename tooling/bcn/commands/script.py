@@ -101,6 +101,55 @@ def script_html(t: Topic, p, teleprompter: bool = False, theme=None) -> str:
     return "\n".join(parts)
 
 
+HANDOUT_CSS = """
+@page { size: A4; }
+html { -webkit-text-size-adjust: none; }
+body { color: #111; margin: 0; }
+header { border-bottom: 2px solid #222; padding-bottom: 8pt; margin-bottom: 14pt; }
+header .id { font-size: 9pt; color: #555; letter-spacing: .5pt; }
+header h1 { font-size: 18pt; margin: 3pt 0 4pt; line-height: 1.2; font-weight: var(--title-weight); }
+header .meta { font-size: 9pt; color: #555; }
+.slide { break-before: page; page-break-before: always; }
+header + .slide { break-before: auto; page-break-before: auto; }
+.label { font-size: 9pt; font-weight: 600; color: #666; text-transform: uppercase; letter-spacing: 1pt; margin: 0 0 6pt; }
+img { display: block; width: 100%; height: auto; border: 0.75pt solid #bbb; margin: 0 0 12pt; break-inside: avoid; }
+p { font-size: 11.5pt; line-height: 1.55; margin: 0 0 8pt; orphans: 3; widows: 3; }
+em { font-style: italic; }
+strong { font-weight: 700; }
+.empty { color: #a00; font-style: italic; }
+"""
+
+
+def handout_html(t: Topic, p, pngs: list, theme=None) -> str:
+    """One slide per page: the rendered slide, then what is said over it. Context for a
+    translator (or anyone reviewing): what is on screen while each passage is spoken."""
+    parts = [f"<!doctype html><html lang='en'><head><meta charset='utf-8'><title>{html.escape(t.id)}</title>",
+             f"<style>{HANDOUT_CSS}{theme_css(theme) if theme else ''}</style></head><body>",
+             "<header>",
+             f"<div class='id'>{html.escape(t.id)}</div>",
+             f"<h1>{html.escape(p.front.get('title', ''))}</h1>",
+             f"<div class='meta'>{len(p.slides)} slides · {p.narration_words} words of narration · slides with what is said over each</div>",
+             "</header>"]
+    for s, png in zip(p.slides, pngs):
+        label = f"Slide {s.index}" + (f" · {s.title}" if s.title else "")
+        parts.append(f"<section class='slide'><div class='label'>{html.escape(label)}</div>")
+        parts.append(f"<img src='{png.resolve().as_uri()}' alt='{html.escape(label, quote=True)}'>")
+        paras = s.say_paragraphs or ([s.say_text] if s.say_text else [])
+        parts += [f"<p>{_inline(para)}</p>" for para in paras] or ["<p class='empty'>(nothing is said over this slide)</p>"]
+        parts.append("</section>")
+    parts.append("</body></html>")
+    return "\n".join(parts)
+
+
+def print_page(tl, page, out, footer: str, file: str) -> None:
+    """Print an HTML page to out (atomically) with the pinned Chrome."""
+    with fsutil.atomic_path(out) as tmp:
+        code, _, err = run_proc([tl.node or "node", str(tools.NODE_DIR / "print.mjs"), str(page), str(tmp), footer],
+                                env={"CHROME_PATH": tl.chrome or ""}, cwd=str(tools.NODE_DIR), timeout=180)
+        if code != 0 or not tmp.stat().st_size:
+            raise Fail("RENDER_FAILED", f"Printing {out.name} failed (exit {code}).", file=file, data={"stderr": err[-2000:]})
+
+
 def add_args(p: argparse.ArgumentParser) -> None:
     pass
 
@@ -123,13 +172,7 @@ def script_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, force
         theme = load_theme(t.root, resolve_theme_name(cfg, None))
         page.write_text(script_html(t, p, theme=theme), encoding="utf-8")
         tp.update(20, "printing")
-        with fsutil.atomic_path(out) as tmp:
-            code, _, err = run_proc([tl.node or "node", str(tools.NODE_DIR / "print.mjs"), str(page), str(tmp),
-                                     f"{t.id} · {p.front.get('title', '')}"],
-                                    env={"CHROME_PATH": tl.chrome or ""}, cwd=str(tools.NODE_DIR), timeout=180)
-            if code != 0 or not tmp.stat().st_size:
-                raise Fail("RENDER_FAILED", f"Printing the script failed (exit {code}).", file="topic.md",
-                           data={"stderr": err[-2000:]})
+        print_page(tl, page, out, f"{t.id} · {p.front.get('title', '')}", "topic.md")
     finally:
         shutil.rmtree(work, ignore_errors=True)
     # Teleprompter copies: the same words as formatted text and as plain text.

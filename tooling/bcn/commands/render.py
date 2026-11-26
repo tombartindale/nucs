@@ -14,6 +14,10 @@ from ..markdown import IMAGE_RE, ParsedTopic, parse
 from ..progress import TopicProgress, run as run_proc
 from ..runner import require_input, require_step, run_topics, try_skip
 from ..tree import Target, Topic
+from ..media import ffmpeg
+from .script import handout_html, print_page
+
+HANDOUT_WIDTH = 1280  # px: the handout's slide images
 
 HELP = "markdown to slide images and PDF"
 
@@ -90,11 +94,13 @@ def render_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, lang:
     assets = [t.dir / im.path for s in p.slides for im in s.images]
     outputs = ([t.slides_dir(lang) / t.slide_name(i, lang) for i in range(1, n + 1)]
                + [t.slides_dir(lang, full_bleed=True) / t.slide_name(i, lang) for i in range(1, n + 1)]
-               + [t.deck_pdf(lang)])
+               + [t.deck_pdf(lang)]
+               + ([t.handout_pdf()] if lang == "en" else []))
     step_inputs = inputs + assets + theme.files()
     if try_skip(t, r, "render", lang, outputs, step_inputs, force):
         return
-    tl = tools.require(cfg, "marp", "chrome")
+    # ffmpeg (English only) scales the slides down for the handout.
+    tl = tools.require(cfg, "marp", "chrome", *(["ffmpeg"] if lang == "en" else []))
     for a in assets:
         require_input(t, a, lang)
 
@@ -219,6 +225,20 @@ def render_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, lang:
         for old in t.slide_pngs(lang, full_bleed=True):
             if old.name not in keep:
                 old.unlink()
+
+        # The handout: each slide with what is said over it, for the translator's batch
+        # (bcn translation --export). English only: the Mandarin sources carry no narration.
+        # The full-bleed images, so no slide has an empty presenter column down one side.
+        # Scaled to 1280 wide and JPEG'd first: the full-size PNGs would make it several MB a
+        # topic, and a batch carries a whole module's worth. Still sharp at A4 width.
+        if lang == "en":
+            tp.update(95, "printing the handout")
+            ffmpeg(tl, ["-start_number", "1", "-i", str(full_dest / t.slide_name(1, lang).replace("-s01.png", "-s%02d.png")),
+                        "-vf", f"scale={HANDOUT_WIDTH}:-2", "-q:v", "3", str(work / "handout-%02d.jpg")], duration=None)
+            page = work / "handout.html"
+            page.write_text(handout_html(t, p, [work / f"handout-{i:02d}.jpg" for i in range(1, n + 1)], theme),
+                            encoding="utf-8")
+            print_page(tl, page, t.handout_pdf(), f"{t.id} · {p.front.get('title', '')} · slides and narration", src.name)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -226,6 +246,8 @@ def render_topic(t: Topic, r: TopicResult, tp: TopicProgress, cfg: Config, lang:
         r.artifacts.append(Envelope.artifact_for(t.root, dest / t.slide_name(i, lang), "slide"))
         r.artifacts.append(Envelope.artifact_for(t.root, full_dest / t.slide_name(i, lang), "slide_full"))
     r.artifacts.append(Envelope.artifact_for(t.root, t.deck_pdf(lang), "deck"))
+    if lang == "en":
+        r.artifacts.append(Envelope.artifact_for(t.root, t.handout_pdf(), "handout"))
     r.extra.update({
         "slides": n,
         "theme": theme.name,

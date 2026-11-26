@@ -140,6 +140,7 @@ CODES: dict[str, tuple[str, str]] = {
     # --- translation -----------------------------------------------------
     "XL_NOT_READY": ("error", "A topic is not ready to export for translation."),
     "XL_EXPORTED": ("info", "A topic was exported for translation."),
+    "XL_NO_HANDOUT": ("warn", "A topic was exported without its slides-and-narration handout: its slides are not rendered for the current script."),
     "XL_IMPORTED": ("info", "A translated file was placed."),
     "XL_UNKNOWN_FILE": ("warn", "A returned file does not name a known topic."),
     # --- transfer ----------------------------------------------------------

@@ -49,3 +49,24 @@ def test_render_produces_reserved_and_full_bleed_slide_sets(tree, capsys):
     # Re-running without changes skips both passes (render is a single try_skip step).
     code, env = bcn(capsys, "render", str(t.dir))
     assert code == 0 and env["results"][0]["skipped"] is True
+
+
+def test_render_prints_the_handout(tree, capsys):
+    """English render also prints build/handout.en.pdf: each slide with what is said over it,
+    for the translator's batch. A render from before that, with no handout, is out of date."""
+    _needs_tools(tree)
+    t = Topic(tree, "KV7015", "U01", "T01")
+    bcn(capsys, "validate", str(t.dir))
+    code, env = bcn(capsys, "render", str(t.dir))
+    assert code == 0, env["diagnostics"]
+    handout = t.handout_pdf()
+    assert handout.is_file() and handout.read_bytes().startswith(b"%PDF")
+    assert "handout" in {a["kind"] for a in env["artifacts"]} | {a["kind"] for r in env["results"] for a in r.get("artifacts", [])}
+
+    _, env = bcn(capsys, "status", str(t.dir))
+    assert env["results"][0]["en"]["steps"]["render"]["fresh"] is True
+    handout.unlink()
+    _, env = bcn(capsys, "status", str(t.dir))
+    assert env["results"][0]["en"]["steps"]["render"]["fresh"] is False
+    code, env = bcn(capsys, "render", str(t.dir))
+    assert code == 0 and env["results"][0]["skipped"] is False and handout.is_file()

@@ -133,6 +133,10 @@ class Topic:
     def deck_pdf(self, lang: str = "en") -> Path:
         return self.build / f"deck.{lang}.pdf"
 
+    def handout_pdf(self) -> Path:
+        """Each slide with the narration said over it (bcn render, English only): context for the translator."""
+        return self.build / "handout.en.pdf"
+
     def render_html(self, lang: str = "en") -> Path:
         return self.build / f"deck.{lang}.html"
 

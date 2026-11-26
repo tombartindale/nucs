@@ -1,7 +1,8 @@
 """bcn translation: the batch handover to translation and back.
 
 --export  For every topic in scope (all or nothing), put the English SRT (reviewed corrections
-          applied) and the narration-stripped slide markdown in a batch folder
+          applied), the narration-stripped slide markdown and, for context, the handout
+          (each rendered slide with its narration, from bcn render) in a batch folder
           and zip under translation/exports/, with a manifest, and record the
           export in each topic's translation.json. In-scope assignment-N.md and
           unit activity.md documents ride along in the same batch, raw text
@@ -123,7 +124,19 @@ def _export(env: Envelope, target: Target) -> None:
             md.write_text(p.stripped_file(), encoding="utf-8")
             srt = work / f"{t.id}.en.srt"
             shutil.copyfile(t.subtitle_out("en", "srt"), srt)
-            for f in (md, srt):
+            sent = [md, srt]
+            # Context only, never returned: each slide as rendered, with what is said over it.
+            # Not a condition of sending (the subtitles can go before the slides are rendered),
+            # so a topic without a current one goes without, and says so.
+            if t.handout_pdf().is_file() and fsutil.is_fresh([t.handout_pdf()], [t.src("en")]):
+                handout = work / f"{t.id}.handout.en.pdf"
+                shutil.copyfile(t.handout_pdf(), handout)
+                sent.append(handout)
+            else:
+                _r.diagnostics.append(Diagnostic("XL_NO_HANDOUT", "The batch has no slides-and-narration handout for this topic: "
+                                                 "its slides have not been rendered since the script last changed.",
+                                                 topic=t.id, hint=f"Run bcn render {t.rel}, then export again to include it."))
+            for f in sent:
                 files.append({"topic": t.id, "name": f.name, "bytes": f.stat().st_size, "sha256": sha256_file(f)})
         for m, name, path, _r in doc_ready:
             remote_name = local_to_remote(m, name)
@@ -139,7 +152,9 @@ def _export(env: Envelope, target: Target) -> None:
                       "and <topic_id>.zh.srt (same cue count, identical timings, translated text). "
                       "For each assignment or activity document, return its name with .zh added before .md "
                       "(KV7016-assignment-1.md -> KV7016-assignment-1.zh.md): the same structure, translated — "
-                      "a quiz keeps the same questions, in the same order, with the same correct answer(s).",
+                      "a quiz keeps the same questions, in the same order, with the same correct answer(s). "
+                      "<topic_id>.handout.en.pdf is context only (each slide with what is said over it): "
+                      "it is not translated or returned.",
         }
         fsutil.write_json(work / "manifest.json", manifest)
         out_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -202,7 +217,8 @@ def _import(env: Envelope, target: Target, source: str, args: argparse.Namespace
             if dm and local_rel:
                 doc_found[f"{dm.group(1)}/{local_rel}"] = f
                 continue
-            if f.name != "manifest.json":
+            # The manifest and the handout are ours, sent for context: a batch returned whole is fine.
+            if f.name != "manifest.json" and not f.name.endswith(".handout.en.pdf"):
                 env.diagnostics.append(Diagnostic("XL_UNKNOWN_FILE",
                                                   f"'{f.name}' is not a <topic_id>.zh.md/.zh.srt, <module>-assignment-N.zh.md, "
                                                   f"or <module>-<unit>-activity.zh.md file; ignored.", file=f.name))
