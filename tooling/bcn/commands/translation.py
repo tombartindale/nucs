@@ -185,6 +185,31 @@ def _export(env: Envelope, target: Target) -> None:
     env.extra["zip"] = env.rel(zpath)
 
 
+_FRONT = re.compile(r"\A(---[ \t]*\r?\n)(.*?)(\r?\n---[ \t]*(?:\r?\n|\Z))", re.S)
+_LANG_LINE = re.compile(r"(?m)^lang[ \t]*:.*$")
+
+
+def _set_lang_zh(data: bytes) -> tuple[bytes, bool]:
+    """A translated topic.zh.md with its front matter's lang put right. Translators translate
+    the content and leave `lang: en` as they found it, which only fails validation for a
+    value nobody needs them to change. Returns the bytes unchanged when there is no
+    front-matter block to correct (validate then reports that as it would anyway)."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data, False
+    bom = "\ufeff" if text.startswith("\ufeff") else ""
+    m = _FRONT.match(text[len(bom):])
+    if not m:
+        return data, False
+    fm = m.group(2)
+    new = _LANG_LINE.sub("lang: zh", fm) if _LANG_LINE.search(fm) else fm.rstrip("\r\n") + "\nlang: zh"
+    if new == fm:
+        return data, False
+    body = text[len(bom):]
+    return (bom + body[:m.start(2)] + new + body[m.end(2):]).encode("utf-8"), True
+
+
 def _import(env: Envelope, target: Target, source: str, args: argparse.Namespace) -> None:
     src = Path(source).expanduser()
     if not src.exists():
@@ -238,14 +263,20 @@ def _import(env: Envelope, target: Target, source: str, args: argparse.Namespace
             for kind, f in kinds.items():
                 dest = t.src("zh") if kind == "md" else t.srt("zh")
                 data = f.read_bytes()
+                lang_fixed = False
+                if kind == "md":
+                    data, lang_fixed = _set_lang_zh(data)
                 if dest.is_file() and dest.read_bytes() == data:
                     actions[kind] = "unchanged"
                     continue
                 actions[kind] = "replaced" if dest.exists() else "placed"
                 fsutil.write_bytes(dest, data)
-                r.diagnostics.append(Diagnostic("XL_IMPORTED", f"{actions[kind].capitalize()} {dest.relative_to(t.root)}.", topic=tid, lang="zh",
+                note = " Its front matter said another language; lang was set to zh." if lang_fixed else ""
+                r.diagnostics.append(Diagnostic("XL_IMPORTED", f"{actions[kind].capitalize()} {dest.relative_to(t.root)}.{note}", topic=tid, lang="zh",
                                                 file=str(dest.relative_to(t.dir))))
-            missing = {"md", "srt"} - set(kinds)
+            # A return of just one file (re-sent slides, a single upload) is fine when the
+            # other is already in place; only report what the topic still has none of.
+            missing = {k for k in {"md", "srt"} - set(kinds) if not (t.src("zh") if k == "md" else t.srt("zh")).is_file()}
             if missing:
                 r.diagnostics.append(Diagnostic("FS_MISSING", f"The return for {tid} has no {' or '.join('.zh.' + k for k in sorted(missing))} file.",
                                                 topic=tid, lang="zh"))

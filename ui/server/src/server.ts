@@ -804,10 +804,12 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
   const media = new MediaStore();
   const MEDIA_KINDS: Record<string, { suffix: string; ext: string }> = {
     master: { suffix: '', ext: 'mp4' }, en: { suffix: '', ext: 'srt' }, zh: { suffix: '.zh', ext: 'srt' },
+    zh_md: { suffix: '.zh', ext: 'md' },
   };
   f.post(`/api/topic/:id(${TOPIC})/media`, { bodyLimit: TRANSFER_UPLOAD_MAX }, async (req: Req, reply) => {
-    const kind = MEDIA_KINDS[String(req.query.kind ?? '')];
-    if (!kind) throw new BadRequest('kind must be master, en or zh.');
+    const k = String(req.query.kind ?? '');
+    const kind = Object.hasOwn(MEDIA_KINDS, k) ? MEDIA_KINDS[k] : undefined;
+    if (!kind) throw new BadRequest('kind must be master, en, zh or zh_md.');
     // Through Claude, subtitles only: video goes through the app.
     if ((req as Who).via && kind.ext !== 'srt') throw new Forbidden('Only subtitle files can be uploaded through Claude.');
     const n = Number(req.headers['content-length'] || 0);
@@ -817,6 +819,15 @@ export async function buildServer({ app, staticDir, testDisableAuth }: ServerOpt
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `${id}${kind.suffix}.${kind.ext}`);
     await pipeline(req.body as IncomingMessage, createWriteStream(file));
+    // Translated slides go through the translation import, as a returned batch of one: it
+    // places topic.zh.md and checks slide parity against the English, which is the check
+    // that matters for a translation. (Uploading one replaces what is there; the browser
+    // confirms first.)
+    if (kind.ext === 'md') {
+      const job = await app.jobs.submit('translation', [app.targetRel(id)], { import: dir },
+        `translated slides ${viaLabel(req, basename(file))} · ${id}`, await jobBy(req));
+      return reply.code(202).send(job);
+    }
     const args: JobArgs = { import: file };
     if (req.query.replace === '1') args.replace = true;
     const job = await app.jobs.submit('transfer', [app.targetRel(id)], args, `media ${viaLabel(req, basename(file))} · ${id}`, await jobBy(req));
