@@ -36,6 +36,9 @@ const CLAIM_WAIT_MS = 25_000;
 const APPLY_LEASE_MS = 10 * 60_000;
 const REGISTRATION_TTL_MS = 24 * 3600_000;
 const MAX_LINES = 2000;
+// How often a runner's silent heartbeat is passed on to browsers, per job: well inside STALL_MS.
+const HEARTBEAT_PUBLISH_MS = 3000;
+const heartbeatSent = new Map<number, number>();
 /** Built into the image (Dockerfile, BEACON_VERSION). A runner on a different build is refused
  *  jobs: its bcn might snapshot or write outputs differently. 'dev' turns the check off. */
 export const SERVER_VERSION = process.env.BEACON_VERSION || 'dev';
@@ -202,14 +205,23 @@ export function registerRunnerRoutes(f: FastifyInstance, app: App, media: MediaS
       if (ev.event === 'progress') progress = JSON.stringify(ev);
       app.bus.publish({ type: 'job-event', job: row.id, target_index: 0, target_count: 1, event: ev });
     }
-    await db.pool.query('UPDATE jobs SET lease_expires_at=$1, last_event=$2, progress=COALESCE($3, progress) WHERE id=$4',
+    const updated = await db.pool.query<JobRow>(
+      'UPDATE jobs SET lease_expires_at=$1, last_event=$2, progress=COALESCE($3, progress) WHERE id=$4 RETURNING *',
       [leaseUntil(LEASE_MS), now(), progress, row.id]);
+    // A report with no lines is the runner's heartbeat: it is busy without printing anything
+    // (fetching the job's files, unpacking them, a slow download inside bcn). The browser only
+    // hears about lines, so without this it would show the job as stalled after STALL_MS.
+    if (!lines.length && updated.rows[0] && Date.now() - (heartbeatSent.get(row.id) ?? 0) >= HEARTBEAT_PUBLISH_MS) {
+      heartbeatSent.set(row.id, Date.now());
+      app.bus.publish({ type: 'job', job: summaryFromRow(updated.rows[0]) });
+    }
     return { cancel: row.cancel_requested };
   });
 
   f.post('/api/runner/jobs/:id(^\\d+$)/complete', async (req: FastifyRequest<{ Params: Record<string, string> }>) => {
     const runner = await authenticate(req);
     const row = await heldJob(req, runner);
+    heartbeatSent.delete(row.id);
     const data = await readJson(req);
     // Applying can take a while; the runner has finished, so it must not be reaped meanwhile.
     await db.pool.query('UPDATE jobs SET lease_expires_at=$1 WHERE id=$2', [leaseUntil(APPLY_LEASE_MS), row.id]);

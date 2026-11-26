@@ -116,7 +116,11 @@ export const useBeacon = defineStore('beacon', () => {
         qaTick.value++;
         refreshQa();
       } else if (ev.type === 'job') {
-        jobs.value.set(ev.job.id, { ...(jobs.value.get(ev.job.id) || {}), ...ev.job });
+        const prev = jobs.value.get(ev.job.id);
+        // A runner's heartbeat arrives as a job update: its last event's age says it is alive.
+        const age = ev.job.last_event_age_ms;
+        const seen = age != null ? Date.now() - age : prev?._seen;
+        jobs.value.set(ev.job.id, { ...(prev || {}), ...ev.job, ...(seen != null ? { _seen: seen } : {}) });
       } else if (ev.type === 'job-event') {
         const j = jobs.value.get(ev.job);
         if (j) {
