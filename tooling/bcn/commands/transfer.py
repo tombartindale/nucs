@@ -6,7 +6,9 @@
           for topic assets/ and the edited video/subtitles
           too, and/or --slides for each topic's narration-stripped slide
           markdown (generated fresh from topic.md, the same text package would
-          deliver, whether or not the topic has actually been packaged yet) —
+          deliver, whether or not the topic has actually been packaged yet), and/or
+          --handouts for each topic's slides-and-narration PDF (bcn render's
+          handout, for a reader's context; import ignores it if it comes back) —
           under transfer/exports/, using the names bcn sync already knows (flat
           "KV7016-U01-T01.md" by default, or --nested for the pipeline's own
           layout).
@@ -72,6 +74,8 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--media", action="store_true", help="export: also include assets/ and the edited video/subtitles")
     p.add_argument("--slides", action="store_true",
                    help="export: also include each topic's narration-stripped slide markdown (generated from topic.md)")
+    p.add_argument("--handouts", action="store_true",
+                   help="export: also include each topic's slides-and-narration handout PDF (from bcn render)")
     p.add_argument("--nested", action="store_true", help="export: use the pipeline's own U01/T01/topic.md layout, not the flat OneDrive names")
     p.add_argument("--full", action="store_true",
                    help="root scope only: a disaster-recovery backup, not just content -- implies --media, and also "
@@ -135,7 +139,8 @@ def _module_files(root: Path, module: str, unit: str | None) -> list[str]:
     return out
 
 
-def _export(env: Envelope, target: Target, media: bool, nested: bool, full: bool, slides: bool = False) -> None:
+def _export(env: Envelope, target: Target, media: bool, nested: bool, full: bool, slides: bool = False,
+            handouts: bool = False) -> None:
     if full and target.level != "root":
         raise Fail("USAGE", "--full only makes sense for the whole programme.", hint="Run it against the programme root, not a module/unit/topic path.")
     media = media or full
@@ -190,6 +195,17 @@ def _export(env: Envelope, target: Target, media: bool, nested: bool, full: bool
             # both can be in the same zip at once.
             name = f"{t.unit}/{t.code}/slides.md" if nested else f"{t.module}-{t.unit}-{t.code}.slides.md"
             entries.append((None, stripped, f"{t.module}/{name}" if nested else name, t.module))
+    if handouts:
+        for t in target.topics:
+            h = t.handout_pdf()
+            if not t.src("en").is_file():
+                continue
+            if not (h.is_file() and fsutil.is_fresh([h], [t.src("en")])):
+                env.diagnostics.append(Diagnostic("XFER_NO_HANDOUT", f"{t.id} has no handout for its current script, so none is included.",
+                                                  topic=t.id, hint=f"Run bcn render {t.rel}, then export again."))
+                continue
+            name = f"{t.unit}/{t.code}/handout.en.pdf" if nested else f"{t.module}-{t.unit}-{t.code}.handout.en.pdf"
+            entries.append((h, None, f"{t.module}/{name}" if nested else name, t.module))
     if full:
         toml = target.root / FULL_PROGRAMME_TOML
         if toml.is_file():
@@ -240,7 +256,8 @@ def _export(env: Envelope, target: Target, media: bool, nested: bool, full: bool
                         manifest_files.append({"module": module, "name": name, "sha256": digest})
                         tp.update(100, "zipped")
                 prog.done()
-                manifest = {"batch": batch, "created": utcnow(), "nested": nested, "media": media, "slides": slides, "full": full, "files": manifest_files}
+                manifest = {"batch": batch, "created": utcnow(), "nested": nested, "media": media, "slides": slides, "handouts": handouts, "full": full,
+                            "files": manifest_files}
                 z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
     except Cancelled:
         env.cancelled = True
@@ -403,7 +420,8 @@ def _import(env: Envelope, target: Target, source: str, dry_run: bool, full: boo
         if single is not None:
             files = [single]
         else:
-            files = [f for f in sorted(base.rglob("*")) if f.is_file() and not is_noise(f.name) and "__MACOSX" not in f.parts and f.name != "manifest.json"]
+            files = [f for f in sorted(base.rglob("*")) if f.is_file() and not is_noise(f.name) and "__MACOSX" not in f.parts and f.name != "manifest.json"
+                     and not f.name.endswith("handout.en.pdf")]  # ours, for context: nothing to place
         with Progress("transfer", len(files)) as prog:
             for f in files:
                 if CANCEL.is_set():
@@ -556,7 +574,7 @@ def run(args: argparse.Namespace, env: Envelope, target: Target) -> None:
         env.extra["scope"] = plan_scope(target.root, args.source)
         return
     if args.export:
-        _export(env, target, args.media, args.nested, args.full, args.slides)
+        _export(env, target, args.media, args.nested, args.full, args.slides, args.handouts)
     else:
         if args.full and target.level != "root":
             raise Fail("USAGE", "--full only makes sense for the whole programme.", hint="Run it against the programme root, not a module/unit/topic path.")

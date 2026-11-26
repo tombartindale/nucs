@@ -8,6 +8,7 @@ import type { BcnTransferEnvelope, JobSummary, TransferListResponse, Translation
 import { api, fileUrl } from '@/api';
 import PageHeader from '@/components/PageHeader.vue';
 import StateChip from '@/components/StateChip.vue';
+import TopicFilesGrid from '@/components/TopicFilesGrid.vue';
 import { confirm } from '@/composables/confirm';
 import { fmtAgo, fmtBytes, plural } from '@/format';
 import { useBeacon } from '@/stores/beacon';
@@ -24,10 +25,13 @@ function topicIdOf(path: string | null | undefined): string | null {
   return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
 
+defineProps<{ tab: 'batch' | 'topics' }>();
+
 const beacon = useBeacon();
 const scope = ref('');
 const media = ref(false);
 const slides = ref(false);
+const handouts = ref(false);
 const nested = ref(false);
 const replace = ref(false);
 const lists = shallowRef<TransferListResponse>({ exports: [] });
@@ -48,7 +52,7 @@ async function doExport() {
   if (!scope.value) return;
   busy.value = true;
   try {
-    const job = await beacon.runJob('transfer', [scope.value], { export: true, media: media.value, slides: slides.value, nested: nested.value });
+    const job = await beacon.runJob('transfer', [scope.value], { export: true, media: media.value, slides: slides.value, handouts: handouts.value, nested: nested.value });
     const done = await beacon.awaitJob(job.id);
     const env = done.envelopes?.[0];
     if (env && !env.ok) beacon.toast(env.diagnostics.filter((d) => d.level === 'error').map((d) => d.message).join(' ') || 'Export failed.', true);
@@ -132,7 +136,16 @@ const fullZips = computed(() => lists.value.exports.filter((x) => x.kind === 'zi
 
 <template>
   <q-page padding class="page-max">
-    <PageHeader title="Transfer" sub="Export a module or unit as a single zip — every file bcn recognises, not just scripts — to hand to a content creator or partner. Import one back: each file is placed by its name. By default nothing that already differs is overwritten; tick Replace to change that." />
+    <q-tabs dense no-caps align="left" class="q-mb-md" active-color="primary" indicator-color="primary">
+      <q-route-tab name="batch" to="/transfer" exact label="Batches" />
+      <q-route-tab name="topics" to="/transfer/topics" exact label="Topics" />
+    </q-tabs>
+    <template v-if="tab === 'topics'">
+      <PageHeader title="Transfer" sub="Every topic in the programme. Drop the editor's video and subtitles, or the translated subtitles and slides, on a topic's row: each file is placed for that topic whatever it is called. Translated slides have their lang set to zh and are checked against the English." />
+      <TopicFilesGrid />
+    </template>
+    <template v-else>
+      <PageHeader title="Transfer" sub="Export a module or unit as a single zip — every file bcn recognises, not just scripts — to hand to a content creator or partner. Import one back: each file is placed by its name. By default nothing that already differs is overwritten; tick Replace to change that." />
     <div class="row q-col-gutter-md">
       <div class="col-12 col-md-6 q-gutter-y-md">
         <q-card flat bordered>
@@ -148,11 +161,15 @@ const fullZips = computed(() => lists.value.exports.filter((x) => x.kind === 'zi
             <q-toggle v-model="slides" dense label="Include slides-only markdown">
               <q-tooltip max-width="320px">For each topic, also export its narration-stripped slide markdown (generated fresh from topic.md — the version without the script, as a slides.md/.slides.md file alongside the real topic.md).</q-tooltip>
             </q-toggle>
+            <q-toggle v-model="handouts" dense label="Include slides-and-narration PDFs">
+              <q-tooltip max-width="320px">For each topic, also export its handout: every slide as rendered, with what is said over it. For a reader's context; it is never imported back. A topic whose slides have not been rendered since its script changed goes without one (the export says which).</q-tooltip>
+            </q-toggle>
             <q-toggle v-model="nested" dense label="Nested folder layout" />
           </q-card-section>
           <q-card-section class="text-caption text-grey-7 q-pt-none">
             {{ media ? 'Everything in scope, including topic images, the edited video and subtitles.' : 'Text files only: scripts, quizzes, the module map and the like — small and quick, but leaves out images.' }}
             {{ slides ? ' Each topic\'s narration-stripped slide markdown is included too.' : '' }}
+            {{ handouts ? ' Each topic\'s slides-and-narration PDF is included too.' : '' }}
             {{ nested ? ' Files keep the pipeline\'s own U01/T01/topic.md layout.' : ' Files use the flat KV7016-U01-T01.md names.' }}
           </q-card-section>
         </q-card>
@@ -256,5 +273,6 @@ const fullZips = computed(() => lists.value.exports.filter((x) => x.kind === 'zi
         </q-card>
       </div>
     </div>
+    </template>
   </q-page>
 </template>

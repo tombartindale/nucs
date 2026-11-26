@@ -8,7 +8,7 @@ from pathlib import Path
 
 from bcn.cli import main
 
-from .conftest import topic_md
+from .conftest import age, topic_md
 
 
 def bcn(capsys, *args):
@@ -506,3 +506,44 @@ def test_import_validates_only_topics_within_its_target(tree, tmp_path, capsys):
     validated = {v["topic"] for v in env["validated"]}
     assert "KV7015-U01-T02" in validated, "a topic the import just created is validated"
     assert "KV7015-U02-T01" not in validated
+
+
+def test_export_handouts_includes_current_ones_and_says_which_are_missing(tree, capsys):
+    """--handouts adds each topic's slides-and-narration PDF; a topic without a current one
+    is left out with a warning rather than failing the export."""
+    h = tree / "KV7015/U01/T01/build/handout.en.pdf"
+    h.parent.mkdir(parents=True, exist_ok=True)
+    h.write_bytes(b"%PDF-1.4 stand-in")  # newer than topic.md
+    code, env = bcn(capsys, "transfer", str(tree / "KV7015"), "--export", "--handouts")
+    assert code == 0, env["diagnostics"]
+    names = _names(tree / env["zip"])
+    assert "KV7015-U01-T01.handout.en.pdf" in names
+    missing = {d["topic"] for d in env["diagnostics"] if d["code"] == "XFER_NO_HANDOUT"}
+    assert "KV7015-U01-T01" not in missing
+    assert [n for n in names if n.endswith(".handout.en.pdf")] == ["KV7015-U01-T01.handout.en.pdf"]
+
+    code, env = bcn(capsys, "transfer", str(tree / "KV7015"), "--export", "--handouts", "--nested")
+    assert code == 0, env["diagnostics"]
+    assert "KV7015/U01/T01/handout.en.pdf" in _names(tree / env["zip"])
+
+    code, env = bcn(capsys, "transfer", str(tree / "KV7015"), "--export")
+    assert not any(n.endswith("handout.en.pdf") for n in _names(tree / env["zip"]))
+
+
+def test_export_handouts_warns_for_a_stale_one(tree, capsys):
+    h = tree / "KV7015/U01/T01/build/handout.en.pdf"
+    h.parent.mkdir(parents=True, exist_ok=True)
+    h.write_bytes(b"%PDF-1.4 stand-in")
+    age(h, 600)  # older than topic.md
+    code, env = bcn(capsys, "transfer", str(tree / "KV7015/U01/T01"), "--export", "--handouts")
+    assert code == 0, env["diagnostics"]
+    assert not any(n.endswith("handout.en.pdf") for n in _names(tree / env["zip"]))
+    assert [d["topic"] for d in env["diagnostics"] if d["code"] == "XFER_NO_HANDOUT"] == ["KV7015-U01-T01"]
+
+
+def test_import_ignores_a_handout(tree, tmp_path, capsys):
+    back = tmp_path / "back"
+    back.mkdir()
+    (back / "KV7015-U01-T01.handout.en.pdf").write_bytes(b"%PDF-1.4 stand-in")
+    code, env = bcn(capsys, "transfer", str(tree / "KV7015"), "--import", str(back))
+    assert "XFER_UNRECOGNIZED" not in {d["code"] for d in env["diagnostics"]}, env["diagnostics"]

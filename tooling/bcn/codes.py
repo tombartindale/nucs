@@ -145,6 +145,7 @@ CODES: dict[str, tuple[str, str]] = {
     "XL_UNKNOWN_FILE": ("warn", "A returned file does not name a known topic."),
     # --- transfer ----------------------------------------------------------
     "XFER_NOTHING_TO_EXPORT": ("error", "Nothing in scope matched a file bcn transfer recognises."),
+    "XFER_NO_HANDOUT": ("warn", "A topic has no handout for its current script, so the export left it out."),
     "XFER_UNRECOGNIZED": ("warn", "An imported file does not match a known name; it was not placed."),
     "XFER_OUT_OF_SCOPE": ("error", "An imported file names a module outside the import's scope."),
     "XFER_EXISTS_DIFFERS": ("error", "An imported file already exists with different content."),
